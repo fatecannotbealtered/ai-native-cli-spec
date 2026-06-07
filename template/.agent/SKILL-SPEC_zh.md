@@ -1,6 +1,5 @@
 # 面向 Agent 的 Skill 编写规范
 
-**English → [SKILL-SPEC.md](SKILL-SPEC.md)**
 
 本文定义本仓库（及个人后续所有 AI 原生工具）编写 Skill 的统一标准。对齐 Anthropic 官方 Agent Skills 定义，并补充「Skill 作为 CLI 门面」时的专属约定。
 

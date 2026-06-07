@@ -1,6 +1,5 @@
 # 面向 Agent 的 CLI 工具设计规范
 
-**English → [CLI-SPEC.md](CLI-SPEC.md)**
 
 本文定义本仓库 CLI 在被 AI Agent 调用时必须遵守的机器契约。目标是让 Agent 能稳定调用、可靠解析、可恢复重试，并避免任何非交互场景下的阻塞或误写。
 

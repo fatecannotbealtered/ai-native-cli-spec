@@ -1,6 +1,5 @@
 # AGENT.md — AI-Native Tool Playbook
 
-**中文 → [AGENT_zh.md](AGENT_zh.md)**
 
 This is the **entry point and playbook** for AI agents working in this repo. Whether you are building a new tool or extending this one, start here: understand how the four specs divide the work, then follow the matching workflow.
 

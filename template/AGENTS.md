@@ -1,6 +1,5 @@
 # AGENTS.md
 
-**中文 → [AGENTS_zh.md](AGENTS_zh.md)**
 
 This repo is an **AI-native CLI tool**: built for humans and for AI agents.
 

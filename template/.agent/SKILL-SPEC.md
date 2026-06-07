@@ -1,6 +1,5 @@
 # Agent Skill Authoring Spec
 
-**中文 → [SKILL-SPEC_zh.md](SKILL-SPEC_zh.md)**
 
 This document defines the standard for authoring Skills in this repo (and all future AI-native tools). It aligns with Anthropic's official Agent Skills definition and adds conventions specific to "a Skill as the front door to a CLI."
 

@@ -1,6 +1,5 @@
 # Agent-Facing CLI Security Spec
 
-**中文 → [SEC-SPEC_zh.md](SEC-SPEC_zh.md)**
 
 This document defines the security baseline for AI-native CLI tools. It **does not repeat** the point-of-use security rules scattered across the other specs (redaction, confirm, credential lifecycle — those stay where they're applied, which is most effective). Instead it collects the **cross-cutting threat model** and four blocks currently missing elsewhere:
 

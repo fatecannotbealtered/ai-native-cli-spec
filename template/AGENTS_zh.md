@@ -1,6 +1,5 @@
 # AGENTS.md
 
-**English → [AGENTS.md](AGENTS.md)**
 
 本仓库是一个 **AI 原生 CLI 工具**：既给人用，也给 AI Agent 用。
 

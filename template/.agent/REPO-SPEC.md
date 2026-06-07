@@ -1,6 +1,5 @@
 # AI-Native Open-Source Repo Spec
 
-**中文 → [REPO-SPEC_zh.md](REPO-SPEC_zh.md)**
 
 This document defines a unified repo standard for all your open-source projects: required docs, template files, directory layout, release conventions. The goal: ten projects look the same, and anyone (including an AI agent) entering any repo finds the same things in the same places.
 

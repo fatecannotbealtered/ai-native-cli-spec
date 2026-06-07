@@ -1,6 +1,5 @@
 # Agent-Facing CLI Design Spec
 
-**中文 → [CLI-SPEC_zh.md](CLI-SPEC_zh.md)**
 
 This document defines the machine contract a CLI must honor when called by an AI agent. The goal: agents can call it reliably, parse it reliably, recover and retry reliably, and never block or mis-write in a non-interactive setting.
 
