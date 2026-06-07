@@ -57,9 +57,9 @@ Then customize the `## 本项目` (This project) section at the bottom of `AGENT
 
 [**outlook-cli**](https://github.com/fatecannotbealtered/outlook-cli) — an Outlook/Exchange CLI built to this spec. Use it as the worked example for the envelope, dry-run/confirm flow, self-description commands, and the `changelog` mechanism.
 
-## Note on language
+## Languages
 
-The specs in `.agent/` are currently written in Chinese; the concepts are language-neutral and the JSON/CLI contracts are universal. English translations of the specs are welcome via PR.
+Every doc is bilingual: English is the primary `X.md`, Chinese is `X_zh.md`, and the two link to each other at the top. This applies to the READMEs, `AGENTS.md`, and all four `.agent/` specs.
 
 ## License
 

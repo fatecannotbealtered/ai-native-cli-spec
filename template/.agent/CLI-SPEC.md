@@ -1,40 +1,42 @@
-# 面向 Agent 的 CLI 工具设计规范
+# Agent-Facing CLI Design Spec
 
-本文定义本仓库 CLI 在被 AI Agent 调用时必须遵守的机器契约。目标是让 Agent 能稳定调用、可靠解析、可恢复重试，并避免任何非交互场景下的阻塞或误写。
+**中文 → [CLI-SPEC_zh.md](CLI-SPEC_zh.md)**
 
-## 1. 核心铁律
+This document defines the machine contract a CLI must honor when called by an AI agent. The goal: agents can call it reliably, parse it reliably, recover and retry reliably, and never block or mis-write in a non-interactive setting.
 
-1. stdout 是契约：默认输出单个合法 JSON 文档，禁止混入日志、进度、提示、颜色控制符。
-2. stderr 是旁路：进度、警告、调试、错误说明全部写 stderr。
-3. 机器优先：默认 `--format json`；`text` 仅供人读；`raw` 仅用于裸字节、日志、diff 等原样透传。
-4. 非交互安全：写操作不得等待键盘输入，必须使用 `--dry-run` + `--confirm <token>`。
-5. 确定性：相同输入产生相同结构输出；字段名、字段顺序、schema 版本保持稳定。
-6. 最小惊扰：查询不改变状态；写操作在缺少有效 confirm token 时必须失败而不是继续执行。
-7. 可恢复：错误码、exit code、`retryable` 必须足够稳定，让 Agent 能决定是否重试、回退或请求用户介入。
+## 1. Core rules
 
-## 2. 全局参数
+1. stdout is the contract: emit a single valid JSON document by default; no logs, progress, prompts, or color codes mixed in.
+2. stderr is the side channel: progress, warnings, debug, and error explanations all go to stderr.
+3. Machine-first: default `--format json`; `text` is for humans only; `raw` is for raw bytes, logs, diffs passed through verbatim.
+4. Non-interactive safe: write operations must not wait on keyboard input; use `--dry-run` + `--confirm <token>`.
+5. Deterministic: same input produces the same output structure; field names, field order, and schema version stay stable.
+6. Least surprise: queries don't change state; a write with no valid confirm token must fail rather than proceed.
+7. Recoverable: error codes, exit codes, and `retryable` must be stable enough for an agent to decide retry, back off, or ask the user.
 
-| 参数                       | 说明                             |
-|--------------------------|--------------------------------|
-| `--format json/text/raw` | 输出格式，默认 `json`                 |
-| `--json`                 | `--format json` 的兼容别名，不推荐新调用使用 |
-| `--fields <a,b,c>`       | 仅返回指定字段，降低 token（查询命令）         |
-| `--compact`              | 紧凑 JSON 输出，去除冗余空白（查询命令）        |
-| `--dry-run`              | 模拟写操作，返回变更预览与 `confirm_token`  |
-| `--confirm <token>`      | 携带 dry-run 返回的 token 真正执行写操作   |
-| `--quiet`                | 抑制 stderr 上的进度/提示，不抑制错误        |
+## 2. Global flags
 
-格式职责：
+| Flag | Meaning |
+|------|---------|
+| `--format json/text/raw` | Output format, default `json` |
+| `--json` | Compatibility alias for `--format json`; not recommended for new calls |
+| `--fields <a,b,c>` | Return only selected fields, reduces tokens (query commands) |
+| `--compact` | Compact JSON output, strips redundant whitespace (query commands) |
+| `--dry-run` | Simulate a write, return a change preview and `confirm_token` |
+| `--confirm <token>` | Carry the dry-run token to actually execute the write |
+| `--quiet` | Suppress progress/prompts on stderr, never suppress errors |
 
-- `json`：结构化机器输出，默认格式，也是唯一推荐给 Agent 的格式。
-- `text`：人类可读，可以变化，禁止程序解析。
-- `raw`：未包装 bytes / log / diff，原样透传，不使用 JSON envelope。
+Format responsibilities:
 
-## 3. 统一输出 Envelope
+- `json`: structured machine output, the default, and the only format recommended for agents.
+- `text`: human-readable, may change, must not be parsed programmatically.
+- `raw`: unwrapped bytes / log / diff, passed through verbatim, no JSON envelope.
 
-成功与失败使用同形结构。Agent 只需要先判断 `ok`。
+## 3. Unified output envelope
 
-成功：
+Success and failure share one shape. The agent only needs to check `ok` first.
+
+Success:
 
 ```json
 {
@@ -47,7 +49,7 @@
 }
 ```
 
-失败：
+Failure:
 
 ```json
 {
@@ -65,29 +67,29 @@
 }
 ```
 
-约定：
+Conventions:
 
-- 所有 JSON 响应必须包含 `ok` 与 `schema_version`。
-- `data` 始终是命令的业务载荷；不要把业务字段提升到 envelope 顶层。
-- `error.code` 使用稳定的语义化枚举，统一以 `E_` 开头。
-- `error.message` 给人读，Agent 不应解析。
-- `error.details` 放结构化上下文，必须脱敏。
-- `error.retryable` 决定 Agent 是否可以自动退避重试。
-- `meta.duration_ms` 记录命令执行耗时。
-- 破坏性 schema 变更必须升级 `schema_version` 主版本。
+- Every JSON response must include `ok` and `schema_version`.
+- `data` is always the command's business payload; do not hoist business fields to the envelope top level.
+- `error.code` is a stable semantic enum, prefixed with `E_`.
+- `error.message` is for humans; agents should not parse it.
+- `error.details` holds structured context; must be redacted.
+- `error.retryable` tells the agent whether it may back off and retry automatically.
+- `meta.duration_ms` records command execution time.
+- A breaking schema change must bump the `schema_version` major version.
 
-## 4. stdout / stderr 规则
+## 4. stdout / stderr rules
 
-- stdout 在 `json` 模式下只能出现一个 JSON 文档，或在明确流式命令中输出 NDJSON。
-- stderr 可输出进度、警告、诊断、错误 envelope。
-- 错误时 stdout 应为空，错误 envelope 输出到 stderr。
-- `--quiet` 只能抑制 stderr 上的非错误信息。
-- 不允许在 JSON stdout 前后打印 banner、提示语、进度条或颜色码。
-- stdout / stderr 一律 **UTF-8 编码，不带 BOM**，换行用 `\n`，确保跨平台（尤其 Windows）Agent 可稳定解析。
+- In `json` mode, stdout may contain only one JSON document, or NDJSON for explicitly streaming commands.
+- stderr may carry progress, warnings, diagnostics, error envelopes.
+- On error, stdout should be empty and the error envelope goes to stderr.
+- `--quiet` may only suppress non-error info on stderr.
+- No banners, prompts, progress bars, or color codes before/after the JSON on stdout.
+- stdout / stderr are always **UTF-8 encoded, no BOM**, newline `\n`, so agents parse reliably across platforms (especially Windows).
 
-## 5. 流式输出（NDJSON）
+## 5. Streaming output (NDJSON)
 
-大输出、日志流、订阅流、批量逐项结果使用 NDJSON。每行必须是独立合法 JSON，便于流式消费、降内存、可中断：
+Large output, log streams, subscription streams, and per-item batch results use NDJSON. Each line must be an independent valid JSON object — easy to consume streaming, low memory, interruptible:
 
 ```jsonl
 {"ok":true,"schema_version":"1.0","type":"item","data":{}}
@@ -95,30 +97,30 @@
 {"ok":true,"schema_version":"1.0","type":"summary","data":{"count":2}}
 ```
 
-约定：
+Conventions:
 
-- 普通查询默认使用单 JSON envelope。
-- 只有命令语义明确是 log / stream / subscribe / 批量流式输出时才使用 NDJSON。
-- NDJSON 行必须包含 `ok`、`schema_version`、`type`。
-- 结束行建议使用 `type: "summary"`。
-- 真正的二进制或纯文本透传走 `--format raw`，不要包成巨型单 JSON。
+- Normal queries use a single JSON envelope by default.
+- Use NDJSON only when the command is explicitly a log / stream / subscribe / batched-stream.
+- NDJSON lines must include `ok`, `schema_version`, `type`.
+- The final line should use `type: "summary"`.
+- True binary or plain-text passthrough goes through `--format raw`, not wrapped into one giant JSON.
 
-## 6. Exit Code 语义表
+## 6. Exit code table
 
-| Code | 含义                 | Agent 行为               |
-|------|--------------------|------------------------|
-| 0    | 成功                 | 继续                     |
-| 1    | 通用错误               | 读取 error envelope 判断   |
-| 2    | 参数/用法错误            | 不重试，修正参数               |
-| 3    | 资源不存在              | 不重试                    |
-| 4    | 权限/认证/配置失败         | 不重试，提示凭证或权限            |
-| 5    | 需确认但缺少 token       | 走 dry-run 获取 token 后重试 |
-| 6    | 前置条件冲突或 token 失效   | 重新读取状态后重试              |
-| 7    | 可重试瞬时错误（网络/限流/服务端） | 退避后重试                  |
-| 8    | 超时                 | 退避后重试                  |
-| 9    | 需人工介入（见 §14.3，可选） | 转述给用户，待其完成后跑 `resume`  |
+| Code | Meaning | Agent behavior |
+|------|---------|----------------|
+| 0 | Success | continue |
+| 1 | Generic error | read the error envelope to decide |
+| 2 | Argument/usage error | don't retry, fix args |
+| 3 | Resource not found | don't retry |
+| 4 | Permission/auth/config failure | don't retry, surface credentials or permission |
+| 5 | Confirmation required but token missing | run dry-run for a token, then retry |
+| 6 | Precondition conflict or invalid token | re-read state, then retry |
+| 7 | Retryable transient error (network/rate-limit/server) | back off and retry |
+| 8 | Timeout | back off and retry |
+| 9 | Human action required (see §14.3, optional) | relay to the user, run `resume` once done |
 
-错误码与 exit code 必须一致：
+Error codes and exit codes must align:
 
 - `E_USAGE` / `E_VALIDATION` -> 2
 - `E_NOT_FOUND` -> 3
@@ -127,11 +129,11 @@
 - `E_CONFLICT` -> 6
 - `E_NETWORK` / `E_RATE_LIMITED` / `E_SERVER` -> 7
 - `E_TIMEOUT` -> 8
-- `E_HUMAN_REQUIRED` -> 9（可选，仅启用 §14.3 时）
+- `E_HUMAN_REQUIRED` -> 9 (optional, only when §14.3 is enabled)
 
-## 7. 写操作流程（dry-run -> confirm）
+## 7. Write flow (dry-run -> confirm)
 
-写命令第一步必须支持 `--dry-run`，返回预览与 token：
+A write command must first support `--dry-run`, returning a preview and a token:
 
 ```json
 {
@@ -158,31 +160,31 @@
 }
 ```
 
-第二步携带 token 执行：
+The second step carries the token to execute:
 
 ```bash
 tool resource delete --id 123 --confirm ct_9f2a...
 ```
 
-confirm token 约定：
+Confirm-token conventions:
 
-- token 必须绑定操作内容哈希，包括命令路径、参数、目标资源 ID、调用账号、权限上下文。
-- 能获取资源版本时，也应绑定资源版本、etag、changekey 或 updated_at，防止状态漂移。
-- token 必须有过期时间，`expires_at` 使用 ISO 8601 UTC。
-- token 过期、操作参数变化、目标状态变化时，执行命令返回 `E_CONFLICT`，exit code 6。
-- 缺少 token 时返回 `E_CONFIRMATION_REQUIRED`，exit code 5。
-- dry-run 不得产生外部副作用，但可以读取状态用于构造 preview。
+- The token must bind a hash of the operation content: command path, args, target resource ID, calling account, permission context.
+- When a resource version is available, also bind it (version, etag, changekey, or updated_at) to prevent state drift.
+- The token must expire; `expires_at` is ISO 8601 UTC.
+- On expiry, changed args, or changed target state, execution returns `E_CONFLICT`, exit code 6.
+- With no token, return `E_CONFIRMATION_REQUIRED`, exit code 5.
+- dry-run must not cause external side effects, but may read state to build the preview.
 
-## 8. 查询、分页与字段选择
+## 8. Query, pagination, and field selection
 
-查询命令默认支持：
+Query commands support, by default:
 
-- `--fields <a,b,c>`：只返回指定字段，支持 dotted path 时需在 reference 中声明。
-- `--compact`：压缩 JSON 空白。
-- `--limit`：限制返回条数。
-- `--cursor` 或 `--offset`：分页游标或偏移。
+- `--fields <a,b,c>`: return only selected fields; when dotted paths are supported, declare it in reference.
+- `--compact`: strip JSON whitespace.
+- `--limit`: cap the number of returned items.
+- `--cursor` or `--offset`: pagination cursor or offset.
 
-分页返回建议：
+Suggested pagination shape:
 
 ```json
 {
@@ -193,24 +195,24 @@ confirm token 约定：
 }
 ```
 
-约定：
+Conventions:
 
-- 所有 ID 使用字符串，即使底层是数字。
-- 所有时间使用 ISO 8601 UTC。
-- 列表顺序必须稳定；默认排序规则应在 reference 中声明。
-- 查询命令不得因为缺少可选过滤条件而进入交互询问。
+- All IDs are strings, even if numeric underneath.
+- All times are ISO 8601 UTC.
+- List order must be stable; declare the default sort in reference.
+- Query commands must not fall into an interactive prompt just because an optional filter is missing.
 
-## 9. 幂等性与并发安全
+## 9. Idempotency and concurrency safety
 
-写命令应尽量支持幂等语义：
+Write commands should support idempotent semantics where possible:
 
-- 创建类命令建议支持 `--request-id` 或 `--idempotency-key`。
-- 重试同一个 idempotency key 不应重复创建资源。
-- 更新/删除类命令应在 dry-run 中记录目标资源版本。
-- confirm 时发现版本变化必须返回 `E_CONFLICT`。
-- 批量写操作应返回逐项结果，不要因为单项失败隐藏其他项状态。
+- Create-type commands should support `--request-id` or `--idempotency-key`.
+- Retrying the same idempotency key must not create duplicate resources.
+- Update/delete commands should record the target resource version during dry-run.
+- If a version change is detected at confirm time, return `E_CONFLICT`.
+- Batch writes should return per-item results; don't hide other items' status because one failed.
 
-批量写结果建议：
+Suggested batch-write result:
 
 ```json
 {
@@ -235,20 +237,20 @@ confirm token 约定：
 }
 ```
 
-## 10. 敏感信息与审计
+## 10. Sensitive data and auditing
 
-- password、token、secret、authorization header、cookie 不得出现在 stdout、stderr、error.details、audit log。
-- dry-run preview 必须脱敏敏感字段。
-- reference/context/doctor 不得泄露明文凭证。
-- context 可以报告凭证是否存在，但只能用布尔值或脱敏摘要。
-- audit log 应记录命令路径、脱敏参数、调用账号、时间、exit code、duration。
-- `--quiet` 不应关闭审计。
+- password, token, secret, authorization header, cookie must not appear in stdout, stderr, error.details, or the audit log.
+- dry-run previews must redact sensitive fields.
+- reference/context/doctor must not leak plaintext credentials.
+- context may report whether credentials exist, but only as a boolean or redacted summary.
+- The audit log should record command path, redacted args, calling account, time, exit code, duration.
+- `--quiet` must not disable auditing.
 
-## 11. 自描述命令（reference / context / doctor / changelog）
+## 11. Self-description commands (reference / context / doctor / changelog)
 
 ### reference
 
-声明工具能力、命令、参数、输出 schema、错误码、权限等级，供 Agent 先理解能力。
+Declares the tool's capabilities, commands, params, output schema, error codes, and permission levels, so an agent understands the tool first.
 
 ```json
 {
@@ -283,7 +285,7 @@ confirm token 约定：
 
 ### context
 
-报告当前运行环境、配置、目标、凭证状态。
+Reports the current runtime, config, target, and credential status.
 
 ```json
 {
@@ -305,7 +307,7 @@ confirm token 约定：
 
 ### doctor
 
-环境与风险体检，每项给出可执行修复建议。
+Environment and risk check-up; each item gives an actionable fix.
 
 ```json
 {
@@ -333,11 +335,11 @@ confirm token 约定：
 
 ### changelog
 
-报告**版本之间发生了什么变化**，让自更新后的 Agent 能补齐认知，而不是继续用旧套路。这是 `reference`（描述当前能力）在时间维度上的补充。
+Reports **what changed between versions** so an agent that just self-updated can refresh its knowledge instead of reusing stale patterns. This is the time-axis complement to `reference` (which describes current capabilities).
 
 ```bash
-tool changelog                    # 全部版本变更
-tool changelog --since 1.0.3      # 只返回比 1.0.3 新的版本
+tool changelog                    # all version changes
+tool changelog --since 1.0.3      # only versions newer than 1.0.3
 ```
 
 ```json
@@ -369,59 +371,58 @@ tool changelog --since 1.0.3      # 只返回比 1.0.3 新的版本
 }
 ```
 
-约定：
+Conventions:
 
-- **单一真相源**：`changelog` 输出从 `CHANGELOG.md` 派生（构建时按 `## [version]` 段落嵌入二进制），不另维护数据。与
-  release-notes 同源。
-- `--since <version>` 只返回严格高于该版本的条目，供「上次见过 X 版本」的 Agent 拉增量。
-- 变更分类沿用 Keep a Changelog：`added` / `changed` / `fixed` / `deprecated` / `removed` / `security`。
-- 自更新成功后，工具应在结果中提示 Agent 运行 `changelog --since <旧版本>`（见 §13）。
+- **Single source of truth**: `changelog` output is derived from `CHANGELOG.md` (embedded into the binary at build time by `## [version]` section); no separate data maintained. Same source as release notes.
+- `--since <version>` returns only entries strictly newer than that version, for an agent that "last saw version X" to pull the delta.
+- Change categories follow Keep a Changelog: `added` / `changed` / `fixed` / `deprecated` / `removed` / `security`.
+- After a successful self-update, the tool should hint the agent to run `changelog --since <old version>` (see §13).
 
-## 12. 命令设计约定
+## 12. Command design conventions
 
-1. 用最短命令完成明确任务，减少组合复杂度。
-2. 查询命令默认支持 `--fields` 与 `--compact` 降 token。
-3. 写命令必须支持 `--dry-run` 与 `--confirm`。
-4. 命名采用 `<noun> <verb>` 或 `<verb> <noun>` 风格，并在全局统一。
-5. 不要求 Agent 解析帮助文本；`--help` 给人看，机器能力通过 `reference` 暴露。
-6. 所有时间用 ISO 8601 UTC；所有 ID 用字符串。
-7. 命令失败时优先返回结构化错误，不输出半截成功 payload。
-8. 命令参数应避免二义性；布尔值用 flag，枚举值用有限选项。
+1. Use the shortest command that completes a clear task; reduce combinatorial complexity.
+2. Query commands support `--fields` and `--compact` by default to cut tokens.
+3. Write commands must support `--dry-run` and `--confirm`.
+4. Naming uses `<noun> <verb>` or `<verb> <noun>` style, consistent across the tool.
+5. Don't require agents to parse help text; `--help` is for humans, machine capability is exposed via `reference`.
+6. All times ISO 8601 UTC; all IDs strings.
+7. On failure, return a structured error rather than a half-finished success payload.
+8. Avoid ambiguous params; booleans are flags, enums are bounded choices.
 
-## 13. 版本与兼容策略
+## 13. Versioning and compatibility
 
-- `schema_version` 表示输出 schema 版本，不等同于工具版本。
-- 破坏性 schema 变更升级主版本，例如 `1.x` -> `2.0`。
-- 非破坏性新增字段可以保持主版本不变。
-- 废弃字段应先保留兼容期，并在 reference 中标记 deprecated。
-- 兼容别名可以存在，但不应作为新文档推荐用法。
-- Agent 应优先依据 `reference`，而不是 `--help` 或 README。
+- `schema_version` is the output schema version, not the tool version.
+- A breaking schema change bumps the major version, e.g. `1.x` -> `2.0`.
+- Non-breaking added fields may keep the major version.
+- Deprecated fields should keep a compatibility window and be marked deprecated in reference.
+- Compatibility aliases may exist but should not be the recommended usage in new docs.
+- Agents should rely on `reference`, not `--help` or README.
 
-### 版本协商（工具版本 ↔ Skill 期望）
+### Version negotiation (tool version ↔ Skill expectation)
 
-Skill 是写它那天的能力快照，二进制版本一漂就可能错位：按 v1.1 写的 Skill 碰上 v1.0 二进制，会静默调用不存在的命令。
+A Skill is a snapshot of the capabilities the day it was written; once the binary version drifts, things misalign: a Skill written for v1.1 against a v1.0 binary will silently call commands that don't exist.
 
-- 工具必须能报告自身版本：`tool --version` 与 `context.data.version`。
-- Skill 在 frontmatter 声明最低兼容版本（见 SKILL-SPEC `requires.min_version`）。
-- `doctor` 应有一项检查「当前版本是否满足声明的最低版本」，不满足时给出 `fix`（升级命令），状态 `fail`。
+- The tool must report its own version: `tool --version` and `context.data.version`.
+- The Skill declares a minimum compatible version in frontmatter (see SKILL-SPEC `requires.min_version`).
+- `doctor` should include a check "does the current version meet the declared minimum"; if not, give a `fix` (upgrade command), status `fail`.
 
-### 自更新闭环
+### Self-update loop
 
-带 `self-update` 的工具，更新成功后**必须打通认知更新链**，否则 Agent 不知道自己刚获得了什么新能力：
+For tools with `self-update`, after a successful update they **must close the knowledge-refresh loop**, or the agent won't know what new capabilities it just gained:
 
-- `update --confirm <token>` 成功后，结果 `data` 中返回 `previous_version` 与 `current_version`。
-- 同时在结果中提示：`run "changelog --since <previous_version>" to see what changed`。
-- Agent 约定：自更新后、继续干活前，先读 `changelog --since <旧版本>`（见 SKILL-SPEC 配方）。
+- After `update --confirm <token>` succeeds, return `previous_version` and `current_version` in `data`.
+- Also hint in the result: `run "changelog --since <previous_version>" to see what changed`.
+- Agent convention: after self-update, before continuing, read `changelog --since <old version>` (see the SKILL-SPEC recipe).
 
-## 14. 可选模式（按需启用）
+## 14. Optional patterns (enable as needed)
 
-以下三种模式**不是人人必做**：工具用得上就照这里实现，用不上就忽略，零负担。它们让规范随工具复杂度伸缩——简单工具保持轻，复杂工具不必重新发明轮子。每条都标了「何时适用」。
+These three patterns are **not for everyone**: implement them if your tool needs them, ignore them otherwise — zero overhead. They let the spec scale with tool complexity — a simple tool stays light, a complex tool need not reinvent the wheel. Each is marked "when applicable."
 
-### 14.1 凭证生命周期（令牌会过期时）
+### 14.1 Credential lifecycle (when tokens expire)
 
-**何时适用**：凭证不是静态的，而是会过期 / 需刷新的——OAuth access_token（微信公众号约 2h）、cookie / session（小红书）、临时 STS 凭证等。静态用户名密码的工具跳过本节。
+**When applicable**: credentials are not static but expire / need refresh — OAuth access_token (WeChat Official Account ~2h), cookie / session (Xiaohongshu), temporary STS credentials, etc. Tools with static username/password skip this section.
 
-- `context.data.credentials` 除「配没配」外，应报告**有效性与过期信息**（脱敏）：
+- Beyond "is it configured," `context.data.credentials` should report **validity and expiry** (redacted):
 
   ```json
   {
@@ -434,16 +435,16 @@ Skill 是写它那天的能力快照，二进制版本一漂就可能错位：�
   }
   ```
 
-- 令牌过期且不可自动刷新时，操作返回 `E_AUTH`（exit 4），`details` 指明需重新认证。
-- 可自动刷新的工具应**透明刷新**，不让 Agent 操心；刷新失败再降级为 `E_AUTH`。
-- `doctor` 增一项 `check: "credentials"`，对临近过期给 `warn` + 续期 `fix`。
-- 刷新令牌、secret 一律脱敏，绝不出现在 stdout / stderr / details。
+- When a token is expired and cannot auto-refresh, the operation returns `E_AUTH` (exit 4), with `details` indicating re-auth is needed.
+- Tools that can auto-refresh should do so **transparently**, not bothering the agent; degrade to `E_AUTH` only if refresh fails.
+- `doctor` adds a `check: "credentials"` item; for near-expiry give `warn` + a renew `fix`.
+- Refresh tokens and secrets are always redacted — never in stdout / stderr / details.
 
-### 14.2 异步任务生命周期（长任务：提交 → 轮询 → 取结果）
+### 14.2 Async job lifecycle (long jobs: submit → poll → fetch result)
 
-**何时适用**：操作不能同步返回结果——SQL 异步执行 / 审批（Archery）、批量群发、采集 / 爬取任务、大导出。同步即得结果的命令跳过本节。
+**When applicable**: the operation can't return a result synchronously — async SQL execution / approval (Archery), bulk send, scrape/crawl jobs, large exports. Commands that return results synchronously skip this section.
 
-- 提交命令立即返回 `job_id` 与状态，不阻塞：
+- The submit command returns a `job_id` and status immediately, without blocking:
 
   ```json
   {
@@ -459,16 +460,16 @@ Skill 是写它那天的能力快照，二进制版本一漂就可能错位：�
   }
   ```
 
-- 状态查询返回稳定枚举：`pending` / `running` / `succeeded` / `failed` / `cancelled`，并带进度（如 `progress`、`eta_seconds`）。
-- 结果与状态分开取：`succeeded` 后用 `result` 命令拉数据（大结果走 NDJSON / `--format raw`）。
-- `failed` 的结果用标准 error envelope，`retryable` 指明能否重试整个任务。
-- 写类长任务的提交仍走 `dry-run → confirm`；confirm 后才落 `job_id`。
+- Status queries return a stable enum: `pending` / `running` / `succeeded` / `failed` / `cancelled`, with progress (e.g. `progress`, `eta_seconds`).
+- Result and status are fetched separately: after `succeeded`, use the `result` command to pull data (large results via NDJSON / `--format raw`).
+- A `failed` result uses the standard error envelope; `retryable` indicates whether the whole job can be retried.
+- Submission of a write-type long job still goes through `dry-run → confirm`; the `job_id` is created only after confirm.
 
-### 14.3 人工介入检查点（需要人来扫码 / 验证码 / 审批时）
+### 14.3 Human-in-the-loop checkpoints (when a human must scan / solve captcha / approve)
 
-**何时适用**：流程中途必须由人完成某步——扫码登录 / 验证码（小红书）、审批人放行（Archery）、二次确认等。全自动工具跳过本节。
+**When applicable**: a step mid-flow must be completed by a human — QR login / captcha (Xiaohongshu), approver sign-off (Archery), secondary confirmation. Fully automated tools skip this section.
 
-- 卡在人工步骤时，**不阻塞、不瞎试**，返回专用信号让 Agent 把球踢给用户：
+- When stuck at a human step, **don't block, don't guess** — return a dedicated signal so the agent hands off to the user:
 
   ```json
   {
@@ -484,33 +485,33 @@ Skill 是写它那天的能力快照，二进制版本一漂就可能错位：�
   }
   ```
 
-- `E_HUMAN_REQUIRED` 用 exit code `9`（在既有 0–8 之外新增；不复用 `4`，以区分「凭证错」与「等人动作」）。
-- `details.action` 用稳定枚举说明需要人做什么，`details.resume` 给出人工完成后的续跑命令。
-- Agent 约定：收到 `E_HUMAN_REQUIRED` → 向用户转述 `message` 与所需动作 → 等用户完成 → 跑 `resume`，不自动重试。
+- `E_HUMAN_REQUIRED` uses exit code `9` (added beyond the existing 0–8; not reusing `4`, to distinguish "bad credentials" from "waiting on a human action").
+- `details.action` is a stable enum describing what the human must do; `details.resume` gives the command to continue after the human is done.
+- Agent convention: on `E_HUMAN_REQUIRED` → relay `message` and the required action to the user → wait for them → run `resume`; do not auto-retry.
 
-## 15. 设计检查清单
+## 15. Design checklist
 
-> 标 `（可选）` 的仅当对应可选模式启用时才需勾。
+> Items marked `(optional)` only apply when the corresponding optional pattern is enabled.
 
-- [ ] 默认 `--format json`
-- [ ] stdout 仅含合法 JSON / NDJSON，无污染
-- [ ] 日志与进度全部走 stderr
-- [ ] 成功/失败同形 envelope，含 `ok` 与 `schema_version`
-- [ ] `error` 含语义化 `code`、`details`、`retryable`
-- [ ] exit code 分层且与 `retryable` 一致
-- [ ] 写命令具备 dry-run / confirm-token 闭环
-- [ ] confirm token 绑定操作参数、账号、权限上下文和资源版本
-- [ ] 提供 `reference` / `context` / `doctor`
-- [ ] 提供 `changelog [--since]`，与 CHANGELOG/release-notes 同源
-- [ ] 工具可报告自身版本（`--version` 与 `context.version`）
-- [ ] （含 self-update 时）更新后回传 previous/current 版本并提示读 changelog
-- [ ] 查询命令支持 `fields` / `compact`
-- [ ] 列表命令支持分页或明确说明无需分页
-- [ ] 所有时间为 ISO 8601 UTC
-- [ ] 所有 ID 为字符串
-- [ ] 敏感信息全链路脱敏
-- [ ] schema 变更有版本与兼容策略
-- [ ] stdout/stderr 为 UTF-8 无 BOM
-- [ ] （可选·令牌过期）`context`/`doctor` 报告凭证有效性与过期，刷新失败降级 `E_AUTH`
-- [ ] （可选·长任务）提交返回 `job_id` + 状态枚举，状态/结果分离
-- [ ] （可选·需人工）卡人工步骤返回 `E_HUMAN_REQUIRED`（exit 9）+ `resume`，不自动重试
+- [ ] Default `--format json`
+- [ ] stdout contains only valid JSON / NDJSON, no pollution
+- [ ] Logs and progress all go to stderr
+- [ ] Success/failure share one envelope, with `ok` and `schema_version`
+- [ ] `error` has semantic `code`, `details`, `retryable`
+- [ ] Exit codes tiered and consistent with `retryable`
+- [ ] Write commands have the dry-run / confirm-token loop
+- [ ] Confirm token binds operation args, account, permission context, resource version
+- [ ] Provides `reference` / `context` / `doctor`
+- [ ] Provides `changelog [--since]`, same source as CHANGELOG/release-notes
+- [ ] Tool reports its own version (`--version` and `context.version`)
+- [ ] (with self-update) post-update returns previous/current version and hints to read changelog
+- [ ] Query commands support `fields` / `compact`
+- [ ] List commands support pagination or explicitly state none is needed
+- [ ] All times ISO 8601 UTC
+- [ ] All IDs strings
+- [ ] Secrets redacted end to end
+- [ ] Schema changes have a versioning/compat policy
+- [ ] stdout/stderr are UTF-8 without BOM
+- [ ] (optional · expiring tokens) `context`/`doctor` report credential validity and expiry; refresh failure degrades to `E_AUTH`
+- [ ] (optional · long jobs) submit returns `job_id` + status enum, status/result separated
+- [ ] (optional · human needed) stuck human steps return `E_HUMAN_REQUIRED` (exit 9) + `resume`, no auto-retry

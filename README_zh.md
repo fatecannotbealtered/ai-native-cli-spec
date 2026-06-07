@@ -57,9 +57,9 @@ LLM Agent 时刻在调 CLI，但绝大多数 CLI 是给人用的：散文式输�
 
 [**outlook-cli**](https://github.com/fatecannotbealtered/outlook-cli)——一个按本规范构建的 Outlook/Exchange CLI。可作为信封、dry-run/confirm 流程、自描述命令、`changelog` 机制的完整范例。
 
-## 关于语言
+## 语言
 
-`.agent/` 下的规范目前以中文书写；其中的概念与语言无关，JSON/CLI 契约本身是通用的。欢迎通过 PR 提交英文翻译。
+每份文档都是双语：英文为主 `X.md`，中文为 `X_zh.md`，两者顶部互相挂切换链接。READMEs、`AGENTS.md` 以及 `.agent/` 四份规范均如此。
 
 ## 许可
 
