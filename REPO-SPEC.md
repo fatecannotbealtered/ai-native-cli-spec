@@ -3,9 +3,12 @@
 
 This document defines a unified repo standard for all your open-source projects: required docs, template files, directory layout, release conventions. The goal: ten projects look the same, and anyone (including an AI agent) entering any repo finds the same things in the same places.
 
-Companion specs (all under `.agent/`, entry is `AGENT.md`):
+Companion specs for consuming tool repositories live under `.agent/`, with
+`AGENT.md` as the entry point. This repo skeleton standard stays here, at the
+root of `ai-native-cli-spec`, so consuming repositories do not carry forked
+copies.
 
-- `AGENT.md` — entry / playbook: how to build & extend a tool here, navigates to the four below.
+- `AGENT.md` — entry / playbook: how to build & extend a tool here, navigates to the local specs and this shared repo standard.
 - `CLI-SPEC.md` — the CLI machine contract (how the tool speaks).
 - `SKILL-SPEC.md` — Skill authoring spec (how the agent uses it).
 - `SEC-SPEC.md` — security baseline (how not to get burned, or burn others).
@@ -35,31 +38,36 @@ Levels: **MUST** required; **SHOULD** strongly recommended; **optional** as need
 | `.github/PULL_REQUEST_TEMPLATE.md` | SHOULD | PR self-check checklist |
 | `.github/dependabot.yml` | optional | dependency updates |
 | `AGENTS.md` | MUST* | cross-tool entry hook, points to `.agent/AGENT.md` |
-| `.agent/AGENT.md` | MUST* | AI-native tool entry / playbook, navigates to the four specs below |
+| `.agent/AGENT.md` | MUST* | AI-native tool entry / playbook, navigates to the local specs and this shared repo standard |
 | `.agent/CLI-SPEC.md` | MUST* | the CLI machine contract (*CLI projects only) |
 | `.agent/SKILL-SPEC.md` | MUST* | Skill authoring spec (*projects with a Skill) |
 | `.agent/SEC-SPEC.md` | MUST* | security baseline (risk tiers + injection/privilege/credential/supply-chain) |
 | `skills/<name>/SKILL.md` | MUST* | Agent Skill (*required for AI-native tools) |
+| `skills/<name>/test-prompts.json` | SHOULD* | Skill regression prompts for review / Darwin-style validation |
 
 `*` items are specific to "AI-native tools" — a plain library may omit them, but any agent-facing CLI / tool must have them. `†` items are scenario-triggered: wrapping a third-party product (Outlook/Exchange, GitLab, Jira, Kibana, etc.) requires the trademark notice and compatibility matrix.
 
 ## 2. Required README skeleton
 
-Every README follows a fixed order, for easy cross-comparison:
+Every README follows a fixed order, for easy cross-comparison and direct Agent onboarding:
 
-1. **Title + one-line positioning** + badges (version / CI / license / language switch link)
-2. **What** — one paragraph: what problem it solves, for whom (human / agent / both)
-3. **Install** — copy-paste-runnable install blocks (CLI install and Skill install listed separately)
-4. **Quick Start** — minimal working example (configure → verify → first command)
-5. **Usage / Commands** — core capabilities, detail points to `reference` or a separate doc
-6. **Configuration** — config items, environment variables, credential location
-7. **For AI Agents** — agent onboarding, points to `SKILL.md` and `.agent/CLI-SPEC.md`
-8. **Development** — local dev, build, test
-9. **License / Contributing / Security** — point to the respective files
+1. **Title + language switch + badges** — badge order is CI, language quality badge when applicable, npm version, license.
+2. **One-line positioning** — Agent-native tool description. Do not position these tools as primarily interactive human CLIs.
+3. **Agent Install** — one copy-paste block an AI Agent can run: npm wrapper install, Skill install, required env placeholders, `context`, `doctor`, and `reference`.
+4. **What It Does** — one paragraph, risk tier, and any third-party/disclaimer note.
+5. **Capabilities** — compact table of command groups; README is a map, not the full manual.
+6. **Agent Workflow** — install, configure, preflight, discover via `reference`, reduce tokens with `--compact`/`--fields`, write with `--dry-run` -> `--confirm`, refresh via `changelog`.
+7. **Machine Contract** — JSON default, envelope shape, stdout/stderr rules, error codes, `_untrusted`, and `--json` compatibility note.
+8. **Configuration** — config path, env vars, credential precedence and storage.
+9. **Project Structure** — top-level tree so every repo looks navigable at a glance.
+10. **Development** — local build/test/lint commands.
+11. **Links** — `AGENTS.md`, Skill, `.agent/CLI-SPEC.md`, security, compatibility, E2E, changelog, contributing, notice, license.
 
 Conventions:
 
-- Install blocks must be copy-paste-runnable, with prerequisites noted.
+- Badge sets are intentionally small. Do not add vanity badges that do not affect Agent trust or release quality.
+- Install blocks must be copy-paste-runnable by an Agent, with secret placeholders instead of real credentials.
+- Command detail belongs in the live `reference` output. README command tables stay high-level to avoid stale manual pages.
 - Example commands use real runnable forms, time as ISO 8601, ID as placeholder `<message-id>`.
 
 ## 3. Internationalization (i18n) convention
@@ -90,11 +98,15 @@ CHANGELOG.md (human-maintained, single source of truth)
 - release-notes are generated by `release.yml` at release time (`sed -n "/^## \[VERSION\]/,/^## \[/p"`), **don't keep a hand-maintained `release-notes.md` in the repo**.
 - The runtime `changelog` command reuses the same CHANGELOG, embedded at build — zero new source, just one more outlet.
 
+**Runtime changelog file naming.** The source file that embeds `CHANGELOG.md` for the runtime `changelog` command is named `changelog.go` (Go) / `changelog.py` (Python) — **singular, with NO `_embed` suffix**. In Go it holds the `//go:embed` directive and exposes the embedded contents as a package var named `ChangelogMarkdown`.
+
+**Go version pinning.** Go projects pin a single current Go version in `go.mod` (`go 1.XX`) and **do not** add a `toolchain` line; CI reads that one source via `setup-go`'s `go-version-file: go.mod` rather than hard-coding a version in the workflow.
+
 ## 4b. Distribution convention (npm wrapper)
 
 Cross-language tools distribute via a uniform npm wrapper, so Go binaries and Python packages both `npm install -g` and are called consistently by agents:
 
-- `package.json` declares the scoped package name and the `bin` entry.
+- `package.json` declares the scoped package name and the `bin` entry. It is the **single source of truth for the npm wrapper's scope/name and version** — `scripts/{install,run}.js` and CI read them from `package.json`, never hard-copying the scope or version elsewhere.
 - `scripts/install.js`: at install, fetch / link the platform binary into `bin/`.
 - `scripts/run.js`: a thin forwarding layer, `execFileSync` invoking the real binary, passing through `argv` and stdio, with an actionable reinstall hint if the binary is missing.
 - The binary itself (`bin/`, `*.exe`, `dist/`) goes into `.gitignore`, produced by CI, not committed.
@@ -115,9 +127,10 @@ project/
 │   ├── AGENT.md                # entry / playbook
 │   ├── CLI-SPEC.md             # CLI machine contract
 │   ├── SKILL-SPEC.md           # Skill authoring spec
-│   ├── SEC-SPEC.md             # security baseline
-│   └── REPO-SPEC.md            # repo skeleton spec
-├── skills/<name>/SKILL.md      # Agent Skill
+│   └── SEC-SPEC.md             # security baseline
+├── skills/<name>/              # bundled Agent Skill
+│   ├── SKILL.md                # executable Skill contract
+│   └── test-prompts.json       # regression prompts for Skill review
 ├── <package>/                  # source (package name)
 ├── tests/                      # tests, structure mirrors source
 ├── scripts/                    # dev / build helper scripts
@@ -129,6 +142,24 @@ Conventions:
 - Source, tests, scripts, docs each in their place, not dumped in the root.
 - Test directory mirrors the source structure, for easy locating.
 - Build artifacts, caches, venvs, IDE config all go into `.gitignore`, not committed.
+
+### 5b. Template model: `common/` + `<lang>/`
+
+The seed in this repo's `template/` is split so that the skeleton above is assembled from two layers, and so adding a language stays cheap:
+
+```text
+template/
+├── common/        # language-agnostic, copied into EVERY repo: AGENTS.md, the four
+│                  #   .agent/ specs, all governance docs, .github/, package.json,
+│                  #   scripts/{install,run}.js, docs/, skills/SKILL.md.tmpl, .gitignore
+├── go/            # overlay: ci.yml, release.yml, .goreleaser.yml, Makefile,
+│                  #   .golangci.yml, .gitignore
+└── python/        # overlay: ci.yml, release.yml, ruff.toml, .gitignore
+```
+
+- Instantiate by copying `common/.` then overlaying **exactly one** `<lang>/.`; concatenate the `<lang>` `.gitignore` onto the common one. See `template/INSTANTIATE.md`.
+- **Adding a language = add `template/<lang>/`** (~6 files of CI / release / formatter / build plumbing), reusing 100% of `common/`.
+- The `.agent/` behavioral specs (`AGENT`, `CLI-SPEC`, `SKILL-SPEC`, `SEC-SPEC`) live in `common/` and **never fork per language** — the machine contract is identical across languages; only build/CI plumbing differs.
 
 ## 6. Quality gate convention
 
@@ -151,5 +182,5 @@ Conventions:
 - [ ] (wrapping a third-party product) `NOTICE.md` + `docs/COMPATIBILITY.md` in place
 - [ ] (calling external APIs) `docs/E2E.md` + integration tests in place
 - [ ] `docs/OPEN_SOURCE_CHECKLIST.md` in place, run through before the first push
-- [ ] (AI-native tool) root `AGENTS.md` + `.agent/{AGENT,CLI-SPEC,SKILL-SPEC,SEC-SPEC,REPO-SPEC}.md` + `skills/<name>/SKILL.md` complete
+- [ ] (AI-native tool) root `AGENTS.md` + `.agent/{AGENT,CLI-SPEC,SKILL-SPEC,SEC-SPEC}.md` + `skills/<name>/{SKILL.md,test-prompts.json}` complete
 - [ ] PR / Issue templates in place

@@ -1,9 +1,10 @@
 # AGENTS.md
 
+**中文版 → [AGENTS_zh.md](AGENTS_zh.md)**
 
-This repo is an **AI-native CLI tool**: built for humans and for AI agents.
+This repo is an **AI-native CLI tool**: designed for AI agents first.
 
-**Any agent (Claude Code / Cursor / Windsurf / others) must read [`.agent/AGENT.md`](.agent/AGENT.md) before implementing or changing features.** That is the project playbook; it navigates you to the four specs — CLI contract, Skill spec, security baseline, repo spec. They take priority over your default habits.
+**Any agent (Claude Code / Cursor / Windsurf / others) must read [`.agent/AGENT.md`](.agent/AGENT.md) before implementing or changing features.** That is the project playbook; it navigates you to the local CLI contract, Skill spec, security baseline, and the shared repo skeleton spec. They take priority over your default habits.
 
 > This file and the `.agent/` specs come from the
 > [ai-native-cli-spec](https://github.com/fatecannotbealtered/ai-native-cli-spec) seed.

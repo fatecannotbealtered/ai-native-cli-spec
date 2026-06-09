@@ -1,9 +1,10 @@
 # AGENTS.md
 
+**English → [AGENTS.md](AGENTS.md)**
 
-本仓库是一个 **AI 原生 CLI 工具**：既给人用，也给 AI Agent 用。
+本仓库是一个 **AI 原生 CLI 工具**：优先面向 AI Agent。
 
-**任何 Agent（Claude Code / Cursor / Windsurf / 其他）在实现或修改功能前，必须先读 [`.agent/AGENT_zh.md`](.agent/AGENT_zh.md)。** 那是本项目的总纲，会按你的任务导航到 CLI 契约、Skill 规范、安全基线、仓库规范四份细则。它们的优先级高于你的默认习惯。
+**任何 Agent（Claude Code / Cursor / Windsurf / 其他）在实现或修改功能前，必须先读 [`.agent/AGENT_zh.md`](.agent/AGENT_zh.md)。** 那是本项目的总纲，会按你的任务导航到本地 CLI 契约、Skill 规范、安全基线，以及共享仓库骨架规范。它们的优先级高于你的默认习惯。
 
 > 本文件与 `.agent/` 规范来自
 > [ai-native-cli-spec](https://github.com/fatecannotbealtered/ai-native-cli-spec) 种子。

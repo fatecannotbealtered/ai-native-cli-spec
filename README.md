@@ -6,15 +6,22 @@ A spec suite **and a copy-paste seed** for building **AI-native CLI tools** — 
 
 Pull the `.agent/` seed into a new project, point your AI at it, and let it build a tool that already conforms to a stable agent contract.
 
+The template is split into a language-agnostic **`common/`** layer plus a thin per-language overlay (**`go/`**, **`python/`**, ...). Pull `common/`, then overlay exactly one language:
+
 ```bash
 # In a new (or existing) project directory:
-npx degit fatecannotbealtered/ai-native-cli-spec/template .
+#   1. the language-agnostic common layer
+npx degit fatecannotbealtered/ai-native-cli-spec/template/common .
+#   2. exactly one language overlay (go OR python)
+npx degit fatecannotbealtered/ai-native-cli-spec/template/go .
 
-# Then tell your AI:
+# Then follow template/INSTANTIATE.md to fill placeholders, and tell your AI:
 #   "Read AGENTS.md, then build this tool following the .agent/ specs."
 ```
 
-That drops two things into your repo:
+See [`template/INSTANTIATE.md`](template/INSTANTIATE.md) for the full copy-paste guide (placeholder dictionary, `.gitignore` concatenation, Skill template rename, `test-prompts.json` setup, the `NOTICE.md` drop-if-not-wrapping rule).
+
+That drops a single coherent skeleton into your repo. From `common/`:
 
 ```
 AGENTS.md          # entry hook every agent reads first
@@ -22,13 +29,17 @@ AGENTS.md          # entry hook every agent reads first
 ├── AGENT.md       # the playbook: navigation + greenfield/extend workflows
 ├── CLI-SPEC.md    # CLI machine contract — how the tool "speaks"
 ├── SKILL-SPEC.md  # Skill authoring — how the agent "listens"
-├── SEC-SPEC.md    # security baseline — how not to get burned
-└── REPO-SPEC.md   # repo skeleton — what the project "looks like"
+└── SEC-SPEC.md    # security baseline — how not to get burned
+README / LICENSE / CHANGELOG / CONTRIBUTING / SECURITY / CODE_OF_CONDUCT / NOTICE
+.github/ (PR + issue templates, dependabot)  ·  package.json + scripts/{install,run}.js
+docs/OPEN_SOURCE_CHECKLIST.md  ·  skills/{SKILL.md.tmpl,test-prompts.json.tmpl}  ·  .gitignore
 ```
+
+Plus, from the one language overlay you pick (`go/` or `python/`): the CI / release workflows, formatter & linter config, build plumbing, and a language `.gitignore` to append. The repo skeleton standard itself lives at [`REPO-SPEC.md`](REPO-SPEC.md), the standard's meta-doc.
 
 ## Why
 
-LLM agents call CLIs constantly, but most CLIs are built for humans: prose output, ad-hoc exit codes, interactive prompts that hang in automation. This suite encodes one coherent, opinionated standard so that **every tool you build behaves the same way an agent expects** — and so an AI can build a new one from day one without re-deriving the rules.
+LLM agents call CLIs constantly, but most CLIs are built for interactive terminals: prose output, ad-hoc exit codes, interactive prompts that hang in automation. This suite encodes one coherent, opinionated standard so that **every tool you build behaves the same way an agent expects** — and so an AI can build a new one from day one without re-deriving the rules.
 
 It is intentionally **layered, not heavy**:
 
@@ -47,11 +58,15 @@ It is intentionally **layered, not heavy**:
 
 ## How to use it
 
-- **Add to an existing repo:** `npx degit fatecannotbealtered/ai-native-cli-spec/template .`
-- **Pin a version:** `npx degit fatecannotbealtered/ai-native-cli-spec/template#v1.0 .`
-- **Start a brand-new repo:** click **Use this template** on GitHub.
+- **Add to an existing repo:** pull `template/common` then exactly one `template/<lang>`:
+  ```bash
+  npx degit fatecannotbealtered/ai-native-cli-spec/template/common .
+  npx degit fatecannotbealtered/ai-native-cli-spec/template/go .   # or template/python
+  ```
+- **Pin a version:** append `#v1.0` to each path, e.g. `.../template/common#v1.0 .`
+- **Start a brand-new repo:** click **Use this template** on GitHub, then keep only the one `template/<lang>` you need.
 
-Then customize the `## 本项目` (This project) section at the bottom of `AGENTS.md`, and let the agent follow **Workflow A (greenfield)** in `.agent/AGENT.md`.
+Then walk [`template/INSTANTIATE.md`](template/INSTANTIATE.md) to fill placeholders, customize the `## 本项目` (This project) section at the bottom of `AGENTS.md`, and let the agent follow **Workflow A (greenfield)** in `.agent/AGENT.md`.
 
 ## Reference implementation
 

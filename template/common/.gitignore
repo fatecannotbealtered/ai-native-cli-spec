@@ -1,0 +1,13 @@
+# Common base — concatenate with template/<lang>/.gitignore
+
+node_modules/
+.env
+.env.local
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+.claude/

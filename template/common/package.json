@@ -1,0 +1,49 @@
+{
+  "name": "{{NPM_PKG}}",
+  "version": "{{VERSION}}",
+  "description": "{{DESCRIPTION}}",
+  "license": "MIT",
+  "author": "{{COPYRIGHT_HOLDER}}",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/{{REPO_SLUG}}.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "{{TOOL_NAME}}": "scripts/run.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  },
+  "files": [
+    "scripts/install.js",
+    "scripts/run.js",
+    "skills/",
+    "README.md",
+    "README_zh.md",
+    "*_zh.md",
+    "LICENSE",
+    "NOTICE.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
+    "AGENTS.md",
+    ".agent/",
+    "docs/"
+  ],
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "engines": {
+    "node": ">=16"
+  }
+}
