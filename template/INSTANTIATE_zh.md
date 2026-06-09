@@ -41,7 +41,7 @@ SHARED PLACEHOLDER DICTIONARY — use these literal tokens, never bake in real v
 - {{RISK_TIER}}        T0 | T1 | T2  (see SEC-SPEC)
 - {{RISK_TIER_DESC}}   short justification of the tier
 - {{THIRD_PARTY}}      wrapped third-party product name, e.g. GitLab (NOTICE only)
-- {{ENV_PREFIX}}       UPPER_SNAKE env var prefix for install script, e.g. MY_CLI
+- {{ENV_PREFIX}}       UPPER_SNAKE env var prefix for runtime/update env vars, e.g. MY_CLI
 - {{REPO_SLUG}}        GitHub owner/repo, e.g. OWNER/{{TOOL_NAME}}
 - {{PRIMARY_TRIGGER}}  触发 Skill 的主要用户意图
 - {{SECONDARY_TRIGGER}} 触发 Skill 的次要用户意图

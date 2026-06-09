@@ -59,10 +59,12 @@
 
 ## 供应链
 
-- **校验和验证（硬失败）**：npm `postinstall` 脚本下载匹配的 GitHub Release 压缩包，并对照 `checksums.txt` 验证。校验和不匹配、缺少 `checksums.txt`、或压缩包在其中没有对应条目，都会**硬失败**安装 —— 不静默降级，且临时下载目录会被清理。
-- **签名 release checksum**：release 使用 tagged GitHub Actions release workflow 的 Sigstore/Cosign keyless 签名来签署 `checksums.txt`。安装/更新路径必须把签名验证状态与 checksum 校验分开报告；不能把 checksum 单独当成发布者身份验证。
+- **npm 平台包**：npm 安装使用主 wrapper 包加 OS/CPU 专属 optional 平台包；安装期不再从 GitHub Release 下载二进制。
+- **npm provenance**：npm release 从 tagged GitHub Actions workflow 发布主 wrapper 包和全部平台包，并带 provenance。npm registry tarball integrity 与 provenance 覆盖 npm 安装路径。
+- **校验和验证（硬失败）**：standalone GitHub 二进制安装/更新路径会对照 `checksums.txt` 验证 release 压缩包。校验和不匹配、缺少 `checksums.txt`、或压缩包在其中没有对应条目，都会**硬失败**安装/更新 —— 不静默降级，且临时下载目录会被清理。
+- **签名 release checksum**：release 使用 tagged GitHub Actions release workflow 的 Sigstore/Cosign keyless 签名来签署 `checksums.txt`。standalone 安装/更新路径必须把签名验证状态与 checksum 校验分开报告；不能把 checksum 单独当成发布者身份验证。
 - **自更新同步 Skill**：`update --confirm` 成功后应同步整个内置 `skills/{{TOOL_NAME}}/` 目录，或返回等价于 `npx skills add {{REPO_SLUG}} -y -g` 的 `skill_sync_command`。
-- **安装期不执行远程代码**：安装脚本只下载发布产物，不执行从网络拉取的代码。
+- **npm 安装无运行时下载器**：npm wrapper 只解析已安装的平台包并执行其中的二进制；不运行安装期下载器。
 - **依赖锁定 + 审计**：锁文件入库，CI 跑 `npm audit --audit-level=high`（Python 变体跑 `pip-audit`），拦截高危依赖。
 - **可追溯构建**：发布产物由 CI 从打 tag 的源码构建 —— 不手工上传二进制。
 

@@ -14,11 +14,15 @@
   "bin": {
     "{{TOOL_NAME}}": "scripts/run.js"
   },
-  "scripts": {
-    "postinstall": "node scripts/install.js"
+  "optionalDependencies": {
+    "{{NPM_PKG}}-darwin-arm64": "{{VERSION}}",
+    "{{NPM_PKG}}-darwin-x64": "{{VERSION}}",
+    "{{NPM_PKG}}-linux-arm64": "{{VERSION}}",
+    "{{NPM_PKG}}-linux-x64": "{{VERSION}}",
+    "{{NPM_PKG}}-win32-arm64": "{{VERSION}}",
+    "{{NPM_PKG}}-win32-x64": "{{VERSION}}"
   },
   "files": [
-    "scripts/install.js",
     "scripts/run.js",
     "skills/",
     "README.md",
@@ -33,15 +37,6 @@
     "AGENTS.md",
     ".agent/",
     "docs/"
-  ],
-  "os": [
-    "darwin",
-    "linux",
-    "win32"
-  ],
-  "cpu": [
-    "x64",
-    "arm64"
   ],
   "engines": {
     "node": ">=16"

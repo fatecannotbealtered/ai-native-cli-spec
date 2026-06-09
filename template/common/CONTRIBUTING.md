@@ -24,7 +24,7 @@ These specs are authoritative and take priority over default habits. Code that v
 language toolchain — keep ONE block below, delete the others:
   - Go 1.25+        : compiled binary + npm wrapper
   - Python 3.10+    : PyInstaller binary + npm wrapper
-  - Node 16+        : required for the npm wrapper / install scripts in all variants
+  - Node 16+        : required for the npm wrapper / platform-package scripts in all variants
 The shape is always: install deps -> build -> test -> run `--help` smoke test.
 -->
 
@@ -45,7 +45,7 @@ go test -race ./...
 # pytest tests/ -v
 # {{TOOL_NAME}} --help
 
-# Optional: Node.js 16+ if you touch the npm install scripts (scripts/install.js)
+# Optional: Node.js 16+ if you touch npm wrapper or platform-package scripts
 ```
 
 If dependency download is slow, use a regional proxy (e.g. Go: `GOPROXY=https://goproxy.cn,direct`; pip: a mirror index).

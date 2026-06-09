@@ -105,11 +105,12 @@ CHANGELOG.md （人工维护，唯一真相源）
 
 跨语言工具统一用 npm 壳分发，让 Go 二进制、Python 包都能 `npm install -g` 装、被 Agent 一致调用：
 
-- `package.json` 声明 scope 包名与 `bin` 入口。它是 **npm 壳的 scope/包名与版本号的单一真相源**——`scripts/{install,run}.js` 与 CI 都从 `package.json` 读取，绝不把 scope 或版本号手抄到别处。
-- `scripts/install.js`：安装时拉取 / 链接对应平台二进制到 `bin/`。
-- `scripts/run.js`：薄转发层，`execFileSync` 调真正的二进制，透传 `argv` 与 stdio，二进制缺失时给出可执行的重装提示。
+- `package.json` 声明 scope 包名、`bin` 入口与 OS/CPU 专属 optional 平台包。它是 **npm 壳的 scope/包名与版本号的单一真相源**——`scripts/run.js`、平台包生成脚本与 CI 都从 `package.json` 读取，绝不把 scope 或版本号手抄到别处。
+- `scripts/run.js`：薄转发层，解析已安装的 npm 平台包并 `execFileSync` 调其中的二进制，透传 `argv` 与 stdio，平台包缺失时给出可执行的重装提示。
+- `scripts/prepare-npm-platform-packages.js`：release 阶段把 CI 已构建的二进制打成 npm optional 平台包。npm 运行时安装不得从 GitHub 下载二进制。
 - 二进制本身（`bin/`、`*.exe`、`dist/`）进 `.gitignore`，由 CI 构建产出，不入库。
 - 发布产物附带 `checksums.txt`；release pipeline 通过 tagged GitHub Actions release workflow 使用 Sigstore/Cosign keyless 签署该文件，并把 bundle 与 checksum 一起发布。
+- npm 分发发布主包和全部平台包，并使用 npm provenance。npm registry tarball integrity 与 provenance 覆盖 npm 安装路径；standalone GitHub 二进制更新路径继续保留 checksum/signature 验证。
 - `update --confirm` 负责完整生命周期：二进制/包更新加整个 `skills/<name>/` 目录同步，最终状态等同于 `npx skills add <repo> -y -g`。
 
 ## 5. 目录布局约定
@@ -179,7 +180,7 @@ template/
 - [ ] 版本号单一真相源；CHANGELOG 为唯一变更源，派生物不入库
 - [ ] 源码 / 测试 / 脚本目录分置，测试镜像源码
 - [ ] 格式化工具配置入库，CI 强制
-- [ ] （npm 壳分发）`package.json` + `scripts/{install,run}.js`，二进制不入库
+- [ ] （npm 壳分发）`package.json` + `scripts/run.js` + `scripts/prepare-npm-platform-packages.js`，二进制不入库
 - [ ] （包装第三方产品）`NOTICE.md` + `docs/COMPATIBILITY.md` 就位
 - [ ] （对接外部 API）`docs/E2E.md` + 集成测试就位
 - [ ] `docs/OPEN_SOURCE_CHECKLIST.md` 就位，首次 push 前过一遍
