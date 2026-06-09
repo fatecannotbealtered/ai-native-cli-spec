@@ -111,6 +111,11 @@ CHANGELOG.md （人工维护，唯一真相源）
 - 二进制本身（`bin/`、`*.exe`、`dist/`）进 `.gitignore`，由 CI 构建产出，不入库。
 - 发布产物附带 `checksums.txt`；release pipeline 通过 tagged GitHub Actions release workflow 使用 Sigstore/Cosign keyless 签署该文件，并把 bundle 与 checksum 一起发布。
 - npm 分发发布主包和全部平台包，并使用 npm provenance。npm registry tarball integrity 与 provenance 覆盖 npm 安装路径；standalone GitHub 二进制更新路径继续保留 checksum/signature 验证。
+- 版本通知是面向 Agent 的结构化契约，不是全局横幅。`update --check`
+  刷新更新状态，并可在工具的用户配置目录写入短缓存；`doctor` 可以用短超时主动刷新，网络失败静默降级；`context` 和 `--help`
+  只读缓存。业务命令不得为了提示升级而主动联网。
+- 有新版本时，维护类命令的 JSON 在 `data.notices[]` 中追加
+  `type: "update_available"`、当前/最新版本、安装方式、推荐命令、已知 release URL、检查时间和下一步。文本/help 输出可追加一句简短提示。
 - `update --confirm` 负责完整生命周期：二进制/包更新加整个 `skills/<name>/` 目录同步，最终状态等同于 `npx skills add <repo> -y -g`。
 
 ## 5. 目录布局约定
