@@ -39,8 +39,9 @@
 
 - [ ] `package.json` 的 `version` 与待发布的 git tag 一致（`vX.Y.Z` ↔ `X.Y.Z`）；`release.yml` 对此做守卫，不一致即失败。
 - [ ] 二进制本身（`bin/`、`*.exe`、`dist/`）**不提交** —— 由 CI 产出并被 gitignore。
-- [ ] 发布产物附带 `checksums.txt`；安装脚本（`scripts/install.js`）校验 checksum，且在不匹配或缺少条目时**失败关闭**。
-- [ ] release pipeline 使用 Sigstore/Cosign keyless 签署 `checksums.txt`，发布 bundle，安装/更新路径把签名验证状态与 checksum 校验分开报告。
+- [ ] GitHub Release 发布产物附带 `checksums.txt`；standalone 二进制安装/更新路径校验 checksum，且在不匹配或缺少条目时**失败关闭**。
+- [ ] release pipeline 使用 Sigstore/Cosign keyless 签署 `checksums.txt`，发布 bundle，standalone 安装/更新路径把签名验证状态与 checksum 校验分开报告。
+- [ ] npm 分发从 CI 构建产物发布主 wrapper 包和每个受支持 OS/CPU 的平台包，并使用 `npm publish --provenance`。
 - [ ] 版本号有唯一真相来源；运行时 `changelog` 命令和 GitHub Release 正文均派生自 `CHANGELOG.md`，而非手工复制。
 
 ## AI 原生

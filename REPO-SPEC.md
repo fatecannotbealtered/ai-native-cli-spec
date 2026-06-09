@@ -106,13 +106,17 @@ CHANGELOG.md (human-maintained, single source of truth)
 
 Cross-language tools distribute via a uniform npm wrapper, so Go binaries and Python packages both `npm install -g` and are called consistently by agents:
 
-- `package.json` declares the scoped package name and the `bin` entry. It is the **single source of truth for the npm wrapper's scope/name and version** — `scripts/{install,run}.js` and CI read them from `package.json`, never hard-copying the scope or version elsewhere.
-- `scripts/install.js`: at install, fetch / link the platform binary into `bin/`.
-- `scripts/run.js`: a thin forwarding layer, `execFileSync` invoking the real binary, passing through `argv` and stdio, with an actionable reinstall hint if the binary is missing.
+- `package.json` declares the scoped package name, `bin` entry, and OS/CPU-specific optional platform packages. It is the **single source of truth for the npm wrapper's scope/name and version** — `scripts/run.js`, the platform-package helper, and CI read them from `package.json`, never hard-copying the scope or version elsewhere.
+- `scripts/run.js`: a thin forwarding layer that resolves the installed npm platform package and `execFileSync` invokes its binary, passing through `argv` and stdio, with an actionable reinstall hint if the platform package is missing.
+- `scripts/prepare-npm-platform-packages.js`: release-time helper that packages already-built CI binaries into npm optional platform packages. Runtime npm installation must not download binaries from GitHub.
 - The binary itself (`bin/`, `*.exe`, `dist/`) goes into `.gitignore`, produced by CI, not committed.
 - Release artifacts ship `checksums.txt`; the release pipeline signs that file with
   Sigstore/Cosign keyless signing from the tagged GitHub Actions release
   workflow and publishes the bundle alongside the checksum file.
+- npm distribution publishes the main package and all platform packages with npm
+  provenance. npm registry tarball integrity and provenance cover the npm
+  install path; standalone GitHub binary update paths keep checksum/signature
+  verification.
 - `update --confirm` owns the full lifecycle: binary/package update plus whole
   `skills/<name>/` directory sync, with the same end state as
   `npx skills add <repo> -y -g`.
@@ -184,7 +188,7 @@ template/
 - [ ] Single source of truth for version; CHANGELOG is the only change source, derived artifacts not committed
 - [ ] Source / tests / scripts separated, tests mirror source
 - [ ] Formatter config committed, enforced in CI
-- [ ] (npm wrapper) `package.json` + `scripts/{install,run}.js`, binary not committed
+- [ ] (npm wrapper) `package.json` + `scripts/run.js` + `scripts/prepare-npm-platform-packages.js`, binary not committed
 - [ ] (wrapping a third-party product) `NOTICE.md` + `docs/COMPATIBILITY.md` in place
 - [ ] (calling external APIs) `docs/E2E.md` + integration tests in place
 - [ ] `docs/OPEN_SOURCE_CHECKLIST.md` in place, run through before the first push

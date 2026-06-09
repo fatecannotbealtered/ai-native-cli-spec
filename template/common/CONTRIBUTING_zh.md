@@ -24,7 +24,7 @@
 语言工具链 —— 下面只保留一个块，删掉其余：
   - Go 1.25+        ：编译型二进制 + npm 壳
   - Python 3.10+    ：PyInstaller 二进制 + npm 壳
-  - Node 16+        ：所有变体的 npm 壳 / 安装脚本都需要
+  - Node 16+        ：所有变体的 npm 壳 / 平台包脚本都需要
 形态始终是：装依赖 -> 构建 -> 测试 -> 跑 `--help` 冒烟测试。
 -->
 
@@ -45,7 +45,7 @@ go test -race ./...
 # pytest tests/ -v
 # {{TOOL_NAME}} --help
 
-# 可选：如果改动 npm 安装脚本（scripts/install.js），需要 Node.js 16+
+# 可选：如果改动 npm wrapper 或平台包脚本，需要 Node.js 16+
 ```
 
 如果拉依赖慢，用区域代理（如 Go：`GOPROXY=https://goproxy.cn,direct`；pip 用镜像源）。

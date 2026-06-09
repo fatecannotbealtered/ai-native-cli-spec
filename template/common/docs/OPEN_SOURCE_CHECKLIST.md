@@ -39,8 +39,9 @@ Run through this gate **before the first public push** of `{{TOOL_NAME}}`. It is
 
 - [ ] `package.json` `version` matches the git tag being released (`vX.Y.Z` ↔ `X.Y.Z`); `release.yml` guards this and fails on mismatch.
 - [ ] The binary itself (`bin/`, `*.exe`, `dist/`) is **not committed** — it is produced by CI and gitignored.
-- [ ] Release artifacts ship a `checksums.txt`; the install script (`scripts/install.js`) verifies the checksum and **fails closed** on mismatch or missing entries.
-- [ ] Release pipeline signs `checksums.txt` with Sigstore/Cosign keyless signing, publishes the bundle, and install/update paths report signature verification status separately from checksum verification.
+- [ ] GitHub Release artifacts ship a `checksums.txt`; standalone binary install/update paths verify the checksum and **fail closed** on mismatch or missing entries.
+- [ ] Release pipeline signs `checksums.txt` with Sigstore/Cosign keyless signing, publishes the bundle, and standalone install/update paths report signature verification status separately from checksum verification.
+- [ ] npm distribution publishes the main wrapper package plus every supported OS/CPU platform package from CI-built artifacts, with `npm publish --provenance`.
 - [ ] The version number has a single source of truth; the runtime `changelog` command and the GitHub Release body are derived from `CHANGELOG.md`, not hand-copied.
 
 ## AI-native

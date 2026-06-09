@@ -59,10 +59,12 @@ Externally controlled text returned by the upstream service — titles, descript
 
 ## Supply Chain
 
-- **Checksum verification (hard-fail)**: the npm `postinstall` script downloads the matching GitHub Release archive and verifies it against `checksums.txt`. A checksum mismatch, a missing `checksums.txt`, or a missing entry for the archive **hard-fails** installation — no silent degradation, and the temp download directory is cleaned up.
-- **Signed release checksum**: releases sign `checksums.txt` with Sigstore/Cosign keyless signing from the tagged GitHub Actions release workflow. Install/update paths must report signature verification status separately from checksum verification; a checksum alone is not treated as publisher authenticity.
+- **npm platform packages**: npm installation uses the main wrapper package plus OS/CPU-specific optional platform packages. It does not download GitHub Release binaries at install time.
+- **npm provenance**: npm releases publish the main wrapper package and all platform packages with provenance from the tagged GitHub Actions workflow. npm registry tarball integrity and provenance cover the npm install path.
+- **Checksum verification (hard-fail)**: standalone GitHub binary install/update paths verify release archives against `checksums.txt`. A checksum mismatch, a missing `checksums.txt`, or a missing entry for the archive **hard-fails** installation/update — no silent degradation, and temp download directories are cleaned up.
+- **Signed release checksum**: releases sign `checksums.txt` with Sigstore/Cosign keyless signing from the tagged GitHub Actions release workflow. Standalone install/update paths must report signature verification status separately from checksum verification; a checksum alone is not treated as publisher authenticity.
 - **Self-update Skill sync**: successful `update --confirm` results sync the whole bundled `skills/{{TOOL_NAME}}/` directory or return a `skill_sync_command` equivalent to `npx skills add {{REPO_SLUG}} -y -g`.
-- **No remote code at install time**: the install script only downloads release artifacts; it does not execute network-fetched code.
+- **No runtime downloader in npm install**: the npm wrapper resolves the already-installed platform package and executes the bundled binary; it does not run an install-time downloader.
 - **Dependency locking + audit**: the lockfile is committed and CI runs `npm audit --audit-level=high` (and `pip-audit` for the Python variant), blocking high-severity dependencies.
 - **Traceable builds**: release artifacts are built by CI from tagged source — no hand-uploaded binaries.
 
