@@ -90,6 +90,14 @@ go test -race ./...
 
 `.github/workflows/ci.yml` 里的 CI 镜像本地校验：在支持的 OS / 运行时矩阵上跑 **lint + test**（外加 `--help` 冒烟测试和依赖审计）。PR 合并前 **lint 和 test 都必须通过** —— 先在本地跑，避免反复折返。
 
+## 功能契约覆盖率
+
+发布标准：**Functional Contract Coverage = 100%**。`README`、`SKILL`、reference 页面、`{{TOOL_NAME}} reference`、`--help`、`context`、`doctor`、`changelog` 或 `update` 中记录的每个公开行为，都必须有自动化命令级测试。
+
+每个新增或变更的命令，至少覆盖成功路径、非法参数、配置/认证/权限失败（适用时）、上游失败或超时（适用时）、JSON envelope 形状、输出 schema、exit code、stdout/stderr 边界，以及非交互行为。每个改变可观察行为的 bug fix 都要带回归测试。
+
+数字代码覆盖率单独跟踪，并可按仓库逐步抬升；但它不能替代缺失的契约测试。
+
 ## 新增命令 / 领域
 
 工具按领域切分（一个领域 ≈ 被封装产品的一个功能面）。新增领域时，每一层都要动：
@@ -114,6 +122,7 @@ go test -race ./...
 
 - [ ] 单一逻辑改动，diff 聚焦
 - [ ] 测试已加/更新且通过（`make test`）
+- [ ] 公开行为仍保持 100% 功能契约覆盖率
 - [ ] Lint 通过（`make lint`）
 - [ ] 文档与行为同步（`README` 及受影响的 `SKILL`/reference 页面）
 - [ ] `CHANGELOG.md` 已在 `## [Unreleased]` 下更新

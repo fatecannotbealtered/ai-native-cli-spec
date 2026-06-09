@@ -90,6 +90,14 @@ Examples: `feat: add export command`, `fix: handle nil pointer in status check`,
 
 CI in `.github/workflows/ci.yml` mirrors the local checks: it runs **lint + test** (plus a `--help` smoke test and dependency audit) across the supported OS / runtime matrix. **Both lint and test must pass** before a PR can merge — run them locally first to avoid round-trips.
 
+## Functional contract coverage
+
+Release standard: **Functional Contract Coverage = 100%**. Every public behavior documented in `README`, `SKILL`, reference pages, `{{TOOL_NAME}} reference`, `--help`, `context`, `doctor`, `changelog`, or `update` must have automated command-level tests.
+
+For each new or changed command, cover success, invalid arguments, config/auth/permission failure where applicable, upstream failure or timeout where applicable, JSON envelope shape, output schema, exit code, stdout/stderr boundary, and non-interactive behavior. Every bug fix that changes observable behavior needs a regression test.
+
+Numeric line coverage is tracked separately and may ratchet upward by repo, but it does not replace missing contract tests.
+
 ## Adding a new command / domain
 
 The tool is sliced by domain (one domain ≈ one area of the wrapped product). To add a new domain, touch each layer:
@@ -114,6 +122,7 @@ The tool is sliced by domain (one domain ≈ one area of the wrapped product). T
 
 - [ ] One logical change, focused diff
 - [ ] Tests added/updated and passing (`make test`)
+- [ ] Functional Contract Coverage remains 100% for public behavior
 - [ ] Lint passing (`make lint`)
 - [ ] Docs synced with behavior (`README` and any affected `SKILL`/reference pages)
 - [ ] `CHANGELOG.md` updated under `## [Unreleased]`

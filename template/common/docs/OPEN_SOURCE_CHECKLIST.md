@@ -32,6 +32,7 @@ Run through this gate **before the first public push** of `{{TOOL_NAME}}`. It is
 
 - [ ] CI (`.github/workflows/ci.yml`) is **green** on the commit being pushed.
 - [ ] CI **enforces** lint and tests — a red lint or failing test blocks merge (not advisory-only).
+- [ ] Functional Contract Coverage is 100%: every public behavior documented in README, Skill, `reference`, `--help`, `context`, `doctor`, `changelog`, or `update` has automated command-level tests.
 - [ ] The formatter config is committed (ruff / golangci-lint / prettier, by language) and CI runs the format check.
 - [ ] No build artifacts, caches, venvs, or IDE config are committed (covered by `.gitignore`).
 

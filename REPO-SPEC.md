@@ -184,6 +184,7 @@ template/
 ## 6. Quality gate convention
 
 - CI must run lint + tests; red means no merge.
+- AI-native CLI releases require **Functional Contract Coverage = 100%**: every public behavior documented in README, Skill, `reference`, `--help`, `context`, `doctor`, `changelog`, or `update` has command-level tests. Numeric line coverage can ratchet upward separately, but cannot replace missing contract tests.
 - A unified formatter (by language: Python ruff, JS prettier, etc.), config committed, no manual alignment.
 - The PR template has built-in self-check items: tests pass, docs synced, CHANGELOG updated, bilingual synced.
 
@@ -197,6 +198,7 @@ template/
 - [ ] `.github/workflows/ci.yml` (lint + test) in place
 - [ ] Single source of truth for version; CHANGELOG is the only change source, derived artifacts not committed
 - [ ] Source / tests / scripts separated, tests mirror source
+- [ ] (AI-native CLI) Functional Contract Coverage release gate documented and wired into contribution/checklist docs
 - [ ] Formatter config committed, enforced in CI
 - [ ] (npm wrapper) `package.json` + `scripts/run.js` + `scripts/prepare-npm-platform-packages.js`, binary not committed
 - [ ] (wrapping a third-party product) `NOTICE.md` + `docs/COMPATIBILITY.md` in place
