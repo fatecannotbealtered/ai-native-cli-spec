@@ -144,7 +144,7 @@ The agent cannot self-escalate beyond the configured credential, account, or env
 
 ## Self-Update
 
-Use the update loop only when the user asks to update or when `doctor` reports the binary is below this Skill's minimum version:
+Use the update loop when the user asks to update, when `doctor` reports the binary is below this Skill's minimum version, or when `context`, `doctor`, `help`, or `update --check` returns `notices[]` with `type: "update_available"`:
 
 ```bash
 {{TOOL_NAME}} update --check --compact

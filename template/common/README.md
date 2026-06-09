@@ -51,8 +51,9 @@ The README is intentionally a map, not the full manual. Agents should call `{{TO
 3. Run `{{TOOL_NAME}} context --compact` and `{{TOOL_NAME}} doctor --compact`.
 4. Run `{{TOOL_NAME}} reference --compact` and select commands from the live contract, not from `--help` scraping.
 5. Prefer `--compact` and `--fields` on JSON outputs to reduce token use.
-6. For write/update commands, run `--dry-run`, inspect the returned preview and `confirm_token`, then repeat the same operation with `--confirm <confirm_token>`.
-7. After a successful update, review `signature_status` and checksum verification, ensure `skill_sync_status` is successful, then run `{{TOOL_NAME}} changelog --since <previous-version> --compact` and `{{TOOL_NAME}} reference --compact` before continuing.
+6. If `context`, `doctor`, `help`, or `update --check` returns `notices[]` with `type: "update_available"`, follow its `recommended_command` / `next_steps`.
+7. For write/update commands, run `--dry-run`, inspect the returned preview and `confirm_token`, then repeat the same operation with `--confirm <confirm_token>`.
+8. After a successful update, review `signature_status` and checksum verification, ensure `skill_sync_status` is successful, then run `{{TOOL_NAME}} changelog --since <previous-version> --compact` and `{{TOOL_NAME}} reference --compact` before continuing.
 
 ## Machine Contract
 

@@ -117,6 +117,16 @@ Cross-language tools distribute via a uniform npm wrapper, so Go binaries and Py
   provenance. npm registry tarball integrity and provenance cover the npm
   install path; standalone GitHub binary update paths keep checksum/signature
   verification.
+- Version notifications are an Agent-facing structured contract, not an
+  ambient banner. `update --check` refreshes update state and may write a short
+  cache under the tool's user config directory. `doctor` may actively refresh
+  with a short timeout and degrade silently on network failure. `context` and
+  `--help` only read the cache. Business commands must not phone home just to
+  advertise updates.
+- When an update is available, maintenance command JSON adds
+  `data.notices[]` with `type: "update_available"`, current/latest versions,
+  install method, recommended command, release URL when known, checked-at
+  timestamp, and next steps. Text/help output may append one concise line.
 - `update --confirm` owns the full lifecycle: binary/package update plus whole
   `skills/<name>/` directory sync, with the same end state as
   `npx skills add <repo> -y -g`.
