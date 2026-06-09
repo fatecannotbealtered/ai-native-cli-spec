@@ -1,0 +1,124 @@
+# Release workflow for the Python flavour of {{TOOL_NAME}}.
+#
+# Triggered by a semver tag (v*.*.*). Builds a single-file PyInstaller binary on
+# each OS, packages it as a platform archive (.zip on Windows, .tar.gz elsewhere)
+# with a SHA256 checksum, and attaches everything to a GitHub Release. A separate
+# publish-npm job ships the thin npm wrapper after guarding tag == package.json.
+#
+# Placeholders (see SHARED PLACEHOLDER DICTIONARY):
+#   {{TOOL_NAME}} kebab-case CLI/binary/repo name, e.g. my-cli
+#   {{NPM_PKG}}   full npm package name incl. scope, e.g. @SCOPE/{{TOOL_NAME}}
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-13, windows-2022]
+        python-version: ["3.12"]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Test
+        run: pytest tests/ -q
+
+      - name: Build binary
+        run: python build.py
+
+      - name: Package release archive
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $platformMap = @{
+            "Linux" = "linux"
+            "macOS" = "darwin"
+            "Windows" = "windows"
+          }
+          $platform = $platformMap["${{ runner.os }}"]
+          $arch = "amd64"
+          $base = "{{TOOL_NAME}}-$version-$platform-$arch"
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          if ("${{ runner.os }}" -eq "Windows") {
+            Copy-Item dist/{{TOOL_NAME}}.exe release/{{TOOL_NAME}}.exe
+            Compress-Archive -Path release/{{TOOL_NAME}}.exe -DestinationPath "release/$base.zip" -Force
+            $hash = (Get-FileHash "release/$base.zip" -Algorithm SHA256).Hash.ToLower()
+            "$hash  $base.zip" | Out-File -Encoding utf8 "release/checksums-$platform-$arch.txt"
+          } else {
+            Copy-Item dist/{{TOOL_NAME}} release/{{TOOL_NAME}}
+            tar -C release -czf "release/$base.tar.gz" {{TOOL_NAME}}
+            $hash = (Get-FileHash "release/$base.tar.gz" -Algorithm SHA256).Hash.ToLower()
+            "$hash  $base.tar.gz" | Out-File -Encoding utf8 "release/checksums-$platform-$arch.txt"
+          }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: {{TOOL_NAME}}-${{ runner.os }}
+          path: release/*
+
+      - name: Upload GitHub Release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+
+  publish-npm:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+          always-auth: true
+
+      - name: Verify package contents
+        run: npm pack --dry-run
+
+      - name: Verify version consistency
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag version (${TAG_VERSION}) does not match package.json version (${PKG_VERSION})"
+            exit 1
+          fi
+
+      - name: Verify npm auth
+        continue-on-error: true
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "::warning::NODE_AUTH_TOKEN is empty"
+            exit 1
+          fi
+          echo "NPM_TOKEN length: ${#NODE_AUTH_TOKEN}"
+          npm whoami || echo "::warning::npm whoami failed; attempting publish anyway"
+
+      - name: Publish to npm
+        run: npm publish --access public

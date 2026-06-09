@@ -1,0 +1,55 @@
+# CI workflow for the Python flavour of {{TOOL_NAME}}.
+#
+# Placeholders (see SHARED PLACEHOLDER DICTIONARY):
+#   {{TOOL_NAME}} kebab-case CLI/binary/repo name, e.g. my-cli
+#   {{TOOL_PKG}}  Python import package (underscores), e.g. my_cli
+#                 The Python package directory uses underscores while the CLI
+#                 binary / npm package use kebab-case. {{TOOL_PKG}} is the module
+#                 path passed to `python -m` and the linted source directory.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint with ruff
+        run: ruff check {{TOOL_PKG}}/ tests/
+
+      - name: Check formatting with ruff
+        run: ruff format --check {{TOOL_PKG}}/ tests/
+
+      - name: Audit Python dependencies
+        run: pip-audit -r requirements.txt
+
+      - name: Audit npm wrapper
+        run: npm audit --omit=dev
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
+
+      - name: Smoke test (--help)
+        run: python -m {{TOOL_PKG}}.main --help

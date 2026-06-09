@@ -3,9 +3,11 @@
 
 本文定义个人所有开源项目的统一仓库标准：必备文档、模板文件、目录布局、发布约定。目标是让开十个项目长一个样，新人（含 AI Agent）进任何一个仓库都能在固定位置找到固定的东西。
 
-配套规范（均在 `.agent/` 下，入口是 `AGENT.md`）：
+消费工具仓库的配套规范放在 `.agent/` 下，入口是 `AGENT.md`。
+本文作为仓库骨架标准保留在 `ai-native-cli-spec` 根目录，消费仓库不复制、
+不分叉本文件。
 
-- `AGENT.md` —— 入口/总纲：怎么在这建&扩工具，导航到下面四份。
+- `AGENT.md` —— 入口/总纲：怎么在这建&扩工具，导航到本地规范与本文这份共享仓库标准。
 - `CLI-SPEC.md` —— CLI 的机器契约（工具怎么说话）。
 - `SKILL-SPEC.md` —— Skill 编写规范（Agent 怎么用）。
 - `SEC-SPEC.md` —— 安全基线（怎么不被坑、不坑人）。
@@ -35,31 +37,36 @@
 | `.github/PULL_REQUEST_TEMPLATE.md` | SHOULD | PR 自检清单 |
 | `.github/dependabot.yml` | 可选 | 依赖更新 |
 | `AGENTS.md` | MUST* | 跨工具入口钩子，指向 `.agent/AGENT.md` |
-| `.agent/AGENT.md` | MUST* | AI 原生工具入口/总纲，导航到下面四份规范 |
+| `.agent/AGENT.md` | MUST* | AI 原生工具入口/总纲，导航到本地规范与本文这份共享仓库标准 |
 | `.agent/CLI-SPEC.md` | MUST* | CLI 工具的机器契约（*仅 CLI 类项目） |
 | `.agent/SKILL-SPEC.md` | MUST* | Skill 编写规范（*带 Skill 的项目） |
 | `.agent/SEC-SPEC.md` | MUST* | 安全基线（风险分级 + 注入/权限/凭证/供应链） |
 | `skills/<name>/SKILL.md` | MUST* | Agent Skill（*AI 原生工具必备） |
+| `skills/<name>/test-prompts.json` | SHOULD* | Skill 审查 / 达尔文式验证用回归 prompt |
 
 带 `*` 的是「AI 原生工具」专属——普通库可不带，但凡是给 Agent 用的 CLI / 工具，这几件是硬指标。带 `†` 的按场景触发：包装第三方产品（Outlook/Exchange、GitLab、Jira、Kibana 等）就必须有商标声明与兼容矩阵。
 
 ## 2. README 必备骨架
 
-每个 README 按固定顺序，便于横向对比：
+每个 README 按固定顺序，便于横向对比，也便于 Agent 直接接入：
 
-1. **标题 + 一句话定位** + 徽章（版本 / CI / license / 语言切换链接）
-2. **What** —— 一段话讲清解决什么问题，给谁用（人 / Agent / 两者）
-3. **Install** —— 复制即用的安装块（CLI 装、Skill 装分开列）
-4. **Quick Start** —— 最小可用示例（配置 → 验证 → 第一条命令）
-5. **Usage / Commands** —— 核心能力，细节指向 `reference` 或独立文档
-6. **Configuration** —— 配置项、环境变量、凭证位置
-7. **For AI Agents** —— Agent 接入说明，指向 `SKILL.md` 与 `.agent/CLI-SPEC.md`
-8. **Development** —— 本地开发、构建、测试
-9. **License / Contributing / Security** —— 指向对应文件
+1. **标题 + 语言切换 + 徽章** —— 徽章顺序固定为 CI、语言质量徽章（适用时）、npm version、license。
+2. **一句话定位** —— Agent-native 工具描述。不要把这些工具定位成主要给交互式人工 CLI 使用。
+3. **Agent Install** —— Agent 可复制执行的一段安装块：npm 壳安装、Skill 安装、必要环境变量占位、`context`、`doctor`、`reference`。
+4. **What It Does** —— 一段话、风险等级，以及必要的第三方/免责声明。
+5. **Capabilities** —— 命令组概览表；README 是地图，不是完整手册。
+6. **Agent Workflow** —— 安装、配置、预检、通过 `reference` 发现能力、用 `--compact`/`--fields` 降 token、写操作用 `--dry-run` -> `--confirm`、更新后读 `changelog`。
+7. **Machine Contract** —— JSON 默认、envelope 形状、stdout/stderr 规则、错误码、`_untrusted`、`--json` 兼容说明。
+8. **Configuration** —— 配置路径、环境变量、凭据优先级与存储方式。
+9. **Project Structure** —— 顶层目录树，让每个仓库一眼可导航。
+10. **Development** —— 本地构建/测试/lint 命令。
+11. **Links** —— `AGENTS.md`、Skill、`.agent/CLI-SPEC.md`、安全、兼容性、E2E、变更记录、贡献、声明、许可证。
 
 约定：
 
-- 安装块必须可复制即跑，标注前置依赖。
+- 徽章数量保持克制。不要加入不会提升 Agent 信任或发布质量的装饰性徽章。
+- 安装块必须可被 Agent 复制执行，用密钥占位符，不放真实凭据。
+- 命令细节归实时 `reference` 输出维护。README 命令表保持高层，避免过期手册。
 - 示例命令用真实可执行的形式，时间用 ISO 8601，ID 用占位符 `<message-id>`。
 
 ## 3. 国际化（i18n）约定
@@ -90,11 +97,15 @@ CHANGELOG.md （人工维护，唯一真相源）
 - release-notes 由 `release.yml` 在发布时截取生成（`sed -n "/^## \[VERSION\]/,/^## \[/p"`），**不要在仓库里保留一份手维护的 `release-notes.md`**。
 - 运行时 `changelog` 命令复用同一份 CHANGELOG，构建时嵌入——零新真相源，只是多一个出口。
 
+**运行时 changelog 文件命名。** 为运行时 `changelog` 命令嵌入 `CHANGELOG.md` 的源文件命名为 `changelog.go`（Go）/ `changelog.py`（Python）——**单数，且不带 `_embed` 后缀**。Go 里它持有 `//go:embed` 指令，并把嵌入内容暴露为一个名为 `ChangelogMarkdown` 的包级变量。
+
+**Go 版本钉法。** Go 项目在 `go.mod` 里钉一个当前 Go 版本（`go 1.XX`），且**不**加 `toolchain` 行；CI 通过 `setup-go` 的 `go-version-file: go.mod` 读取这唯一来源，而不是在 workflow 里写死版本号。
+
 ## 4b. 分发约定（npm 壳）
 
 跨语言工具统一用 npm 壳分发，让 Go 二进制、Python 包都能 `npm install -g` 装、被 Agent 一致调用：
 
-- `package.json` 声明 scope 包名与 `bin` 入口。
+- `package.json` 声明 scope 包名与 `bin` 入口。它是 **npm 壳的 scope/包名与版本号的单一真相源**——`scripts/{install,run}.js` 与 CI 都从 `package.json` 读取，绝不把 scope 或版本号手抄到别处。
 - `scripts/install.js`：安装时拉取 / 链接对应平台二进制到 `bin/`。
 - `scripts/run.js`：薄转发层，`execFileSync` 调真正的二进制，透传 `argv` 与 stdio，二进制缺失时给出可执行的重装提示。
 - 二进制本身（`bin/`、`*.exe`、`dist/`）进 `.gitignore`，由 CI 构建产出，不入库。
@@ -115,9 +126,10 @@ project/
 │   ├── AGENT.md                # 入口/总纲
 │   ├── CLI-SPEC.md             # CLI 机器契约
 │   ├── SKILL-SPEC.md           # Skill 编写规范
-│   ├── SEC-SPEC.md             # 安全基线
-│   └── REPO-SPEC.md            # 仓库骨架规范
-├── skills/<name>/SKILL.md      # Agent Skill
+│   └── SEC-SPEC.md             # 安全基线
+├── skills/<name>/              # 内置 Agent Skill
+│   ├── SKILL.md                # 可执行 Skill 契约
+│   └── test-prompts.json       # Skill 审查回归 prompt
 ├── <package>/                  # 源码（包名）
 ├── tests/                      # 测试，目录结构镜像源码
 ├── scripts/                    # 开发 / 构建辅助脚本
@@ -129,6 +141,24 @@ project/
 - 源码、测试、脚本、文档各归其位，不混放根目录。
 - 测试目录结构镜像源码结构，便于定位。
 - 构建产物、缓存、虚拟环境、IDE 配置一律进 `.gitignore`，不入库。
+
+### 5b. 模板模型：`common/` + `<lang>/`
+
+本仓库 `template/` 里的种子做了拆分：上面的骨架由两层拼装而成，加一门语言的成本也因此很低：
+
+```text
+template/
+├── common/        # 语言无关，拷进每一个仓库：AGENTS.md、本地 .agent/ 规范、
+│                  #   全部治理文档、.github/、package.json、
+│                  #   scripts/{install,run}.js、docs/、skills/SKILL.md.tmpl、.gitignore
+├── go/            # 叠加层：ci.yml、release.yml、.goreleaser.yml、Makefile、
+│                  #   .golangci.yml、.gitignore
+└── python/        # 叠加层：ci.yml、release.yml、ruff.toml、.gitignore
+```
+
+- 实例化方式：拷 `common/.`，再叠加**恰好一种** `<lang>/.`；把 `<lang>` 的 `.gitignore` 追加到通用那份后面。详见 `template/INSTANTIATE.md`。
+- **加一门语言 = 加一个 `template/<lang>/`**（约 6 个文件：CI / release / 格式化 / 构建管线），100% 复用 `common/`。
+- `.agent/` 的行为规范（`AGENT`、`CLI-SPEC`、`SKILL-SPEC`、`SEC-SPEC`）放在 `common/`，**绝不按语言分叉**——机器契约跨语言完全一致，不同的只有构建/CI 管线。
 
 ## 6. 质量门禁约定
 
@@ -151,5 +181,5 @@ project/
 - [ ] （包装第三方产品）`NOTICE.md` + `docs/COMPATIBILITY.md` 就位
 - [ ] （对接外部 API）`docs/E2E.md` + 集成测试就位
 - [ ] `docs/OPEN_SOURCE_CHECKLIST.md` 就位，首次 push 前过一遍
-- [ ] （AI 原生工具）根 `AGENTS.md` + `.agent/{AGENT,CLI-SPEC,SKILL-SPEC,SEC-SPEC,REPO-SPEC}.md` + `skills/<name>/SKILL.md` 齐
+- [ ] （AI 原生工具）根 `AGENTS.md` + `.agent/{AGENT,CLI-SPEC,SKILL-SPEC,SEC-SPEC}.md` + `skills/<name>/{SKILL.md,test-prompts.json}` 齐
 - [ ] PR / Issue 模板就位

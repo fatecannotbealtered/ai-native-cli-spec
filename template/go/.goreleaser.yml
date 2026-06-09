@@ -1,0 +1,47 @@
+version: 2
+
+project_name: {{TOOL_NAME}}
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: {{CMD_PATH}}
+    binary: {{TOOL_NAME}}
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X {{MODULE}}/cmd.version={{ .Version }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # Windows ARM64 is not built natively; the install script falls back to
+    # the amd64 binary which runs via Windows x64 emulation on ARM devices.
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    wrap_in_directory: false
+    # Ship CLI binary only — skills install via npx.
+    files:
+      - none*
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  # Idempotent re-tagging: overwrite artifacts if the release already exists.
+  replace_existing_artifacts: true
