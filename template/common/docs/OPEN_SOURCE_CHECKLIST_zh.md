@@ -32,6 +32,7 @@
 
 - [ ] 待推送的提交上 CI（`.github/workflows/ci.yml`）为**绿色**。
 - [ ] CI **强制**执行 lint 和测试 —— lint 失败或测试失败会阻断合并（不仅仅是提示性的）。
+- [ ] 功能契约覆盖率为 100%：README、Skill、`reference`、`--help`、`context`、`doctor`、`changelog` 或 `update` 中记录的每个公开行为，都有自动化命令级测试。
 - [ ] 格式化工具配置已提交（按语言：ruff / golangci-lint / prettier），且 CI 运行格式校验。
 - [ ] 没有提交构建产物、缓存、虚拟环境或 IDE 配置（已由 `.gitignore` 覆盖）。
 

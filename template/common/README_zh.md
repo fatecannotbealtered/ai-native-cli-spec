@@ -101,6 +101,8 @@ make fmt
 npm ci --ignore-scripts
 ```
 
+发布门禁：README、Skill、`reference`、`--help`、`context`、`doctor`、`changelog` 或 `update` 中声明的每个公开行为，都必须有命令级测试。目标是 **Functional Contract Coverage = 100%**；数字代码覆盖率是辅助指标。
+
 ## 链接
 
 - Agent 入口：[AGENTS.md](AGENTS.md)

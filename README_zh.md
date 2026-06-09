@@ -54,6 +54,7 @@ LLM Agent 时刻在调 CLI，但绝大多数 CLI 是给人用的：散文式输�
 - **自描述**——`reference` / `context` / `doctor` / `changelog`，让 agent 发现能力、并在自更新后知道"变了什么"。
 - **Skill**——对齐 Anthropic 的 `SKILL.md` 编写规范、渐进式披露、版本协商。
 - **安全**——不可信内容/注入防护、最小权限、凭证落盘、供应链。
+- **发布质量门禁**——README / Skill / reference / help / context / doctor / changelog / update 中声明的公开行为必须达到 Functional Contract Coverage = 100%；数字代码覆盖率是辅助指标。
 - **仓库与分发**——必备文档、双语 README 约定、CHANGELOG 单一真相源、npm 壳分发。
 
 ## 怎么用

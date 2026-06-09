@@ -34,7 +34,7 @@
 2. **定契约**（→ CLI-SPEC）：先实现 envelope、exit code 映射、错误分类，再写第一个命令。这是地基，不要后补。
 3. **建自描述四件套**（→ CLI-SPEC §11）：`reference` / `context` / `doctor` / `changelog`。`changelog` 从 CHANGELOG.md 派生、构建时嵌入。
 4. **实现命令**：查询命令支持 `--fields` / `--compact` / 分页；写命令走 dry-run/confirm。
-5. **评估可选模式**（→ CLI-SPEC §14，按需）：令牌会过期？→ 凭证生命周期；有长任务？→ 异步 job；要扫码/验证码/审批？→ 人工介入。用得上才做，用不上跳过。
+5. **评估可选模式**（→ CLI-SPEC §15，按需）：令牌会过期？→ 凭证生命周期；有长任务？→ 异步 job；要扫码/验证码/审批？→ 人工介入。用得上才做，用不上跳过。
 6. **定安全档**（→ SEC-SPEC）：先判 T0/T1/T2 风险档，按档套用注入防护、最小权限、凭证落盘、供应链。
 7. **写 Skill**（→ SKILL-SPEC）：frontmatter（含 `requires.bins` + `min_version`）、触发清单、错误决策树、用法剧本。
 8. **配分发**（→ 共享 REPO-SPEC §4b）：npm 壳（`scripts/{install,run}.js`），二进制不入库。
@@ -46,11 +46,13 @@
 2. 改 Skill 前先读 `SKILL-SPEC`；**不要在 Skill 里硬编码会漂移的参数/schema**，指向 `reference`。
 3. 改了行为：同步 `CHANGELOG.md`（唯一变更源）与对应 `SKILL.md`；用到新命令就抬高 Skill 的 `min_version`。
 4. 提交前：单测 + CI 范围内 lint/format 全绿。
+5. 发布前：README / Skill / reference / help / context / doctor / changelog / update 中声明的公开行为达到 100% 功能契约覆盖率。
 
 ## 自检（收尾必过）
 
 - [ ] 本地规范与共享仓库规范各自的检查清单都过（CLI / SKILL / REPO / SEC）
 - [ ] stdout 干净、envelope 合规、exit code 与 retryable 一致
 - [ ] 外部内容已 `_untrusted` 标注（见 SEC-SPEC §2）
+- [ ] 公开行为达到 100% 功能契约覆盖率
 - [ ] `CHANGELOG.md` 已更，派生物（release-notes/runtime changelog）同源
 - [ ] 对应 `SKILL.md` 已同步

@@ -54,6 +54,7 @@ It is intentionally **layered, not heavy**:
 - **Self-description** — `reference` / `context` / `doctor` / `changelog` so agents discover capabilities and learn what changed after a self-update.
 - **Skills** — Anthropic-aligned `SKILL.md` authoring, progressive disclosure, version negotiation.
 - **Security** — untrusted-content/injection handling, least privilege, credential-at-rest, supply chain.
+- **Release quality gate** — Functional Contract Coverage = 100% for public README / Skill / reference / help / context / doctor / changelog / update behavior; numeric line coverage is secondary.
 - **Repo & distribution** — required docs, bilingual README convention, single-source CHANGELOG, npm-wrapper distribution.
 
 ## How to use it

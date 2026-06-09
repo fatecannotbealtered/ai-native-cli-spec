@@ -171,6 +171,7 @@ template/
 ## 6. 质量门禁约定
 
 - CI 必须跑 lint + 测试，红了不许合并。
+- AI 原生 CLI 发布要求 **Functional Contract Coverage = 100%**：README、Skill、`reference`、`--help`、`context`、`doctor`、`changelog` 或 `update` 中记录的每个公开行为，都有命令级测试。数字代码覆盖率可以单独逐步抬升，但不能替代缺失的契约测试。
 - 统一格式化工具（按语言：Python 用 ruff，JS 用 prettier 等），配置入库，不靠人肉对齐。
 - PR 模板内置自检项：测试通过、文档同步、CHANGELOG 已更、双语已同步。
 
@@ -184,6 +185,7 @@ template/
 - [ ] `.github/workflows/ci.yml`（lint + test）就位
 - [ ] 版本号单一真相源；CHANGELOG 为唯一变更源，派生物不入库
 - [ ] 源码 / 测试 / 脚本目录分置，测试镜像源码
+- [ ] （AI 原生 CLI）功能契约覆盖率发布门禁已写入贡献说明和检查清单
 - [ ] 格式化工具配置入库，CI 强制
 - [ ] （npm 壳分发）`package.json` + `scripts/run.js` + `scripts/prepare-npm-platform-packages.js`，二进制不入库
 - [ ] （包装第三方产品）`NOTICE.md` + `docs/COMPATIBILITY.md` 就位
