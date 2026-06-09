@@ -25,6 +25,8 @@
 | `--confirm <token>`      | 携带 dry-run 返回的 token 真正执行写操作   |
 | `--quiet`                | 抑制 stderr 上的进度/提示，不抑制错误        |
 
+`update` 命令可以按工具增加 `--target-version` 或 `--channel` 等参数，但必须保留统一生命周期参数：`--check`、`--dry-run`、`--confirm <token>`。
+
 格式职责：
 
 - `json`：结构化机器输出，默认格式，也是唯一推荐给 Agent 的格式。
@@ -405,9 +407,28 @@ Skill 是写它那天的能力快照，二进制版本一漂就可能错位：�
 - Skill 在 frontmatter 声明最低兼容版本（见 SKILL-SPEC `requires.min_version`）。
 - `doctor` 应有一项检查「当前版本是否满足声明的最低版本」，不满足时给出 `fix`（升级命令），状态 `fail`。
 
-### 自更新闭环
+### 自更新与 Skill 同步闭环
 
-带 `self-update` 的工具，更新成功后**必须打通认知更新链**，否则 Agent 不知道自己刚获得了什么新能力：
+带 `self-update` 的工具，更新成功后**必须打通两条更新链**：
+
+1. 二进制或包本身是最新；
+2. 内置 Agent Skill 目录也是最新，最终状态等同于运行 `npx skills add <repo> -y -g`。
+
+用户首次安装 Skill 仍使用 `npx skills add ...`；CLI 二进制不能暴露单独的 `install-skill` 命令。但在 update 生命周期中，工具需要负责完整更新：要么同步整个 `skills/<tool>/` 目录，要么在结果中显式返回 `skill_sync_status` 与 `skill_sync_command`，让 Agent 在使用新能力前完成同步。
+
+update 必须遵守的契约：
+
+- `update --check` 只读。返回当前/目标版本、安装方式、是否有二进制/包更新、Skill 同步是否需要或可用、checksum/签名材料是否可用。
+- `update --dry-run` 返回完整变更预览：二进制/包更新、Skill 目录同步、checksum/签名校验，以及 `confirm_token`。
+- `update --confirm <token>` 执行更新。替换本地文件或运行包管理器前，必须先完成 release 完整性校验。
+- 更新成功后，返回 `previous_version`、`current_version`、`skill_sync_status`，以及足够审计的校验元数据。
+- 如果二进制/包更新成功但 Skill 同步失败，必须返回非成功或部分成功状态，并给出 `skill_sync_command`；Agent 在 Skill 同步完成前不得使用新文档能力。
+
+release 校验基线：
+
+- 按 `checksums.txt` 校验归档/包；checksum 不匹配、缺失 checksum 文件、或缺少当前归档条目，都必须失败关闭。
+- 已签名 release 应由 tagged GitHub Actions release workflow 使用 Sigstore/Cosign keyless 模式签署 `checksums.txt`。验证端应绑定到预期仓库 workflow 身份和 GitHub OIDC issuer。
+- 当本地签名验证无法执行，结果必须用结构化字段说明（`signature_verified: false`、`signature_policy`、`signature_reason`），不能把 checksum 校验伪装成签名校验。
 
 - `update --confirm <token>` 成功后，结果 `data` 中返回 `previous_version` 与 `current_version`。
 - 同时在结果中提示：`run "changelog --since <previous_version>" to see what changed`。
@@ -503,6 +524,9 @@ Skill 是写它那天的能力快照，二进制版本一漂就可能错位：�
 - [ ] 提供 `reference` / `context` / `doctor`
 - [ ] 提供 `changelog [--since]`，与 CHANGELOG/release-notes 同源
 - [ ] 工具可报告自身版本（`--version` 与 `context.version`）
+- [ ] （含 self-update 时）实现 `update --check` / `--dry-run` / `--confirm`
+- [ ] （含 self-update 时）release 完整性被校验，签名状态显式返回
+- [ ] （含 self-update 时）整个 Skill 目录同步纳入 update 结果
 - [ ] （含 self-update 时）更新后回传 previous/current 版本并提示读 changelog
 - [ ] 查询命令支持 `fields` / `compact`
 - [ ] 列表命令支持分页或明确说明无需分页

@@ -69,7 +69,8 @@ Agent 侧约定（同时写进 SKILL-SPEC 的用法）：
 
 ## 5. 供应链（凡分发即适用）
 
-- **完整性校验**：安装脚本拉取二进制必须校验 checksum / 签名，**不匹配硬失败**，不静默降级。
+- **完整性校验**：安装脚本和自更新命令拉取二进制时必须校验 checksum，**不匹配硬失败**，并显式返回签名校验状态。checksum 只能证明字节与 checksum 文件一致，不能证明 checksum 文件来自发布者。
+- **签名发布材料**：release pipeline 应由 tagged GitHub Actions release workflow 使用 Sigstore/Cosign keyless 模式签署 `checksums.txt`，并把 bundle 与 checksum 一起发布。验证时必须绑定到预期仓库 workflow 身份和 GitHub OIDC issuer。
 - **依赖锁定 + 审计**：提交 lockfile；CI 跑 `npm audit` / `pip-audit` 一类，高危依赖阻断。
 - **构建可追溯**：发布产物由 CI 从打了 tag 的源码构建，不手工上传不明二进制。
 - **不在 postinstall 跑远程脚本**：安装期不执行从网络现拉的代码。
@@ -97,7 +98,7 @@ Agent 侧约定（同时写进 SKILL-SPEC 的用法）：
 
 - [ ] 默认 `read-only`，Agent 不能自我提权
 - [ ] 凭证落盘加密 + 文件权限 `0600`
-- [ ] 分发完整性校验，不匹配硬失败；依赖锁定 + 审计
+- [ ] 分发 checksum 校验，不匹配硬失败；release checksum 已签名或签名状态被显式报告；依赖锁定 + 审计
 
 **T2（高危 / 不可逆）**
 

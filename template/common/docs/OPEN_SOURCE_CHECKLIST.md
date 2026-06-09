@@ -39,7 +39,8 @@ Run through this gate **before the first public push** of `{{TOOL_NAME}}`. It is
 
 - [ ] `package.json` `version` matches the git tag being released (`vX.Y.Z` ↔ `X.Y.Z`); `release.yml` guards this and fails on mismatch.
 - [ ] The binary itself (`bin/`, `*.exe`, `dist/`) is **not committed** — it is produced by CI and gitignored.
-- [ ] Release artifacts ship a `checksums.txt`; the install script (`scripts/install.js`) verifies the checksum and **fails closed** when verification is unavailable.
+- [ ] Release artifacts ship a `checksums.txt`; the install script (`scripts/install.js`) verifies the checksum and **fails closed** on mismatch or missing entries.
+- [ ] Release pipeline signs `checksums.txt` with Sigstore/Cosign keyless signing, publishes the bundle, and install/update paths report signature verification status separately from checksum verification.
 - [ ] The version number has a single source of truth; the runtime `changelog` command and the GitHub Release body are derived from `CHANGELOG.md`, not hand-copied.
 
 ## AI-native
@@ -49,5 +50,6 @@ Run through this gate **before the first public push** of `{{TOOL_NAME}}`. It is
 - [ ] `skills/{{TOOL_NAME}}/SKILL.md` is present; frontmatter includes `version`, `license: MIT`, `user-invocable: true`, and `metadata.requires.min_version` matching the CLI version.
 - [ ] `SKILL.md` includes `When to use`, `Do not use`, `First Step`, agent defaults, JSON contract, write recipe or explicit read-only boundary, `STOP CHECKPOINT`, error decision tree, security boundary, self-update, and eval scenarios.
 - [ ] `skills/{{TOOL_NAME}}/test-prompts.json` is present, valid JSON, and covers fresh-agent read, write safety or read-only boundary, permission boundary, `_untrusted` handling, and self-update.
+- [ ] `update --confirm` syncs the whole `skills/{{TOOL_NAME}}/` directory or returns a `skill_sync_command` equivalent to `npx skills add {{REPO_SLUG}} -y -g`.
 - [ ] `{{TOOL_NAME}} reference`, `{{TOOL_NAME}} context`, and `{{TOOL_NAME}} doctor` run and emit valid JSON envelopes — an agent can self-onboard from a clean checkout.
 - [ ] The risk tier in `SECURITY.md` matches the tier declared in `.agent/SEC-SPEC.md` (`{{RISK_TIER}}`).

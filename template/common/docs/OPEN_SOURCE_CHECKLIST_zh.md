@@ -39,7 +39,8 @@
 
 - [ ] `package.json` 的 `version` 与待发布的 git tag 一致（`vX.Y.Z` ↔ `X.Y.Z`）；`release.yml` 对此做守卫，不一致即失败。
 - [ ] 二进制本身（`bin/`、`*.exe`、`dist/`）**不提交** —— 由 CI 产出并被 gitignore。
-- [ ] 发布产物附带 `checksums.txt`；安装脚本（`scripts/install.js`）校验 checksum，且在无法校验时**失败关闭**。
+- [ ] 发布产物附带 `checksums.txt`；安装脚本（`scripts/install.js`）校验 checksum，且在不匹配或缺少条目时**失败关闭**。
+- [ ] release pipeline 使用 Sigstore/Cosign keyless 签署 `checksums.txt`，发布 bundle，安装/更新路径把签名验证状态与 checksum 校验分开报告。
 - [ ] 版本号有唯一真相来源；运行时 `changelog` 命令和 GitHub Release 正文均派生自 `CHANGELOG.md`，而非手工复制。
 
 ## AI 原生
@@ -49,5 +50,6 @@
 - [ ] `skills/{{TOOL_NAME}}/SKILL.md` 存在；frontmatter 包含 `version`、`license: MIT`、`user-invocable: true`，且 `metadata.requires.min_version` 匹配 CLI 版本。
 - [ ] `SKILL.md` 包含 `When to use`、`Do not use`、`First Step`、Agent 默认规则、JSON contract、写操作配方或明确只读边界、`STOP CHECKPOINT`、错误决策树、安全边界、自更新和评估场景。
 - [ ] `skills/{{TOOL_NAME}}/test-prompts.json` 存在、JSON 合法，并覆盖 fresh-agent read、写操作安全或只读边界、权限边界、`_untrusted` 处理和自更新。
+- [ ] `update --confirm` 同步整个 `skills/{{TOOL_NAME}}/` 目录，或返回等价于 `npx skills add {{REPO_SLUG}} -y -g` 的 `skill_sync_command`。
 - [ ] `{{TOOL_NAME}} reference`、`{{TOOL_NAME}} context`、`{{TOOL_NAME}} doctor` 可运行并输出合法的 JSON 信封 —— 代理能从干净的检出自助上手。
 - [ ] `SECURITY.md` 中的风险等级与 `.agent/SEC-SPEC.md` 声明的等级一致（`{{RISK_TIER}}`）。
