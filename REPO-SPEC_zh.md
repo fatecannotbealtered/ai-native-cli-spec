@@ -109,6 +109,8 @@ CHANGELOG.md （人工维护，唯一真相源）
 - `scripts/install.js`：安装时拉取 / 链接对应平台二进制到 `bin/`。
 - `scripts/run.js`：薄转发层，`execFileSync` 调真正的二进制，透传 `argv` 与 stdio，二进制缺失时给出可执行的重装提示。
 - 二进制本身（`bin/`、`*.exe`、`dist/`）进 `.gitignore`，由 CI 构建产出，不入库。
+- 发布产物附带 `checksums.txt`；release pipeline 通过 tagged GitHub Actions release workflow 使用 Sigstore/Cosign keyless 签署该文件，并把 bundle 与 checksum 一起发布。
+- `update --confirm` 负责完整生命周期：二进制/包更新加整个 `skills/<name>/` 目录同步，最终状态等同于 `npx skills add <repo> -y -g`。
 
 ## 5. 目录布局约定
 

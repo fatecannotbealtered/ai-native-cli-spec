@@ -60,6 +60,8 @@ Externally controlled text returned by the upstream service — titles, descript
 ## Supply Chain
 
 - **Checksum verification (hard-fail)**: the npm `postinstall` script downloads the matching GitHub Release archive and verifies it against `checksums.txt`. A checksum mismatch, a missing `checksums.txt`, or a missing entry for the archive **hard-fails** installation — no silent degradation, and the temp download directory is cleaned up.
+- **Signed release checksum**: releases sign `checksums.txt` with Sigstore/Cosign keyless signing from the tagged GitHub Actions release workflow. Install/update paths must report signature verification status separately from checksum verification; a checksum alone is not treated as publisher authenticity.
+- **Self-update Skill sync**: successful `update --confirm` results sync the whole bundled `skills/{{TOOL_NAME}}/` directory or return a `skill_sync_command` equivalent to `npx skills add {{REPO_SLUG}} -y -g`.
 - **No remote code at install time**: the install script only downloads release artifacts; it does not execute network-fetched code.
 - **Dependency locking + audit**: the lockfile is committed and CI runs `npm audit --audit-level=high` (and `pip-audit` for the Python variant), blocking high-severity dependencies.
 - **Traceable builds**: release artifacts are built by CI from tagged source — no hand-uploaded binaries.

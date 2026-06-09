@@ -110,6 +110,12 @@ Cross-language tools distribute via a uniform npm wrapper, so Go binaries and Py
 - `scripts/install.js`: at install, fetch / link the platform binary into `bin/`.
 - `scripts/run.js`: a thin forwarding layer, `execFileSync` invoking the real binary, passing through `argv` and stdio, with an actionable reinstall hint if the binary is missing.
 - The binary itself (`bin/`, `*.exe`, `dist/`) goes into `.gitignore`, produced by CI, not committed.
+- Release artifacts ship `checksums.txt`; the release pipeline signs that file with
+  Sigstore/Cosign keyless signing from the tagged GitHub Actions release
+  workflow and publishes the bundle alongside the checksum file.
+- `update --confirm` owns the full lifecycle: binary/package update plus whole
+  `skills/<name>/` directory sync, with the same end state as
+  `npx skills add <repo> -y -g`.
 
 ## 5. Directory layout convention
 
