@@ -101,7 +101,7 @@ make fmt
 npm ci --ignore-scripts
 ```
 
-发布门禁：README、Skill、`reference`、`--help`、`context`、`doctor`、`changelog` 或 `update` 中声明的每个公开行为，都必须有命令级测试。目标是 **Functional Contract Coverage = 100%**；数字代码覆盖率是辅助指标。
+发布门禁：README、Skill、`reference`、`--help`、`context`、`doctor`、`changelog` 或 `update` 中声明的每个公开行为，都必须有命令级测试。目标是 **Functional Contract Coverage = 100%**；数字代码覆盖率是辅助指标。`{{TOOL_NAME}} reference` 会报告 `release_readiness.level`；没有真实环境 smoke/E2E 记录时，工具必须声明为 `beta`，不能声明为 `stable`。
 
 ## 链接
 

@@ -33,6 +33,8 @@
 - [ ] 待推送的提交上 CI（`.github/workflows/ci.yml`）为**绿色**。
 - [ ] CI **强制**执行 lint 和测试 —— lint 失败或测试失败会阻断合并（不仅仅是提示性的）。
 - [ ] 功能契约覆盖率为 100%：README、Skill、`reference`、`--help`、`context`、`doctor`、`changelog` 或 `update` 中记录的每个公开行为，都有自动化命令级测试。
+- [ ] `reference.release_readiness.level` 准确：`stable` 具备 FCC 100%、mock upstream / contract tests 和真实环境 smoke/E2E 记录；缺真实证据为 `beta`；缺命令级覆盖为 `unpublishable`。
+- [ ] `doctor` 包含 `release_readiness` 检查，且状态与声明的发布等级一致。
 - [ ] 格式化工具配置已提交（按语言：ruff / golangci-lint / prettier），且 CI 运行格式校验。
 - [ ] 没有提交构建产物、缓存、虚拟环境或 IDE 配置（已由 `.gitignore` 覆盖）。
 
@@ -54,4 +56,5 @@
 - [ ] `skills/{{TOOL_NAME}}/test-prompts.json` 存在、JSON 合法，并覆盖 fresh-agent read、写操作安全或只读边界、权限边界、`_untrusted` 处理和自更新。
 - [ ] `update --confirm` 同步整个 `skills/{{TOOL_NAME}}/` 目录，或返回等价于 `npx skills add {{REPO_SLUG}} -y -g` 的 `skill_sync_command`。
 - [ ] `{{TOOL_NAME}} reference`、`{{TOOL_NAME}} context`、`{{TOOL_NAME}} doctor` 可运行并输出合法的 JSON 信封 —— 代理能从干净的检出自助上手。
+- [ ] `{{TOOL_NAME}} reference` 暴露 `release_readiness`，`{{TOOL_NAME}} doctor` 报告匹配的检查项。
 - [ ] `SECURITY.md` 中的风险等级与 `.agent/SEC-SPEC.md` 声明的等级一致（`{{RISK_TIER}}`）。

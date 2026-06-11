@@ -185,6 +185,7 @@ template/
 
 - CI must run lint + tests; red means no merge.
 - AI-native CLI releases require **Functional Contract Coverage = 100%**: every public behavior documented in README, Skill, `reference`, `--help`, `context`, `doctor`, `changelog`, or `update` has command-level tests. Numeric line coverage can ratchet upward separately, but cannot replace missing contract tests.
+- Release readiness is part of the machine contract: `reference` reports `release_readiness.level` as `stable`, `beta`, or `unpublishable`, and `doctor` includes a `release_readiness` check. `Stable` requires FCC 100%, mock upstream/contract tests with failure-path coverage, and recorded live smoke/E2E evidence. `Beta` is allowed only when FCC and mock contracts are in place but live smoke evidence is missing or declared unavailable. Missing command-level coverage is `unpublishable`.
 - A unified formatter (by language: Python ruff, JS prettier, etc.), config committed, no manual alignment.
 - The PR template has built-in self-check items: tests pass, docs synced, CHANGELOG updated, bilingual synced.
 
@@ -199,6 +200,7 @@ template/
 - [ ] Single source of truth for version; CHANGELOG is the only change source, derived artifacts not committed
 - [ ] Source / tests / scripts separated, tests mirror source
 - [ ] (AI-native CLI) Functional Contract Coverage release gate documented and wired into contribution/checklist docs
+- [ ] (AI-native CLI) `reference.release_readiness` and `doctor.checks[].check == "release_readiness"` implemented
 - [ ] Formatter config committed, enforced in CI
 - [ ] (npm wrapper) `package.json` + `scripts/run.js` + `scripts/prepare-npm-platform-packages.js`, binary not committed
 - [ ] (wrapping a third-party product) `NOTICE.md` + `docs/COMPATIBILITY.md` in place

@@ -98,6 +98,14 @@ go test -race ./...
 
 数字代码覆盖率单独跟踪，并可按仓库逐步抬升；但它不能替代缺失的契约测试。
 
+发布就绪等级是机器可读契约：
+
+- `stable`：FCC 达到 100%，mock upstream / contract tests 覆盖成功与失败路径，并且该 release candidate 有真实环境 smoke/E2E 记录。
+- `beta`：FCC 达到 100%，mock upstream / contract tests 完整，但缺少真实环境 smoke/E2E 记录，或明确不具备真实 E2E 条件。
+- `unpublishable`：任一公开行为缺少命令级测试，或 mock upstream / contract tests 只覆盖 happy path。
+
+当测试证据变化时，同步保持 `{{TOOL_NAME}} reference` 的 `release_readiness` 和 `{{TOOL_NAME}} doctor` 的 `release_readiness` 检查真实可信。
+
 ## 新增命令 / 领域
 
 工具按领域切分（一个领域 ≈ 被封装产品的一个功能面）。新增领域时，每一层都要动：
@@ -123,6 +131,7 @@ go test -race ./...
 - [ ] 单一逻辑改动，diff 聚焦
 - [ ] 测试已加/更新且通过（`make test`）
 - [ ] 公开行为仍保持 100% 功能契约覆盖率
+- [ ] `release_readiness` 仍准确（`stable` 必须有真实环境 smoke/E2E 记录）
 - [ ] Lint 通过（`make lint`）
 - [ ] 文档与行为同步（`README` 及受影响的 `SKILL`/reference 页面）
 - [ ] `CHANGELOG.md` 已在 `## [Unreleased]` 下更新
