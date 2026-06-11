@@ -1,13 +1,13 @@
 # Release workflow for the Python flavour of {{TOOL_NAME}}.
 #
-# Triggered by a semver tag (v*.*.*). Builds a single-file PyInstaller binary on
-# each OS, packages it as a platform archive (.zip on Windows, .tar.gz elsewhere)
-# with a SHA256 checksum, and attaches everything to a GitHub Release. A separate
-# publish-npm job ships the thin npm wrapper after guarding tag == package.json.
+# Triggered by a semver tag (v*.*.*). Builds a single-file PyInstaller binary
+# per OS/arch, merges per-platform checksums into one checksums.txt, signs it
+# with Sigstore/Cosign keyless signing, attaches everything to a GitHub
+# Release, then publishes the npm wrapper plus every platform package with
+# npm provenance.
 #
-# Placeholders (see SHARED PLACEHOLDER DICTIONARY):
+# Placeholders (see SHARED PLACEHOLDER DICTIONARY in template/INSTANTIATE.md):
 #   {{TOOL_NAME}} kebab-case CLI/binary/repo name, e.g. my-cli
-#   {{NPM_PKG}}   full npm package name incl. scope, e.g. @SCOPE/{{TOOL_NAME}}
 name: Release
 
 on:
@@ -15,16 +15,22 @@ on:
     tags:
       - "v*.*.*"
 
+permissions:
+  contents: write
+  id-token: write
+
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-13, windows-2022]
+        # PyInstaller binaries are not cross-compiled: one runner per OS/arch.
+        # macos-13 = darwin-amd64, macos-14 = darwin-arm64 (Apple Silicon),
+        # ubuntu-24.04-arm = linux-arm64. win32-arm64 reuses the amd64 binary
+        # via Windows x64 emulation (see prepare-npm-platform-packages.js).
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-13, macos-14, windows-2022]
         python-version: ["3.12"]
     runs-on: ${{ matrix.os }}
-    permissions:
-      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -55,7 +61,7 @@ jobs:
             "Windows" = "windows"
           }
           $platform = $platformMap["${{ runner.os }}"]
-          $arch = "amd64"
+          $arch = if ("${{ runner.arch }}" -eq "ARM64") { "arm64" } else { "amd64" }
           $base = "{{TOOL_NAME}}-$version-$platform-$arch"
           New-Item -ItemType Directory -Force -Path release | Out-Null
           if ("${{ runner.os }}" -eq "Windows") {
@@ -73,8 +79,34 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: {{TOOL_NAME}}-${{ runner.os }}
+          name: {{TOOL_NAME}}-${{ matrix.os }}
           path: release/*
+
+  release:
+    name: Publish release assets
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-dist
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find release-dist -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release/ \;
+          find release-dist -type f -name "checksums-*.txt" -exec cat {} \; > release/checksums.txt
+          test -s release/checksums.txt
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign checksums
+        shell: bash
+        run: cosign sign-blob --bundle release/checksums.txt.sigstore.json release/checksums.txt --yes
 
       - name: Upload GitHub Release assets
         uses: softprops/action-gh-release@v2
@@ -82,13 +114,14 @@ jobs:
           files: release/*
 
   publish-npm:
-    needs: build
-    runs-on: ubuntu-latest
+    name: Publish to npm
+    needs: release
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
+      id-token: write
     env:
       NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
     steps:
       - uses: actions/checkout@v4
 
@@ -98,11 +131,10 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           always-auth: true
 
-      - name: Verify package contents
-        run: npm pack --dry-run
-
       - name: Verify version consistency
+        shell: bash
         run: |
+          set -euo pipefail
           TAG_VERSION=${GITHUB_REF#refs/tags/v}
           PKG_VERSION=$(node -p "require('./package.json').version")
           if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
@@ -110,15 +142,38 @@ jobs:
             exit 1
           fi
 
-      - name: Verify npm auth
-        continue-on-error: true
+      - name: Download release archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
-          if [ -z "${NODE_AUTH_TOKEN}" ]; then
-            echo "::warning::NODE_AUTH_TOKEN is empty"
-            exit 1
-          fi
-          echo "NPM_TOKEN length: ${#NODE_AUTH_TOKEN}"
-          npm whoami || echo "::warning::npm whoami failed; attempting publish anyway"
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "${GITHUB_REF_NAME}" --dir dist --pattern "*.tar.gz" --pattern "*.zip"
+          find dist -type f \( -name "*.tar.gz" -o -name "*.zip" \) -print
+
+      - name: Prepare npm platform packages
+        run: node scripts/prepare-npm-platform-packages.js dist npm-platform
 
       - name: Publish to npm
-        run: npm publish --access public
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          ROOT_PKG=$(node -p "require('./package.json').name")
+
+          for dir in npm-platform/*; do
+            [ -d "$dir" ] || continue
+            PKG=$(node -p "require('./${dir}/package.json').name")
+            if npm view "${PKG}@${VERSION}" version 2>/dev/null | grep -qx "${VERSION}"; then
+              echo "npm package ${PKG}@${VERSION} already published; skipping"
+              continue
+            fi
+            npm publish "$dir" --access public --provenance
+          done
+
+          if npm view "${ROOT_PKG}@${VERSION}" version 2>/dev/null | grep -qx "${VERSION}"; then
+            echo "npm package ${ROOT_PKG}@${VERSION} already published; skipping"
+            exit 0
+          fi
+          npm publish --access public --provenance

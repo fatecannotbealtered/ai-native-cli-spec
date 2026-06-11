@@ -6,7 +6,7 @@ const { execFileSync } = require("child_process");
 const path = require("path");
 
 const rootPackage = require("../package.json");
-const toolName = "{{TOOL_NAME}}";
+const toolName = Object.keys(rootPackage.bin || {})[0] || "{{TOOL_NAME}}";
 const ext = process.platform === "win32" ? ".exe" : "";
 const platformKey = `${process.platform}-${process.arch}`;
 const platformPackage = `${rootPackage.name}-${platformKey}`;
@@ -15,7 +15,7 @@ const optionalDependencies = rootPackage.optionalDependencies || {};
 if (!Object.prototype.hasOwnProperty.call(optionalDependencies, platformPackage)) {
   console.error(
     `${toolName} does not ship an npm platform package for ${platformKey}.\n` +
-    `Install a supported platform package or use the GitHub standalone binary.`
+    "Install a supported platform package or use the GitHub standalone binary."
   );
   process.exit(1);
 }
@@ -27,7 +27,7 @@ try {
 } catch {
   console.error(
     `${toolName} platform package ${platformPackage} is not installed.\n` +
-    `This usually means npm optional dependencies were omitted.\n` +
+    "This usually means npm optional dependencies were omitted.\n" +
     `Reinstall with:  npm install -g ${rootPackage.name} --include=optional`
   );
   process.exit(1);

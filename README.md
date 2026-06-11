@@ -31,7 +31,7 @@ AGENTS.md          # entry hook every agent reads first
 ├── SKILL-SPEC.md  # Skill authoring — how the agent "listens"
 └── SEC-SPEC.md    # security baseline — how not to get burned
 README / LICENSE / CHANGELOG / CONTRIBUTING / SECURITY / CODE_OF_CONDUCT / NOTICE
-.github/ (PR + issue templates, dependabot)  ·  package.json + scripts/{install,run}.js
+.github/ (PR + issue templates, dependabot)  ·  package.json + scripts/{run,prepare-npm-platform-packages}.js
 docs/OPEN_SOURCE_CHECKLIST.md  ·  skills/{SKILL.md.tmpl,test-prompts.json.tmpl}  ·  .gitignore
 ```
 

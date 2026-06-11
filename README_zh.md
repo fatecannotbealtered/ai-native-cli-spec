@@ -31,7 +31,7 @@ AGENTS.md          # 每个 agent 最先读的入口钩子
 ├── SKILL-SPEC.md  # Skill 编写规范——agent"怎么听"
 └── SEC-SPEC.md    # 安全基线——怎么不被坑、不坑人
 README / LICENSE / CHANGELOG / CONTRIBUTING / SECURITY / CODE_OF_CONDUCT / NOTICE
-.github/（PR + issue 模板、dependabot）  ·  package.json + scripts/{install,run}.js
+.github/（PR + issue 模板、dependabot）  ·  package.json + scripts/{run,prepare-npm-platform-packages}.js
 docs/OPEN_SOURCE_CHECKLIST.md  ·  skills/{SKILL.md.tmpl,test-prompts.json.tmpl}  ·  .gitignore
 ```
 
