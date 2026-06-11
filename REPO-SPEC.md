@@ -171,7 +171,7 @@ The seed in this repo's `template/` is split so that the skeleton above is assem
 template/
 ├── common/        # language-agnostic, copied into EVERY repo: AGENTS.md, the four
 │                  #   .agent/ specs, all governance docs, .github/, package.json,
-│                  #   scripts/{install,run}.js, docs/, skills/SKILL.md.tmpl, .gitignore
+│                  #   scripts/{run,prepare-npm-platform-packages}.js, docs/, skills/SKILL.md.tmpl, .gitignore
 ├── go/            # overlay: ci.yml, release.yml, .goreleaser.yml, Makefile,
 │                  #   .golangci.yml, .gitignore
 └── python/        # overlay: ci.yml, release.yml, ruff.toml, .gitignore

@@ -16,7 +16,7 @@ template/
 │   ├── CONTRIBUTING.md (+_zh) / SECURITY.md (+_zh)
 │   ├── CODE_OF_CONDUCT.md (+_zh) / NOTICE.md (+_zh)
 │   ├── .github/ (PR 模板、ISSUE_TEMPLATE/、dependabot.yml)
-│   ├── package.json / scripts/{install,run}.js
+│   ├── package.json / scripts/{run,prepare-npm-platform-packages}.js
 │   ├── docs/OPEN_SOURCE_CHECKLIST.md (+_zh)
 │   ├── skills/{SKILL.md.tmpl,test-prompts.json.tmpl}
 │   └── .gitignore / .gitattributes
@@ -34,6 +34,7 @@ SHARED PLACEHOLDER DICTIONARY — use these literal tokens, never bake in real v
 - {{MODULE}}           Go module path, e.g. github.com/OWNER/{{TOOL_NAME}}   (go templates only)
 - {{CMD_PATH}}         Go main package path, e.g. ./cmd/{{TOOL_NAME}}        (go templates only)
 - {{NPM_PKG}}          full npm package name incl. scope, e.g. @SCOPE/{{TOOL_NAME}}
+- {{TOOL_PKG}}         Python import 包名（下划线），例如 my_cli            (python templates only)
 - {{VERSION}}          semver, e.g. 0.1.0
 - {{COPYRIGHT_YEAR}}   e.g. 2024-2026
 - {{COPYRIGHT_HOLDER}} e.g. Your Name
@@ -72,7 +73,9 @@ Keep placeholders consistent across files. Write files with the Write tool to th
    检查没有残留的 `{{`：
 
    ```bash
-   grep -rn '{{' . || echo "占位符已全部填好"
+   # 只匹配大写占位符 token——直接 grep '{{' 会误中 workflow 里合法的
+   # ${{ ... }} 和 .goreleaser.yml 里的 {{ .Var }}。
+   grep -rnE '\{\{[A-Z_0-9]+\}\}' . || echo "占位符已全部填好"
    ```
 
 5. **不包装第三方就删掉 NOTICE.md。** `NOTICE.md`（+ `_zh`）只在工具包装第三方产品时必需
@@ -94,7 +97,17 @@ Keep placeholders consistent across files. Write files with the Write tool to th
    错误决策树、安全边界、自更新和评估场景。`test-prompts.json` 是 Skill 审查用的
    回归集，prompt 要写成本 CLI 的真实场景。
 
-7. **跑一遍开源清单。** 首次公开 push 前，过一遍 `docs/OPEN_SOURCE_CHECKLIST.md`。
+7. **创建构建清单和 lockfile。** CI workflow 假定语言构建清单已存在——模板不带它，
+   因为它是项目相关的：
+
+   - Go：`go mod init {{MODULE}}`（CI 从 `go.mod` 读取 Go 版本）。
+   - Python：提供 `[dev]` extra（pytest、ruff、pip-audit、pyinstaller）的
+     `pyproject.toml`/`setup.py`、供 `pip-audit -r` 用的 `requirements.txt`、
+     以及 `release.yml` 调用的 PyInstaller 入口 `build.py`。
+   - npm 壳：生成并提交 CI 里 `npm ci` / `npm audit` 需要的 lockfile：
+     `npm install --package-lock-only --ignore-scripts`。
+
+8. **跑一遍开源清单。** 首次公开 push 前，过一遍 `docs/OPEN_SOURCE_CHECKLIST.md`。
 
 ## 轻量契约
 

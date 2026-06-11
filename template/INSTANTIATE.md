@@ -17,7 +17,7 @@ template/
 │   ├── CONTRIBUTING.md (+_zh) / SECURITY.md (+_zh)
 │   ├── CODE_OF_CONDUCT.md (+_zh) / NOTICE.md (+_zh)
 │   ├── .github/ (PR template, ISSUE_TEMPLATE/, dependabot.yml)
-│   ├── package.json / scripts/{install,run}.js
+│   ├── package.json / scripts/{run,prepare-npm-platform-packages}.js
 │   ├── docs/OPEN_SOURCE_CHECKLIST.md (+_zh)
 │   ├── skills/{SKILL.md.tmpl,test-prompts.json.tmpl}
 │   └── .gitignore / .gitattributes
@@ -35,6 +35,7 @@ SHARED PLACEHOLDER DICTIONARY — use these literal tokens, never bake in real v
 - {{MODULE}}           Go module path, e.g. github.com/OWNER/{{TOOL_NAME}}   (go templates only)
 - {{CMD_PATH}}         Go main package path, e.g. ./cmd/{{TOOL_NAME}}        (go templates only)
 - {{NPM_PKG}}          full npm package name incl. scope, e.g. @SCOPE/{{TOOL_NAME}}
+- {{TOOL_PKG}}         Python import package (underscores), e.g. my_cli       (python templates only)
 - {{VERSION}}          semver, e.g. 0.1.0
 - {{COPYRIGHT_YEAR}}   e.g. 2024-2026
 - {{COPYRIGHT_HOLDER}} e.g. Your Name
@@ -77,7 +78,9 @@ Keep placeholders consistent across files. Write files with the Write tool to th
    them. Sanity-check that no `{{` survives:
 
    ```bash
-   grep -rn '{{' . || echo "all placeholders filled"
+   # Match only UPPER_SNAKE placeholder tokens — plain '{{' would also hit
+   # legitimate ${{ ... }} in workflows and {{ .Var }} in .goreleaser.yml.
+   grep -rnE '\{\{[A-Z_0-9]+\}\}' . || echo "all placeholders filled"
    ```
 
 5. **Drop NOTICE.md if not wrapping a third party.** `NOTICE.md` (+ `_zh`) is
@@ -101,7 +104,18 @@ Keep placeholders consistent across files. Write files with the Write tool to th
    eval scenarios). `test-prompts.json` is the regression set used by Skill
    review; keep the prompts concrete to this CLI.
 
-7. **Run the open-source checklist.** Walk `docs/OPEN_SOURCE_CHECKLIST.md`
+7. **Create the build manifest and lockfile.** The CI workflows assume the
+   language build manifest exists — the template does not ship it because it
+   is project-specific:
+
+   - Go: `go mod init {{MODULE}}` (CI reads the Go version from `go.mod`).
+   - Python: a `pyproject.toml`/`setup.py` exposing a `[dev]` extra (pytest,
+     ruff, pip-audit, pyinstaller), a `requirements.txt` for `pip-audit -r`,
+     and a `build.py` PyInstaller entry used by `release.yml`.
+   - npm wrapper: generate and commit the lockfile that `npm ci` / `npm audit`
+     in CI require: `npm install --package-lock-only --ignore-scripts`.
+
+8. **Run the open-source checklist.** Walk `docs/OPEN_SOURCE_CHECKLIST.md`
    before the first public push.
 
 ## The lightness contract

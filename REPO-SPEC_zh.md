@@ -158,7 +158,7 @@ project/
 template/
 ├── common/        # 语言无关，拷进每一个仓库：AGENTS.md、本地 .agent/ 规范、
 │                  #   全部治理文档、.github/、package.json、
-│                  #   scripts/{install,run}.js、docs/、skills/SKILL.md.tmpl、.gitignore
+│                  #   scripts/{run,prepare-npm-platform-packages}.js、docs/、skills/SKILL.md.tmpl、.gitignore
 ├── go/            # 叠加层：ci.yml、release.yml、.goreleaser.yml、Makefile、
 │                  #   .golangci.yml、.gitignore
 └── python/        # 叠加层：ci.yml、release.yml、ruff.toml、.gitignore
