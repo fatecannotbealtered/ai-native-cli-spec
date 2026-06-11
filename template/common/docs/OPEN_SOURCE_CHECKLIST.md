@@ -33,6 +33,8 @@ Run through this gate **before the first public push** of `{{TOOL_NAME}}`. It is
 - [ ] CI (`.github/workflows/ci.yml`) is **green** on the commit being pushed.
 - [ ] CI **enforces** lint and tests — a red lint or failing test blocks merge (not advisory-only).
 - [ ] Functional Contract Coverage is 100%: every public behavior documented in README, Skill, `reference`, `--help`, `context`, `doctor`, `changelog`, or `update` has automated command-level tests.
+- [ ] `reference.release_readiness.level` is accurate: `stable` has FCC 100%, mock upstream/contract tests, and recorded live smoke/E2E evidence; missing live evidence is `beta`; missing command-level coverage is `unpublishable`.
+- [ ] `doctor` includes a `release_readiness` check whose status matches the declared release level.
 - [ ] The formatter config is committed (ruff / golangci-lint / prettier, by language) and CI runs the format check.
 - [ ] No build artifacts, caches, venvs, or IDE config are committed (covered by `.gitignore`).
 
@@ -54,4 +56,5 @@ Run through this gate **before the first public push** of `{{TOOL_NAME}}`. It is
 - [ ] `skills/{{TOOL_NAME}}/test-prompts.json` is present, valid JSON, and covers fresh-agent read, write safety or read-only boundary, permission boundary, `_untrusted` handling, and self-update.
 - [ ] `update --confirm` syncs the whole `skills/{{TOOL_NAME}}/` directory or returns a `skill_sync_command` equivalent to `npx skills add {{REPO_SLUG}} -y -g`.
 - [ ] `{{TOOL_NAME}} reference`, `{{TOOL_NAME}} context`, and `{{TOOL_NAME}} doctor` run and emit valid JSON envelopes — an agent can self-onboard from a clean checkout.
+- [ ] `{{TOOL_NAME}} reference` exposes `release_readiness`, and `{{TOOL_NAME}} doctor` reports the matching check.
 - [ ] The risk tier in `SECURITY.md` matches the tier declared in `.agent/SEC-SPEC.md` (`{{RISK_TIER}}`).

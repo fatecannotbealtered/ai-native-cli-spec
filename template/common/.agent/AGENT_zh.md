@@ -46,7 +46,7 @@
 2. 改 Skill 前先读 `SKILL-SPEC`；**不要在 Skill 里硬编码会漂移的参数/schema**，指向 `reference`。
 3. 改了行为：同步 `CHANGELOG.md`（唯一变更源）与对应 `SKILL.md`；用到新命令就抬高 Skill 的 `min_version`。
 4. 提交前：单测 + CI 范围内 lint/format 全绿。
-5. 发布前：README / Skill / reference / help / context / doctor / changelog / update 中声明的公开行为达到 100% 功能契约覆盖率。
+5. 发布前：README / Skill / reference / help / context / doctor / changelog / update 中声明的公开行为达到 100% 功能契约覆盖率；`reference.release_readiness` 与 `doctor` 必须如实声明 `stable`、`beta` 或 `unpublishable`。
 
 ## 自检（收尾必过）
 
@@ -54,5 +54,6 @@
 - [ ] stdout 干净、envelope 合规、exit code 与 retryable 一致
 - [ ] 外部内容已 `_untrusted` 标注（见 SEC-SPEC §2）
 - [ ] 公开行为达到 100% 功能契约覆盖率
+- [ ] `reference` 已声明发布就绪等级，`doctor` 已检查它；`stable` 有真实环境 smoke/E2E 记录
 - [ ] `CHANGELOG.md` 已更，派生物（release-notes/runtime changelog）同源
 - [ ] 对应 `SKILL.md` 已同步

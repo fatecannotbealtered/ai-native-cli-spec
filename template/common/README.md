@@ -101,7 +101,7 @@ make fmt
 npm ci --ignore-scripts
 ```
 
-Release gate: every public behavior documented in README, Skill, `reference`, `--help`, `context`, `doctor`, `changelog`, or `update` must have command-level tests. The target is **Functional Contract Coverage = 100%**; numeric line coverage is secondary.
+Release gate: every public behavior documented in README, Skill, `reference`, `--help`, `context`, `doctor`, `changelog`, or `update` must have command-level tests. The target is **Functional Contract Coverage = 100%**; numeric line coverage is secondary. `{{TOOL_NAME}} reference` reports `release_readiness.level`; without recorded live smoke/E2E evidence, the tool must declare `beta`, not `stable`.
 
 ## Links
 

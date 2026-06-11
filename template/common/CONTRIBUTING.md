@@ -98,6 +98,14 @@ For each new or changed command, cover success, invalid arguments, config/auth/p
 
 Numeric line coverage is tracked separately and may ratchet upward by repo, but it does not replace missing contract tests.
 
+Release readiness is machine-readable:
+
+- `stable`: FCC is 100%, mock upstream/contract tests cover success and failure paths, and live smoke/E2E evidence is recorded for the release candidate.
+- `beta`: FCC is 100% and mock upstream/contract tests are complete, but live smoke/E2E evidence is missing or explicitly unavailable.
+- `unpublishable`: any public behavior lacks command-level tests, or mock upstream/contract tests cover only happy paths.
+
+Keep `{{TOOL_NAME}} reference` `release_readiness` and `{{TOOL_NAME}} doctor`'s `release_readiness` check honest when test evidence changes.
+
 ## Adding a new command / domain
 
 The tool is sliced by domain (one domain ≈ one area of the wrapped product). To add a new domain, touch each layer:
@@ -123,6 +131,7 @@ The tool is sliced by domain (one domain ≈ one area of the wrapped product). T
 - [ ] One logical change, focused diff
 - [ ] Tests added/updated and passing (`make test`)
 - [ ] Functional Contract Coverage remains 100% for public behavior
+- [ ] `release_readiness` remains accurate (`stable` requires recorded live smoke/E2E evidence)
 - [ ] Lint passing (`make lint`)
 - [ ] Docs synced with behavior (`README` and any affected `SKILL`/reference pages)
 - [ ] `CHANGELOG.md` updated under `## [Unreleased]`
