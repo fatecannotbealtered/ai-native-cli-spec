@@ -23,8 +23,9 @@ template/
 │   └── .gitignore / .gitattributes
 │                                 # common hygiene; per-language .gitignore appended
 ├── go/                     # overlay — ci.yml, release.yml, .goreleaser.yml,
-│                           #   Makefile, .golangci.yml, .gitignore
-└── python/                 # overlay — ci.yml, release.yml, ruff.toml, .gitignore
+│                           #   Makefile, .golangci.yml, cmd/fcc_guard_test.go, .gitignore
+└── python/                 # overlay — ci.yml, release.yml, ruff.toml,
+│                           #   tests/test_fcc_guard.py, .gitignore
 ```
 
 ## Placeholder dictionary

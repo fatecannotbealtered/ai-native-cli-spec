@@ -22,8 +22,9 @@ template/
 │   └── .gitignore / .gitattributes
 │                                 # 通用仓库卫生；按语言追加 .gitignore
 ├── go/                     # 叠加层——ci.yml、release.yml、.goreleaser.yml、
-│                           #   Makefile、.golangci.yml、.gitignore
-└── python/                 # 叠加层——ci.yml、release.yml、ruff.toml、.gitignore
+│                           #   Makefile、.golangci.yml、cmd/fcc_guard_test.go、.gitignore
+└── python/                 # 叠加层——ci.yml、release.yml、ruff.toml、
+│                           #   tests/test_fcc_guard.py、.gitignore
 ```
 
 ## 占位符字典
