@@ -119,13 +119,12 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Build
-        run: go build -o {{TOOL_NAME}} {{CMD_PATH}}
-
-      - name: Smoke test (Unix)
-        if: runner.os != 'Windows'
-        run: ./{{TOOL_NAME}} --help
-
-      - name: Smoke test (Windows)
-        if: runner.os == 'Windows'
-        run: ./{{TOOL_NAME}}.exe --help
+      - name: Build and smoke test
+        # explicit -o never appends .exe, so name the output per-OS;
+        # bash keeps one step working across all three runners
+        shell: bash
+        run: |
+          BIN={{TOOL_NAME}}
+          [ "$RUNNER_OS" = "Windows" ] && BIN={{TOOL_NAME}}.exe
+          go build -o "$BIN" {{CMD_PATH}}
+          "./$BIN" --help
