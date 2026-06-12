@@ -14,10 +14,10 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # Go version is sourced from go.mod — the single source of truth.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
@@ -41,9 +41,9 @@ jobs:
           fi
 
       - name: golangci-lint
-        # Action v8 pairs with golangci-lint v2 (the .golangci.yml `version: "2"`
-        # config format); action v6 only drives v1 binaries.
-        uses: golangci/golangci-lint-action@v8
+        # Action v8+ pairs with golangci-lint v2 (the .golangci.yml `version: "2"`
+        # config format); v9 verified green across the fleet (2026-06).
+        uses: golangci/golangci-lint-action@v9
         with:
           # 'latest' tracks the newest v2 linter release; pin to a specific
           # version (e.g. v2.1.0) once you want reproducible lint results.
@@ -57,9 +57,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
@@ -82,7 +82,7 @@ jobs:
 
       - name: Upload coverage artifact
         if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage.out
@@ -91,9 +91,9 @@ jobs:
     name: npm audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: npm
@@ -113,9 +113,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     needs: [lint, test, npm-audit]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
