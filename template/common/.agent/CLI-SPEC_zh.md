@@ -76,7 +76,8 @@
 - `error.message` 给人读，Agent 不应解析。
 - `error.details` 放结构化上下文，必须脱敏。
 - `error.retryable` 决定 Agent 是否可以自动退避重试。
-- `meta.duration_ms` 记录命令执行耗时。
+- `meta.duration_ms` 记录命令执行耗时。`meta` 在每个响应（成功与失败）里都要输出，
+  不要标 `omitempty`——`duration_ms: 0` 是合法值，agent 应当总能读到。
 - 破坏性 schema 变更必须升级 `schema_version` 主版本。
 
 ## 4. stdout / stderr 规则
@@ -131,6 +132,23 @@
 - `E_NETWORK` / `E_RATE_LIMITED` / `E_SERVER` -> 7
 - `E_TIMEOUT` -> 8
 - `E_HUMAN_REQUIRED` -> 9（可选，仅启用 §15.3 时）
+
+当错误来自上游 HTTP 调用时，按状态码映射到错误码，让 agent 能从 `error.code` +
+`retryable` 区分失败类型——不要把所有 4xx 都塌缩成 `E_NETWORK`：
+
+- `401` -> `E_AUTH`
+- `403` -> `E_FORBIDDEN`
+- `404` -> `E_NOT_FOUND`
+- `408` -> `E_TIMEOUT`（可重试）
+- `409` -> `E_CONFLICT`
+- `429` -> `E_RATE_LIMITED`（可重试）
+- `5xx` -> `E_SERVER`（可重试）
+- 连接拒绝 / DNS / 重置 -> `E_NETWORK`（可重试）
+
+优先按上游的错误类型/状态码映射，不要靠匹配人类可读的 message 文本（子串匹配会把仅仅
+包含「not found」等字样的消息误判）。把这套映射收敛到**一个**函数里，避免 output
+层与 command 层的 status->code->exit 契约漂移。声明了但运行时不可达的错误码应标注为
+保留，免得 agent 为不会发生的分支做规划。
 
 ## 7. 写操作流程（dry-run -> confirm）
 
@@ -196,6 +214,23 @@ confirm token 约定：
   "has_more": false
 }
 ```
+
+对基于 offset 的上游，回显 `offset` 并返回显式的 `next_offset`（下一页要传的值，
+仅在 `has_more` 为 true 时出现），让 agent 确定性翻页，而不必自己从 `offset + count`
+推导：
+
+```json
+{
+  "items": [],
+  "count": 0,
+  "offset": 0,
+  "next_offset": 20,
+  "has_more": true
+}
+```
+
+当列表被静默截断（例如自动翻页上限）时，要输出 `truncated: true`，而不是返回一个看起来
+完整、实则被截短的列表。
 
 约定：
 

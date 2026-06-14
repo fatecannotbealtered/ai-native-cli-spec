@@ -78,7 +78,9 @@ Conventions:
 - `error.message` is for humans; agents should not parse it.
 - `error.details` holds structured context; must be redacted.
 - `error.retryable` tells the agent whether it may back off and retry automatically.
-- `meta.duration_ms` records command execution time.
+- `meta.duration_ms` records command execution time. `meta` is always emitted on
+  every response (success and error); do not mark it `omitempty`, since
+  `duration_ms: 0` is a valid value the agent should always be able to read.
 - A breaking schema change must bump the `schema_version` major version.
 
 ## 4. stdout / stderr rules
@@ -133,6 +135,26 @@ Error codes and exit codes must align:
 - `E_NETWORK` / `E_RATE_LIMITED` / `E_SERVER` -> 7
 - `E_TIMEOUT` -> 8
 - `E_HUMAN_REQUIRED` -> 9 (optional, only when §15.3 is enabled)
+
+When the failure comes from an upstream HTTP call, map the status onto the
+taxonomy so the agent can tell failure modes apart from `error.code` +
+`retryable` — do NOT collapse every 4xx into `E_NETWORK`:
+
+- `401` -> `E_AUTH`
+- `403` -> `E_FORBIDDEN`
+- `404` -> `E_NOT_FOUND`
+- `408` -> `E_TIMEOUT` (retryable)
+- `409` -> `E_CONFLICT`
+- `429` -> `E_RATE_LIMITED` (retryable)
+- `5xx` -> `E_SERVER` (retryable)
+- connection refused / DNS / reset -> `E_NETWORK` (retryable)
+
+Map by the upstream's own error TYPE/status where available, not by sniffing
+the human-readable message text (substring matching misclassifies messages that
+merely contain words like "not found"). Keep this mapping in ONE function so the
+status->code->exit contract cannot drift between the output layer and the
+command layer. Codes that are declared but never reachable should be annotated
+as reserved so an agent does not plan for a branch that cannot occur.
 
 ## 7. Write flow (dry-run -> confirm)
 
@@ -198,6 +220,23 @@ Suggested pagination shape:
   "has_more": false
 }
 ```
+
+For offset-based upstreams, echo `offset` and return an explicit `next_offset`
+(the value to pass next, present only while `has_more` is true) so the agent
+pages deterministically instead of re-deriving `offset + count`:
+
+```json
+{
+  "items": [],
+  "count": 0,
+  "offset": 0,
+  "next_offset": 20,
+  "has_more": true
+}
+```
+
+When a list is silently capped (e.g. an auto-paginate ceiling), surface
+`truncated: true` rather than returning a short list that looks complete.
 
 Conventions:
 
