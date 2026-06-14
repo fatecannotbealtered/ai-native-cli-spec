@@ -243,10 +243,16 @@ confirm token 约定：
 
 写命令应尽量支持幂等语义：
 
-- 创建类命令建议支持 `--request-id` 或 `--idempotency-key`。
+- 创建类命令建议支持 `--request-id` 或 `--idempotency-key`。上游若支持幂等头（如 GitLab 的
+  `Idempotency-Key`），应转发该头，并把 key 绑进 confirm scope，使 token 只对该 key 生效。
 - 重试同一个 idempotency key 不应重复创建资源。
 - 更新/删除类命令应在 dry-run 中记录目标资源版本。
 - confirm 时发现版本变化必须返回 `E_CONFLICT`。
+- **confirm token 单次消费。** token 一旦被接受执行写操作，就记录其指纹（如
+  `~/.<tool>/confirm-consumed.json`，按过期裁剪），任何重放都以 `E_CONFLICT` 拒绝（「token 已用过，
+  请重新 `--dry-run`」）。这给 agent 安全重试语义：确认后超时的写不能盲目重发——重放被拒，重新
+  `--dry-run` 会显示当前真实状态。对于无资源版本可绑的上游，这是通用的安全重试机制。要在写执行**之前**
+  标记消费（中途崩溃宁可保守拒绝重放，也不冒重复风险）。存储失败要优雅降级，绝不阻塞写。
 - 批量写操作应返回逐项结果，不要因为单项失败隐藏其他项状态。
 
 批量写结果建议：
@@ -289,6 +295,13 @@ confirm token 约定：
 
 声明工具能力、命令、参数、输出 schema、错误码、权限等级，供 Agent 先理解能力。
 
+每个命令的 `output_schema` 必须可被机器使用，不能是占位 stub。用一个字符串 label 指向顶层
+`schemas` 目录里的条目：`{ "shape": "object"|"array", "fields": [...], "untrusted_fields": [...] }`，
+其中字段清单从命令真实返回的数据（flatten 结构 / `*ToMap` 构造）枚举，`untrusted_fields` 列出
+攻击者可控的键。每个命令还应带 `examples`：一条可直接运行的调用（写命令展示 `--dry-run` 再
+`--confirm` 这一对，危险命令带 `--dangerous`）。应有一个 guard 测试断言每个叶子命令都解析到非空
+schema 且至少有一条 example，使 `reference` 不会悄悄退化回 stub。
+
 ```json
 {
   "ok": true,
@@ -324,9 +337,20 @@ confirm token 约定：
             "multiple": false
           }
         ],
-        "output_schema": {}
+        "output_schema": "deleted_resource",
+        "examples": [
+          "<tool> resource delete <id> --dry-run --compact",
+          "<tool> resource delete <id> --confirm <confirm_token> --compact"
+        ]
       }
     ],
+    "schemas": {
+      "deleted_resource": {
+        "shape": "object",
+        "fields": ["id", "status"],
+        "untrusted_fields": []
+      }
+    },
     "exit_codes": {}
   },
   "meta": {

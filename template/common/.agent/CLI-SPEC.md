@@ -249,10 +249,20 @@ Conventions:
 
 Write commands should support idempotent semantics where possible:
 
-- Create-type commands should support `--request-id` or `--idempotency-key`.
+- Create-type commands should support `--request-id` or `--idempotency-key`. Where the upstream
+  honors an idempotency header (e.g. GitLab's `Idempotency-Key`), forward it; bind the key into the
+  confirm scope so the token matches only that key.
 - Retrying the same idempotency key must not create duplicate resources.
 - Update/delete commands should record the target resource version during dry-run.
 - If a version change is detected at confirm time, return `E_CONFLICT`.
+- **Confirm tokens are single-use.** Once a token has been accepted to execute a write, record its
+  fingerprint (e.g. under `~/.<tool>/confirm-consumed.json`, pruned by expiry) and reject any replay
+  with `E_CONFLICT` ("token already used; re-run `--dry-run`"). This gives agents safe-retry: a
+  confirmed write that times out cannot be blindly re-sent — the retry is rejected and re-running
+  `--dry-run` reveals the now-current state. This is the universal safe-retry mechanism for upstreams
+  that expose no resource version to bind. Mark consumed BEFORE the write executes (a crash mid-write
+  conservatively blocks the replay rather than risking a duplicate). A storage failure must degrade
+  gracefully and never block the write.
 - Batch writes should return per-item results; don't hide other items' status because one failed.
 
 Suggested batch-write result:
@@ -295,6 +305,15 @@ Suggested batch-write result:
 
 Declares the tool's capabilities, commands, params, output schema, error codes, and permission levels, so an agent understands the tool first.
 
+Each command's `output_schema` MUST be machine-usable, not a stub. Use a string label that
+resolves to an entry in a top-level `schemas` catalog: `{ "shape": "object"|"array", "fields":
+[...], "untrusted_fields": [...] }`, with the field list enumerated from the command's actual
+returned data (the flatten structs / `*ToMap` builders) and `untrusted_fields` listing the
+attacker-controllable keys. Each command SHOULD also carry `examples`: one runnable invocation
+(write commands show the `--dry-run` then `--confirm` pair, dangerous commands include
+`--dangerous`). A guard test SHOULD assert every leaf command resolves to a non-empty schema and has
+at least one example, so `reference` cannot silently regress to a stub.
+
 ```json
 {
   "ok": true,
@@ -330,9 +349,20 @@ Declares the tool's capabilities, commands, params, output schema, error codes, 
             "multiple": false
           }
         ],
-        "output_schema": {}
+        "output_schema": "deleted_resource",
+        "examples": [
+          "<tool> resource delete <id> --dry-run --compact",
+          "<tool> resource delete <id> --confirm <confirm_token> --compact"
+        ]
       }
     ],
+    "schemas": {
+      "deleted_resource": {
+        "shape": "object",
+        "fields": ["id", "status"],
+        "untrusted_fields": []
+      }
+    },
     "exit_codes": {}
   },
   "meta": {
