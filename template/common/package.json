@@ -14,6 +14,10 @@
   "bin": {
     "{{TOOL_NAME}}": "scripts/run.js"
   },
+  "scripts": {
+    "version": "node scripts/sync-version.js",
+    "check-version": "node scripts/check-version.js"
+  },
   "optionalDependencies": {
     "{{NPM_PKG}}-darwin-arm64": "{{VERSION}}",
     "{{NPM_PKG}}-darwin-x64": "{{VERSION}}",

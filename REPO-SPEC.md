@@ -83,7 +83,18 @@ Conventions:
 - The tool version (package version) is decoupled from the CLI's output `schema_version` — the latter bumps only when the JSON contract breaks (see `CLI-SPEC.md`).
 - **CHANGELOG uses Keep a Changelog format**: `Unreleased` on top, split into `Added/Changed/Fixed/Deprecated/Removed/Security`.
 - A release means tagging git `vX.Y.Z`, triggering build & publish via `release.yml`.
-- Single source of truth for the version number (e.g. `package.json` / `setup.py`); everything else references it, no hand-copying.
+- Single source of truth for the version number (`package.json` `version`); everything else is **derived, never hand-copied**.
+
+### Version bump mechanics (enforced, not by hand)
+
+Bumping a version edits one source and lets tooling fan it out — so a release can never again ship with a stale pin, lockfile, Skill header, or `__version__`:
+
+- **One command:** `npm version <patch|minor|major|x.y.z>`. npm bumps `package.json` `version` (and the lockfile's top-level version) offline, then its `version` lifecycle hook runs `scripts/sync-version.js`, which propagates the new version to every derived location: `package.json` `optionalDependencies`, `package-lock.json` (`version`, `packages[""].version`, platform pins), each `skills/*/SKILL.md` (`version:` + `metadata.requires.min_version`), the Python `<pkg>/__init__.py` `__version__` (with `setup.py` reading it dynamically — not a separate copy), and a Keep-a-Changelog roll of `## [Unreleased]` into a dated `## [x.y.z]`.
+- **No git side effects:** a committed `.npmrc` sets `git-tag-version=false`, so `npm version` only edits files. The flow stays push → CI green → tag; the human reviews the synced diff and tags after CI.
+- **Single registry, two consumers:** `scripts/version-files.js` defines the derived-location set once; both `sync-version.js` (writer) and `scripts/check-version.js` (verifier) consume it, so adding a location is covered by both automatically.
+- **Fail-closed CI guard:** `scripts/check-version.js` runs in `ci.yml` (every push/PR) and in `release.yml`'s version-consistency step (at tag time). Any location that disagrees with `package.json` — even from a hand edit that bypassed the tool — turns CI red. This is the backstop that makes drift unmergeable and unpublishable.
+- **No version literals in tests:** tests read the expected version dynamically (Go: the embedded `packageJSONVersion()`; Python: the package `__version__`). A version bump must never require editing a test.
+- The lockfile is resynced by surgically rewriting only its version-bearing fields, **never** by `npm install --package-lock-only` (which would inject the developer's registry-mirror URLs into a public lockfile).
 
 ### CHANGELOG single source of truth
 
