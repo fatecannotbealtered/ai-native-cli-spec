@@ -109,8 +109,8 @@ CHANGELOG.md （人工维护，唯一真相源）
 - `scripts/run.js`：薄转发层，解析已安装的 npm 平台包并 `execFileSync` 调其中的二进制，透传 `argv` 与 stdio，平台包缺失时给出可执行的重装提示。
 - `scripts/prepare-npm-platform-packages.js`：release 阶段把 CI 已构建的二进制打成 npm optional 平台包。npm 运行时安装不得从 GitHub 下载二进制。
 - 二进制本身（`bin/`、`*.exe`、`dist/`）进 `.gitignore`，由 CI 构建产出，不入库。
-- 发布产物附带 `checksums.txt`；release pipeline 通过 tagged GitHub Actions release workflow 使用 Sigstore/Cosign keyless 签署该文件，并把 bundle 与 checksum 一起发布。
-- npm 分发发布主包和全部平台包，并使用 npm provenance。npm registry tarball integrity 与 provenance 覆盖 npm 安装路径；standalone GitHub 二进制更新路径继续保留 checksum/signature 验证。
+- 发布产物附带 `checksums.txt`；release pipeline 通过 tagged GitHub Actions release workflow 用 Sigstore/Cosign keyless 模式以 `cosign sign-blob --new-bundle-format` 签署该文件（产出 Sigstore protobuf bundle），并把 bundle 与 checksum 一起发布。
+- npm 分发发布主包和全部平台包，并使用 npm provenance。npm registry tarball integrity 与 provenance 覆盖 npm 安装路径。standalone GitHub 二进制自更新路径在**进程内**验证该签名（Go 用 `sigstore-go`，Python 在冻结二进制内用 `sigstore`——不外挂 cosign、不依赖用户环境），fail-closed 且无跳过;完整性失败返回非重试的 `E_INTEGRITY`。Python 工具冻结成自包含二进制,使这条路径跨语言完全一致（详见 CLI-SPEC §14 / SEC-SPEC §5）。
 - 版本通知是面向 Agent 的结构化契约，不是全局横幅。`update --check`
   刷新更新状态，并可在工具的用户配置目录写入短缓存；`doctor` 可以用短超时主动刷新，网络失败静默降级；`context` 和 `--help`
   只读缓存。业务命令不得为了提示升级而主动联网。
