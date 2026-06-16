@@ -82,7 +82,18 @@
 - 工具版本（package 版本）与 CLI 输出的 `schema_version` 解耦——后者只在 JSON 契约破坏时升（见 `CLI-SPEC.md`）。
 - **CHANGELOG 用 Keep a Changelog 格式**：`Unreleased` 在顶，分 `Added/Changed/Fixed/Deprecated/Removed/Security`。
 - 发布即打 git tag `vX.Y.Z`，由 `release.yml` 触发构建发布。
-- 版本号单一真相源（如 `package.json` / `setup.py`），其余引用它，不手抄多处。
+- 版本号单一真相源（`package.json` `version`），其余全部**派生，绝不手抄**。
+
+### 版本号改动机制（强制，不靠人手）
+
+改版本号只动一个源，由工具扇出到所有派生位置——从此一次发版不可能再漏掉某个 pin、lockfile、Skill 头或 `__version__`：
+
+- **一条命令**：`npm version <patch|minor|major|x.y.z>`。npm 离线改 `package.json` `version`（及 lockfile 顶层版本），随后 `version` 生命周期钩子跑 `scripts/sync-version.js`，把新版本同步到全部派生位置：`package.json` `optionalDependencies`、`package-lock.json`（`version`、`packages[""].version`、平台 pins）、每个 `skills/*/SKILL.md`（`version:` + `metadata.requires.min_version`）、Python `<pkg>/__init__.py` 的 `__version__`（`setup.py` 动态读取它，不再单独抄一份），并按 Keep a Changelog 把 `## [Unreleased]` 滚动为带日期的 `## [x.y.z]`。
+- **零 git 副作用**：仓库内提交的 `.npmrc` 设 `git-tag-version=false`，`npm version` 只改文件。流程保持 push → CI 绿 → 打 tag；人工审完同步后的 diff，CI 过了再打 tag。
+- **一份清单，两个消费者**：`scripts/version-files.js` 用一处定义派生位置集合；`sync-version.js`（写入）与 `scripts/check-version.js`（校验）都消费它，新增位置两边自动覆盖。
+- **CI 兜底（fail-closed）**：`scripts/check-version.js` 进 `ci.yml`（每次 push/PR）与 `release.yml` 的版本一致性步骤（tag 时）。任何位置与 `package.json` 不一致——哪怕是绕过工具的手改——都让 CI 变红。这是让漂移合不进、发不出的硬底线。
+- **测试不写死版本号**：测试动态读真源（Go：内嵌的 `packageJSONVersion()`；Python：包的 `__version__`）。升版本绝不需要改测试。
+- lockfile 仅外科式改其版本字段，**绝不**用 `npm install --package-lock-only`（那会把开发者本地的 registry 镜像 URL 写进公开 lockfile）。
 
 ### CHANGELOG 单一真相源
 

@@ -10,7 +10,10 @@ metadata: {"requires":{"bins":["{{TOOL_NAME}}"],"min_version":"{{VERSION}}"}}
 <!--
 Replace every placeholder before publishing:
 - {{TOOL_NAME}}: binary and Skill directory name.
-- {{VERSION}}: must match package.json/setup.py and metadata.requires.min_version.
+- {{VERSION}}: set once at instantiation. Thereafter it is DERIVED from package.json
+  "version" — never hand-edit it; `npm version` runs scripts/sync-version.js to keep
+  the `version:` line and metadata.requires.min_version in lockstep, and CI's
+  scripts/check-version.js fails the build on any drift.
 - {{DESCRIPTION}}: concrete capability phrase, not marketing copy.
 
 Keep this file short. Command details belong in `{{TOOL_NAME}} reference` and, for larger tools, `skills/{{TOOL_NAME}}/reference/*.md`.

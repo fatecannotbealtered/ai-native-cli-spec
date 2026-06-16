@@ -17,7 +17,8 @@ template/
 │   ├── CONTRIBUTING.md (+_zh) / SECURITY.md (+_zh)
 │   ├── CODE_OF_CONDUCT.md (+_zh) / NOTICE.md (+_zh)
 │   ├── .github/ (PR template, ISSUE_TEMPLATE/, dependabot.yml)
-│   ├── package.json / scripts/{run,prepare-npm-platform-packages}.js
+│   ├── package.json / .npmrc / scripts/{run,prepare-npm-platform-packages}.js
+│   ├── scripts/{version-files,sync-version,check-version}.js  # version SSoT: `npm version` syncs, CI checks
 │   ├── docs/OPEN_SOURCE_CHECKLIST.md (+_zh)
 │   ├── skills/{SKILL.md.tmpl,test-prompts.json.tmpl}
 │   └── .gitignore / .gitattributes
