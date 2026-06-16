@@ -111,12 +111,17 @@ Cross-language tools distribute via a uniform npm wrapper, so Go binaries and Py
 - `scripts/prepare-npm-platform-packages.js`: release-time helper that packages already-built CI binaries into npm optional platform packages. Runtime npm installation must not download binaries from GitHub.
 - The binary itself (`bin/`, `*.exe`, `dist/`) goes into `.gitignore`, produced by CI, not committed.
 - Release artifacts ship `checksums.txt`; the release pipeline signs that file with
-  Sigstore/Cosign keyless signing from the tagged GitHub Actions release
-  workflow and publishes the bundle alongside the checksum file.
+  Sigstore/Cosign keyless signing from the tagged GitHub Actions release workflow
+  using `cosign sign-blob --new-bundle-format` (a Sigstore protobuf bundle), and
+  publishes the bundle alongside the checksum file.
 - npm distribution publishes the main package and all platform packages with npm
-  provenance. npm registry tarball integrity and provenance cover the npm
-  install path; standalone GitHub binary update paths keep checksum/signature
-  verification.
+  provenance. npm registry tarball integrity and provenance cover the npm install
+  path. The standalone GitHub binary self-update path verifies that signature
+  **in-process** (Go via `sigstore-go`, Python inside the frozen binary via
+  `sigstore` — no external cosign, no user-environment dependency), fail-closed
+  with no skip path; integrity failures return the non-retryable `E_INTEGRITY`
+  code. Python tools are frozen to a self-contained binary so this path is
+  identical across languages (see CLI-SPEC §14 / SEC-SPEC §5).
 - Version notifications are an Agent-facing structured contract, not an
   ambient banner. `update --check` refreshes update state and may write a short
   cache under the tool's user config directory. `doctor` may actively refresh
