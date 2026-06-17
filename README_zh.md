@@ -1,6 +1,22 @@
-# ai-native-cli-spec
+<h1 align="center">ai-native-cli-spec</h1>
 
-**English → [README.md](README.md)**
+<p align="center">
+  <strong>用于构建 AI-native CLI 的复制即用种子规范</strong>
+</p>
+
+<p align="center">
+  <a href="README.md">English</a> &middot; <a href="README_zh.md">中文</a>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge"></a>
+</p>
+
+<p align="center">
+  <img alt="Agent native" src="https://img.shields.io/badge/agent-native-111827?style=for-the-badge">
+  <img alt="AI-native CLI spec" src="https://img.shields.io/badge/spec-AI--native%20CLI-0891B2?style=for-the-badge">
+  <img alt="Copy-paste seed" src="https://img.shields.io/badge/seed-copy--paste%20ready-F59E0B?style=for-the-badge">
+</p>
 
 一套**规范 + 可直接拉取的种子**，用来构建 **AI 原生 CLI 工具**——专为 AI Agent 可靠驱动而设计的命令行工具，而不只是给人用。
 

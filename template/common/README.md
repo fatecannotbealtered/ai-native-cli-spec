@@ -1,10 +1,24 @@
-# {{TOOL_NAME}}
+<h1 align="center">{{TOOL_NAME}}</h1>
 
-[English](README.md) | [中文](README_zh.md)
+<p align="center">
+  <strong>Agent-native CLI for {{DESCRIPTION}} &middot; JSON-first &middot; dry-run guarded</strong>
+</p>
 
-[![CI](https://github.com/{{REPO_SLUG}}/actions/workflows/ci.yml/badge.svg)](https://github.com/{{REPO_SLUG}}/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/{{NPM_PKG}}.svg)](https://www.npmjs.com/package/{{NPM_PKG}})
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+<p align="center">
+  <a href="README.md">English</a> &middot; <a href="README_zh.md">中文</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/{{REPO_SLUG}}/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/{{REPO_SLUG}}/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=CI"></a>
+  <a href="https://www.npmjs.com/package/{{NPM_PKG}}"><img alt="npm" src="https://img.shields.io/npm/v/{{NPM_PKG}}?style=for-the-badge&logo=npm&logoColor=white&label=npm&color=CB3837"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge"></a>
+</p>
+
+<p align="center">
+  <img alt="Agent native" src="https://img.shields.io/badge/agent-native-111827?style=for-the-badge">
+  <img alt="JSON first" src="https://img.shields.io/badge/output-JSON--first-0891B2?style=for-the-badge">
+  <img alt="Dry-run guarded" src="https://img.shields.io/badge/writes-dry--run%20guarded-F59E0B?style=for-the-badge">
+</p>
 
 > Agent-native CLI for {{DESCRIPTION}}.
 

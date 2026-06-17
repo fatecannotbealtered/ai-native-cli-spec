@@ -1,6 +1,22 @@
-# ai-native-cli-spec
+<h1 align="center">ai-native-cli-spec</h1>
 
-**中文版 → [README_zh.md](README_zh.md)**
+<p align="center">
+  <strong>The copy-paste seed for agent-native command-line tools</strong>
+</p>
+
+<p align="center">
+  <a href="README.md">English</a> &middot; <a href="README_zh.md">中文</a>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge"></a>
+</p>
+
+<p align="center">
+  <img alt="Agent native" src="https://img.shields.io/badge/agent-native-111827?style=for-the-badge">
+  <img alt="AI-native CLI spec" src="https://img.shields.io/badge/spec-AI--native%20CLI-0891B2?style=for-the-badge">
+  <img alt="Copy-paste seed" src="https://img.shields.io/badge/seed-copy--paste%20ready-F59E0B?style=for-the-badge">
+</p>
 
 A spec suite **and a copy-paste seed** for building **AI-native CLI tools** — command-line tools designed to be driven reliably by AI agents, not just humans.
 
