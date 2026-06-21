@@ -127,7 +127,7 @@ CHANGELOG.md （人工维护，唯一真相源）
   只读缓存。业务命令不得为了提示升级而主动联网。
 - 有新版本时，维护类命令的 JSON 在 `data.notices[]` 中追加
   `type: "update_available"`、当前/最新版本、安装方式、推荐命令、已知 release URL、检查时间和下一步。文本/help 输出可追加一句简短提示。
-- `update --confirm` 负责完整生命周期：二进制/包更新加整个 `skills/<name>/` 目录同步，最终状态等同于 `npx skills add <repo> -y -g`。
+- 裸 `update` 一次调用负责完整生命周期（无 confirm token、无叶子子命令）：二进制/包更新加整个 `skills/<name>/` 目录同步，最终状态等同于 `npx skills add <repo> -y -g`。每次失败或中断都报告 `stage` + `current_version` + `binary_replaced` + `skill_sync_status`（见 CLI-SPEC §14）。
 
 ## 5. 目录布局约定
 

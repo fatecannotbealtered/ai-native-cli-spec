@@ -54,7 +54,7 @@
 - [ ] `skills/{{TOOL_NAME}}/SKILL.md` 存在；frontmatter 包含 `version`、`license: MIT`、`user-invocable: true`，且 `metadata.requires.min_version` 匹配 CLI 版本。
 - [ ] `SKILL.md` 包含 `When to use`、`Do not use`、`First Step`、Agent 默认规则、JSON contract、写操作配方或明确只读边界、`STOP CHECKPOINT`、错误决策树、安全边界、自更新和评估场景。
 - [ ] `skills/{{TOOL_NAME}}/test-prompts.json` 存在、JSON 合法，并覆盖 fresh-agent read、写操作安全或只读边界、权限边界、`_untrusted` 处理和自更新。
-- [ ] `update --confirm` 同步整个 `skills/{{TOOL_NAME}}/` 目录，或返回等价于 `npx skills add {{REPO_SLUG}} -y -g` 的 `skill_sync_command`。
+- [ ] 裸 `update`（单命令、无 confirm token）同步整个 `skills/{{TOOL_NAME}}/` 目录，或返回等价于 `npx skills add {{REPO_SLUG}} -y -g` 的 `skill_sync_command`；失败/中断报告 `stage` + `current_version` + `binary_replaced` + `skill_sync_status`。
 - [ ] `{{TOOL_NAME}} reference`、`{{TOOL_NAME}} context`、`{{TOOL_NAME}} doctor` 可运行并输出合法的 JSON 信封 —— 代理能从干净的检出自助上手。
 - [ ] `{{TOOL_NAME}} reference` 暴露 `release_readiness`，`{{TOOL_NAME}} doctor` 报告匹配的检查项。
 - [ ] `SECURITY.md` 中的风险等级与 `.agent/SEC-SPEC.md` 声明的等级一致（`{{RISK_TIER}}`）。

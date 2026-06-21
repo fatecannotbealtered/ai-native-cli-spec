@@ -54,7 +54,7 @@ Run through this gate **before the first public push** of `{{TOOL_NAME}}`. It is
 - [ ] `skills/{{TOOL_NAME}}/SKILL.md` is present; frontmatter includes `version`, `license: MIT`, `user-invocable: true`, and `metadata.requires.min_version` matching the CLI version.
 - [ ] `SKILL.md` includes `When to use`, `Do not use`, `First Step`, agent defaults, JSON contract, write recipe or explicit read-only boundary, `STOP CHECKPOINT`, error decision tree, security boundary, self-update, and eval scenarios.
 - [ ] `skills/{{TOOL_NAME}}/test-prompts.json` is present, valid JSON, and covers fresh-agent read, write safety or read-only boundary, permission boundary, `_untrusted` handling, and self-update.
-- [ ] `update --confirm` syncs the whole `skills/{{TOOL_NAME}}/` directory or returns a `skill_sync_command` equivalent to `npx skills add {{REPO_SLUG}} -y -g`.
+- [ ] A bare `update` (single command, no confirm token) syncs the whole `skills/{{TOOL_NAME}}/` directory or returns a `skill_sync_command` equivalent to `npx skills add {{REPO_SLUG}} -y -g`; failures/interruptions report `stage` + `current_version` + `binary_replaced` + `skill_sync_status`.
 - [ ] `{{TOOL_NAME}} reference`, `{{TOOL_NAME}} context`, and `{{TOOL_NAME}} doctor` run and emit valid JSON envelopes — an agent can self-onboard from a clean checkout.
 - [ ] `{{TOOL_NAME}} reference` exposes `release_readiness`, and `{{TOOL_NAME}} doctor` reports the matching check.
 - [ ] The risk tier in `SECURITY.md` matches the tier declared in `.agent/SEC-SPEC.md` (`{{RISK_TIER}}`).

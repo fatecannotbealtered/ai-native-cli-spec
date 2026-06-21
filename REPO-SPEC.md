@@ -143,9 +143,11 @@ Cross-language tools distribute via a uniform npm wrapper, so Go binaries and Py
   `data.notices[]` with `type: "update_available"`, current/latest versions,
   install method, recommended command, release URL when known, checked-at
   timestamp, and next steps. Text/help output may append one concise line.
-- `update --confirm` owns the full lifecycle: binary/package update plus whole
-  `skills/<name>/` directory sync, with the same end state as
-  `npx skills add <repo> -y -g`.
+- A bare `update` owns the full lifecycle in one call (no confirm token, no leaf
+  subcommands): binary/package update plus whole `skills/<name>/` directory sync,
+  with the same end state as `npx skills add <repo> -y -g`. Every failure or
+  interruption reports `stage` + `current_version` + `binary_replaced` +
+  `skill_sync_status` (see CLI-SPEC §14).
 
 ## 5. Directory layout convention
 
