@@ -125,8 +125,7 @@ CHANGELOG.md （人工维护，唯一真相源）
 - 版本通知是面向 Agent 的结构化契约，不是全局横幅。`update --check`
   刷新更新状态，并可在工具的用户配置目录写入短缓存；`doctor` 可以用短超时主动刷新，网络失败静默降级；`context` 和 `--help`
   只读缓存。业务命令不得为了提示升级而主动联网。
-- 有新版本时，维护类命令的 JSON 在 `data.notices[]` 中追加
-  `type: "update_available"`、当前/最新版本、安装方式、推荐命令、已知 release URL、检查时间和下一步。文本/help 输出可追加一句简短提示。
+- 有新版本时，通知含 `type: "update_available"`、`severity`、当前/最新版本、安装方式、推荐命令、已知 release URL、检查时间和下一步。它出现在维护类命令的 `data`，并以只读方式（不联网）出现在任意命令的 `meta.notices`。`severity` 由 CHANGELOG 增量定级：增量含 `security` 条目或跨 major 版本→`warning`，否则 `info`（`critical` 保留给已 yank/有漏洞的版本）。文本/help 输出可追加一句简短提示。
 - 裸 `update` 一次调用负责完整生命周期（无 confirm token、无叶子子命令）：二进制/包更新加整个 `skills/<name>/` 目录同步，最终状态等同于 `npx skills add <repo> -y -g`。每次失败或中断都报告 `stage` + `current_version` + `binary_replaced` + `skill_sync_status`（见 CLI-SPEC §14）。
 
 ## 5. 目录布局约定

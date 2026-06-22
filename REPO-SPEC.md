@@ -139,10 +139,14 @@ Cross-language tools distribute via a uniform npm wrapper, so Go binaries and Py
   with a short timeout and degrade silently on network failure. `context` and
   `--help` only read the cache. Business commands must not phone home just to
   advertise updates.
-- When an update is available, maintenance command JSON adds
-  `data.notices[]` with `type: "update_available"`, current/latest versions,
-  install method, recommended command, release URL when known, checked-at
-  timestamp, and next steps. Text/help output may append one concise line.
+- When an update is available, the notice carries `type: "update_available"`,
+  `severity`, current/latest versions, install method, recommended command,
+  release URL when known, checked-at timestamp, and next steps. It appears in
+  maintenance command `data` and, read-only from the cache (no network), in any
+  command's `meta.notices`. `severity` is graded from the CHANGELOG delta:
+  `warning` when the delta has a `security` entry or a major-version bump, else
+  `info` (`critical` reserved for known-yanked/vulnerable). Text/help output may
+  append one concise line.
 - A bare `update` owns the full lifecycle in one call (no confirm token, no leaf
   subcommands): binary/package update plus whole `skills/<name>/` directory sync,
   with the same end state as `npx skills add <repo> -y -g`. Every failure or
