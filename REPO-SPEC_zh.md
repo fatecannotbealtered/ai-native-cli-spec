@@ -126,7 +126,7 @@ CHANGELOG.md （人工维护，唯一真相源）
   刷新更新状态，并可在工具的用户配置目录写入短缓存；`doctor` 可以用短超时主动刷新，网络失败静默降级；`context` 和 `--help`
   只读缓存。业务命令不得为了提示升级而主动联网。
 - 有新版本时，通知含 `type: "update_available"`、`severity`、当前/最新版本、安装方式、推荐命令、已知 release URL、检查时间和下一步。它出现在维护类命令的 `data`，并以只读方式（不联网）出现在任意命令的 `meta.notices`。`severity` 由 CHANGELOG 增量定级：增量含 `security` 条目或跨 major 版本→`warning`，否则 `info`（`critical` 保留给已 yank/有漏洞的版本）。文本/help 输出可追加一句简短提示。
-- 裸 `update` 一次调用负责完整生命周期（无 confirm token、无叶子子命令）：二进制/包更新加整个 `skills/<name>/` 目录同步，最终状态等同于 `npx skills add <repo> -y -g`。每次失败或中断都报告 `stage` + `current_version` + `binary_replaced` + `skill_sync_status`（见 CLI-SPEC §14）。
+- 裸 `update` 一次调用负责完整生命周期（无 confirm token、无叶子子命令）：二进制/包更新加整个 `skills/<name>/` 目录同步，最终状态等同于 `npx skills add <repo> -y -g`。独立二进制经进程内 Sigstore 验签后原地替换；包管理器管理的安装则通过**驱动包管理器**（替用户执行 `npm install -g <pkg>@<version>` / `go install …`）来升级，绝不原地改被管理的文件、也绝不只是把命令打印给用户去跑。每次失败或中断都报告 `stage` + `current_version` + `binary_replaced` + `skill_sync_status`（见 CLI-SPEC §14）。
 
 ## 5. 目录布局约定
 
@@ -177,6 +177,16 @@ template/
 - 实例化方式：拷 `common/.`，再叠加**恰好一种** `<lang>/.`；把 `<lang>` 的 `.gitignore` 追加到通用那份后面。详见 `template/INSTANTIATE.md`。
 - **加一门语言 = 加一个 `template/<lang>/`**（约 6 个文件：CI / release / 格式化 / 构建管线），100% 复用 `common/`。
 - `.agent/` 的行为规范（`AGENT`、`CLI-SPEC`、`SKILL-SPEC`、`SEC-SPEC`）放在 `common/`，**绝不按语言分叉**——机器契约跨语言完全一致，不同的只有构建/CI 管线。
+
+### 5c. 规范单源化：钉住、同步、守卫
+
+`.agent/` 规范与 canonical `contract/contract.json` **只在一个地方维护——本模板**——并 vendor 进各工具，绝不每仓手维护。机制对齐版本单源流程（§4）：一个注册表，两个消费者（写入器 + 失败关闭的校验器）。
+
+- **注册表：** `scripts/spec-files.js` 列出所有 spec-synced 路径（八份 `.agent/*.md`、`contract/contract.json`、以及 sync/check/codegen 工具脚本）。
+- **钉版本：** 每个工具在 `.agent/SPEC_VERSION` 记录所追踪的 spec tag（如 `v1.4`），与 `degit …#v1.4` 安装流程同一种钉法。
+- **写入器：** `scripts/sync-spec.js` 从 `ai-native-cli-spec@<pin>` 逐字节 vendor 每个注册文件，再从同步来的 `contract.json` 重新生成各语言契约模块（`contract_gen.{go,py}`）。
+- **校验器（CI，失败关闭）：** `scripts/check-spec.js` 从 `template@<pin>` 重新拉取每个注册文件并断言逐字节一致（瞬时网络故障降级为告警），并——严格、离线——断言生成的契约模块与 `contract.json` 一致。漂移即 CI 红，所以工具可以重新同步，但绝不能悄悄分叉规范或契约。
+- **编辑流程：** 只在模板改规范/契约 → tag 一个新 spec 版本 → 各工具升 `.agent/SPEC_VERSION` 并跑 `sync-spec` → diff 是机械的、守卫证明对齐。工具绝不直接编辑 `.agent/*` 或 `contract.json`。
 
 ## 6. 质量门禁约定
 

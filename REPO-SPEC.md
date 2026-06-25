@@ -149,8 +149,12 @@ Cross-language tools distribute via a uniform npm wrapper, so Go binaries and Py
   append one concise line.
 - A bare `update` owns the full lifecycle in one call (no confirm token, no leaf
   subcommands): binary/package update plus whole `skills/<name>/` directory sync,
-  with the same end state as `npx skills add <repo> -y -g`. Every failure or
-  interruption reports `stage` + `current_version` + `binary_replaced` +
+  with the same end state as `npx skills add <repo> -y -g`. A standalone binary is
+  replaced in place after in-process Sigstore verification; a package-manager-managed
+  install is upgraded by **driving the manager** (running `npm install -g
+  <pkg>@<version>` / `go install …` on the user's behalf), never by mutating managed
+  files in place and never by merely printing the command for the user to run. Every
+  failure or interruption reports `stage` + `current_version` + `binary_replaced` +
   `skill_sync_status` (see CLI-SPEC §14).
 
 ## 5. Directory layout convention
@@ -202,6 +206,30 @@ template/
 - Instantiate by copying `common/.` then overlaying **exactly one** `<lang>/.`; concatenate the `<lang>` `.gitignore` onto the common one. See `template/INSTANTIATE.md`.
 - **Adding a language = add `template/<lang>/`** (~6 files of CI / release / formatter / build plumbing), reusing 100% of `common/`.
 - The `.agent/` behavioral specs (`AGENT`, `CLI-SPEC`, `SKILL-SPEC`, `SEC-SPEC`) live in `common/` and **never fork per language** — the machine contract is identical across languages; only build/CI plumbing differs.
+
+### 5c. Spec single-sourcing: pin, sync, guard
+
+The `.agent/` specs and the canonical `contract/contract.json` are **managed in
+exactly one place — this template** — and vendored into each tool, never
+hand-maintained per repo. The mechanism mirrors the version single-source flow
+(§4): one registry, two consumers (a writer and a fail-closed verifier).
+
+- **Registry:** `scripts/spec-files.js` lists every spec-synced path (the eight
+  `.agent/*.md`, `contract/contract.json`, and the sync/check/codegen tooling).
+- **Pin:** each tool records the spec tag it tracks in `.agent/SPEC_VERSION`
+  (e.g. `v1.4`), the same tag-pinning used by the `degit …#v1.4` install flow.
+- **Writer:** `scripts/sync-spec.js` vendors every registry file from
+  `ai-native-cli-spec@<pin>` byte-for-byte, then regenerates the per-language
+  contract module (`contract_gen.{go,py}`) from the synced `contract.json`.
+- **Verifier (CI, fail-closed):** `scripts/check-spec.js` re-fetches each registry
+  file from `template@<pin>` and asserts byte-identity (a transient network
+  failure degrades to a warning), and — strictly, offline — asserts the generated
+  contract module matches `contract.json`. Drift turns CI red, so a tool can
+  re-sync but can never silently fork the specs or the contract.
+- **Editing flow:** change the spec/contract **only** in the template → tag a new
+  spec version → in each tool bump `.agent/SPEC_VERSION` and run `sync-spec` → the
+  diff is mechanical and the guard proves alignment. Tools never edit `.agent/*`
+  or `contract.json` directly.
 
 ## 6. Quality gate convention
 
