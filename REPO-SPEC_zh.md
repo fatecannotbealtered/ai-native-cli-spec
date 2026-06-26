@@ -183,7 +183,7 @@ template/
 `.agent/` 规范与 canonical `contract/contract.json` **只在一个地方维护——本模板**——并 vendor 进各工具，绝不每仓手维护。机制对齐版本单源流程（§4）：一个注册表，两个消费者（写入器 + 失败关闭的校验器）。
 
 - **注册表：** `scripts/spec-files.js` 列出所有 spec-synced 路径（八份 `.agent/*.md`、`contract/contract.json`、以及 sync/check/codegen 工具脚本）。
-- **钉版本：** 每个工具在 `.agent/SPEC_VERSION` 记录所追踪的 spec tag（如 `v1.4`），与 `degit …#v1.4` 安装流程同一种钉法。
+- **钉版本：** 每个工具在 `.agent/SPEC_VERSION` 记录所追踪的 spec tag（如 `v1.5.0`），与 `degit …#v1.5.0` 安装流程同一种钉法。
 - **写入器：** `scripts/sync-spec.js` 从 `ai-native-cli-spec@<pin>` 逐字节 vendor 每个注册文件，再从同步来的 `contract.json` 重新生成各语言契约模块（`contract_gen.{go,py}`）。
 - **校验器（CI，失败关闭）：** `scripts/check-spec.js` 从 `template@<pin>` 重新拉取每个注册文件并断言逐字节一致（瞬时网络故障降级为告警），并——严格、离线——断言生成的契约模块与 `contract.json` 一致。漂移即 CI 红，所以工具可以重新同步，但绝不能悄悄分叉规范或契约。
 - **编辑流程：** 只在模板改规范/契约 → tag 一个新 spec 版本 → 各工具升 `.agent/SPEC_VERSION` 并跑 `sync-spec` → diff 是机械的、守卫证明对齐。工具绝不直接编辑 `.agent/*` 或 `contract.json`。

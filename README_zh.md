@@ -80,7 +80,7 @@ LLM Agent 时刻在调 CLI，但绝大多数 CLI 是给人用的：散文式输�
   npx degit fatecannotbealtered/ai-native-cli-spec/template/common .
   npx degit fatecannotbealtered/ai-native-cli-spec/template/go .   # 或 template/python
   ```
-- **固定版本：** 在每条路径后加 `#v1.0`，如 `.../template/common#v1.0 .`
+- **固定版本：** 在每条路径后加 `#v1.5.0`，如 `.../template/common#v1.5.0 .`
 - **从零起新仓库：** 在 GitHub 上点 **Use this template**，然后只保留你需要的那一种 `template/<lang>`。
 
 然后照 [`template/INSTANTIATE.md`](template/INSTANTIATE.md) 填好占位符，填好 `AGENTS.md` 底部的 `## 本项目` 一节，让 agent 照着 `.agent/AGENT.md` 里的**工作流 A（新建工具）**走。

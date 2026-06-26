@@ -80,7 +80,7 @@ It is intentionally **layered, not heavy**:
   npx degit fatecannotbealtered/ai-native-cli-spec/template/common .
   npx degit fatecannotbealtered/ai-native-cli-spec/template/go .   # or template/python
   ```
-- **Pin a version:** append `#v1.0` to each path, e.g. `.../template/common#v1.0 .`
+- **Pin a version:** append `#v1.5.0` to each path, e.g. `.../template/common#v1.5.0 .`
 - **Start a brand-new repo:** click **Use this template** on GitHub, then keep only the one `template/<lang>` you need.
 
 Then walk [`template/INSTANTIATE.md`](template/INSTANTIATE.md) to fill placeholders, customize the `## 本项目` (This project) section at the bottom of `AGENTS.md`, and let the agent follow **Workflow A (greenfield)** in `.agent/AGENT.md`.

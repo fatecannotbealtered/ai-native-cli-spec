@@ -217,7 +217,7 @@ hand-maintained per repo. The mechanism mirrors the version single-source flow
 - **Registry:** `scripts/spec-files.js` lists every spec-synced path (the eight
   `.agent/*.md`, `contract/contract.json`, and the sync/check/codegen tooling).
 - **Pin:** each tool records the spec tag it tracks in `.agent/SPEC_VERSION`
-  (e.g. `v1.4`), the same tag-pinning used by the `degit …#v1.4` install flow.
+  (e.g. `v1.5.0`), the same tag-pinning used by the `degit …#v1.5.0` install flow.
 - **Writer:** `scripts/sync-spec.js` vendors every registry file from
   `ai-native-cli-spec@<pin>` byte-for-byte, then regenerates the per-language
   contract module (`contract_gen.{go,py}`) from the synced `contract.json`.
