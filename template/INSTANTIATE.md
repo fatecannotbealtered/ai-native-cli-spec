@@ -23,8 +23,9 @@ template/
 │   ├── skills/{SKILL.md.tmpl,test-prompts.json.tmpl}
 │   └── .gitignore / .gitattributes
 │                                 # common hygiene; per-language .gitignore appended
-├── go/                     # overlay — ci.yml, release.yml, .goreleaser.yml,
-│                           #   Makefile, .golangci.yml, cmd/fcc_guard_test.go, .gitignore
+├── go/                     # overlay — ci.yml, release.yml, dependabot.yml,
+│                           #   .goreleaser.yml, Makefile, .golangci.yml,
+│                           #   cmd/fcc_guard_test.go, .gitignore
 └── python/                 # overlay — ci.yml, release.yml, ruff.toml,
 │                           #   tests/test_fcc_guard.py, .gitignore
 ```
