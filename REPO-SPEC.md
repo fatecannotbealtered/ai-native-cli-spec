@@ -147,15 +147,25 @@ Cross-language tools distribute via a uniform npm wrapper, so Go binaries and Py
   `warning` when the delta has a `security` entry or a major-version bump, else
   `info` (`critical` reserved for known-yanked/vulnerable). Text/help output may
   append one concise line.
+- `update` result fields describe the final post-command state, not just the
+  pre-install comparison. After a successful install, `current_version` equals
+  `target_version`, `previous_version` carries the old version, and
+  `update_available` is `false`. A cached update notice for the installed target
+  must be cleared or suppressed before later commands attach `meta.notices`.
 - A bare `update` owns the full lifecycle in one call (no confirm token, no leaf
   subcommands): binary/package update plus whole `skills/<name>/` directory sync,
   with the same end state as `npx skills add <repo> -y -g`. A standalone binary is
   replaced in place after in-process Sigstore verification; a package-manager-managed
   install is upgraded by **driving the manager** (running `npm install -g
   <pkg>@<version>` / `go install …` on the user's behalf), never by mutating managed
-  files in place and never by merely printing the command for the user to run. Every
-  failure or interruption reports `stage` + `current_version` + `binary_replaced` +
+  files in place and never by merely printing the command for the user to run. The
+  idempotent no-op check runs before any package-manager command, so an already
+  current install never re-runs `npm`, `go`, `pip`, or `brew`. Every failure or
+  interruption reports `stage` + `current_version` + `binary_replaced` +
   `skill_sync_status` (see CLI-SPEC §14).
+- Update-notice cache tests must isolate the user config directory, and compiled
+  test binaries (including Windows `*.test.exe`) must not read or write the real
+  user update cache by default.
 
 ## 5. Directory layout convention
 
