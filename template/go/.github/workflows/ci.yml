@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v7
 
       # Go version is sourced from go.mod — the single source of truth.
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -26,6 +26,15 @@ jobs:
 
       - name: Vet
         run: go vet ./...
+
+      # SEC-SPEC §5 requires an audit per shipped ecosystem, fail-closed. This is
+      # the Go half; the `npm audit` job below is the wrapper half. govulncheck
+      # also covers the Go standard library, so a toolchain CVE turns CI red --
+      # fix it by moving the `go` directive in go.mod, which setup-go reads above.
+      - name: Go vulnerability audit
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
 
       - name: Project-specific clean check
         if: runner.os == 'Linux'
@@ -59,7 +68,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -96,7 +105,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: npm
@@ -122,7 +131,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
