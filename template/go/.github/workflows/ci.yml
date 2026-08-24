@@ -120,6 +120,11 @@ jobs:
       - name: Verify version sync
         run: node scripts/check-version.js
 
+      # Fail-closed: the vendored spec assets must match the pinned tag, and the
+      # generated contract module must match contract.json (REPO-SPEC §5c).
+      - name: Verify spec/contract sync
+        run: node scripts/check-spec.js
+
   build:
     name: Build
     strategy:
