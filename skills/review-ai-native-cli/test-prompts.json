@@ -48,5 +48,15 @@
     "id": "dishonest-release-readiness",
     "prompt": "Review this repo. Its reference reports release_readiness stable but there are no live smoke/E2E records and the FCC guard is missing.",
     "expected": "Cross-check between reference output and static evidence flags the dishonest stable declaration as a Major finding, reviewer disagrees with self-declared level in the verdict section."
+  },
+  {
+    "id": "several-skills-family",
+    "prompt": "Review this CLI repo. Its .agent/SPEC_VERSION is v1.6.3, and besides skills/foo-cli/ it ships skills/foo-pcb/ and skills/foo-schematic/.",
+    "expected": "Grades the family per static-review.md §5 'Several Skills': install, pre-flight, write recipe, error tree, security boundary, _untrusted rule and self-update are checked in skills/foo-cli/ only; each domain Skill is checked for its own triggers, metadata.requires.skills, an opening instruction to read ../foo-cli/SKILL.md with a STOP CHECKPOINT when it is missing (absent → Major), a description that names what it does not cover, and the family-wide version. update's Skill sync scope is checked statically, never by running a bare update."
+  },
+  {
+    "id": "older-pin-newer-rule",
+    "prompt": "Review this CLI repo. Its .agent/SPEC_VERSION is v1.6.2, and its release workflow runs govulncheck but not npm audit.",
+    "expected": "The release-path audit rule arrived in v1.6.3, so it is not filed as a finding against a v1.6.2 pin: it goes under Advisory with the version that adds it, and the remedy named is bumping the pin. Findings cite only rules present in the vendored v1.6.2 specs."
   }
 ]

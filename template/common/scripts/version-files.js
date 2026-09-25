@@ -139,9 +139,12 @@ function skillMd(root) {
         const text = readRaw(file);
         const out = [];
         const ver = text.match(/^version:\s*"([^"]+)"/m);
-        if (ver) out.push({ where: "version", value: ver[1] });
+        // A Skill without either field reports null ("(missing)") rather than
+        // nothing, so a Skill added without them fails the check instead of
+        // passing it.
+        out.push({ where: "version", value: ver ? ver[1] : null });
         const min = text.match(/"min_version"\s*:\s*"([^"]+)"/);
-        if (min) out.push({ where: "min_version", value: min[1] });
+        out.push({ where: "min_version", value: min ? min[1] : null });
         return out;
       },
       write(version) {

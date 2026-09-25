@@ -35,8 +35,6 @@ Run each; capture stdout and stderr separately into the repo-relative scratch di
 | P1 | `<tool> --version` | version string; matches the repo's declared version source (package.json for npm-shell repos, else the manifest identified in static §4) | §14 |
 | P2 | `<tool> context --compact` | envelope; `data.version`; `credentials` as boolean/summary, no secrets | §11 |
 | P3 | `<tool> doctor --compact` | envelope; `checks[]` each with `check`/`status`/`fix`; includes `release_readiness` check | §11 |
-
-> P3 "must not fail on network" — scope note: §11 says a network failure must not make `doctor` *fail by itself*, but does not define whether "fail" means the **envelope** (`ok:false`) or the **process exit code**. Grade what the spec clearly requires: the envelope MUST stay `ok:true` with the failing probe honestly encoded in `checks[]` (`network:fail` + actionable `fix`). If the envelope is honest but the process still exits non-zero purely because the network probe failed, record it as at most a Minor (borderline; the machine-readable contract itself conformed) and note the spec ambiguity — do not escalate to Blocker/Major on the exit code alone.
 | P4 | `<tool> reference --compact` | envelope; `release_readiness.level`; every command has non-stub `output_schema` resolving into `schemas{}` and ≥1 example; exit_codes table matches contract.json | §11, §3.1 |
 | P5 | `<tool> changelog --since <older-version>` | envelope; entries strictly newer than `--since`; content matches CHANGELOG.md | §11 |
 | P6 | `<tool> reference --fields <a,b>` | only requested fields in `data` | §8 |
@@ -48,6 +46,8 @@ Run each; capture stdout and stderr separately into the repo-relative scratch di
 | P12 | `<tool> update --check --compact` (only if the tool ships self-update) | read-only; envelope with current/latest, install method; release host unreachable from this network → valid `E_NETWORK` envelope, mark N/A | §14 |
 | P13 | a list command with `--limit 1` | pagination fields (`count`, `has_more`, cursor/offset per contract) | §8 |
 | P14 | any command producing external content | `_untrusted` array present listing the external fields | SEC §2 |
+
+> P3 "must not fail on network" — scope note: §14 says a network failure must not make `doctor` *fail by itself*, but does not define whether "fail" means the **envelope** (`ok:false`) or the **process exit code**. Grade what the spec clearly requires: the envelope MUST stay `ok:true` with the failing probe honestly encoded in `checks[]` (`network:fail` + actionable `fix`). If the envelope is honest but the process still exits non-zero purely because the network probe failed, record it as at most a Minor (borderline; the machine-readable contract itself conformed) and note the spec ambiguity — do not escalate to Blocker/Major on the exit code alone.
 
 P8/P13/P14 need a real read command — pick the cheapest from `reference` (P4). Skip-with-reason anything requiring live credentials the user hasn't provided.
 
@@ -89,4 +89,4 @@ Only Pass/Fail carry contract weight; a Fail feeds the findings table. Verified-
 
 - `reference.release_readiness.level` vs. actual test/FCC evidence found in Phase 1 — dishonest `stable` is a Major (CLI-SPEC §13).
 - Risk tier claimed in SECURITY.md vs. tier reported in `reference`.
-- `context.data.version` vs. SKILL.md `metadata.requires.min_version`.
+- `context.data.version` vs. `metadata.requires.min_version` in every `skills/*/SKILL.md`.

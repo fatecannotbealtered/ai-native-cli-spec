@@ -1,6 +1,6 @@
 ---
 name: review-ai-native-cli
-version: "1.5.0"
+version: "1.6.3"
 description: "Reviews an AI-native CLI repository for conformance with ai-native-cli-spec: repo skeleton, vendored .agent specs, Skill compliance (static), plus building the tool and probing its machine contract — JSON envelope, exit codes, dry-run/confirm, self-describing commands (dynamic). Use when the user asks to review, audit, grade, or check spec conformance of an AI-native CLI tool or repo. Not for reviewing ordinary libraries or apps that never target agent callers."
 license: MIT
 user-invocable: true
@@ -67,7 +67,7 @@ and check items off as you go:
 ### Phase 0 — Scope
 
 1. Confirm the target is an AI-native CLI repo: `.agent/` specs exist at the root. Missing `.agent/` entirely → stop, this skill does not apply. `.agent/` present but root `AGENTS.md` missing → review normally and file the missing entry hook as a finding (it is a MUST in the file matrix).
-2. Read `.agent/SPEC_VERSION` → the pinned spec tag. All findings cite spec sections **at that tag**. No `SPEC_VERSION` (internal fork, air-gapped vendor copy)? Grade against the repo's own vendored `.agent/*` files and note in the report that no pin was declared (Minor).
+2. Read `.agent/SPEC_VERSION` → the pinned spec tag. All findings cite spec sections **at that tag**. No `SPEC_VERSION` (internal fork, air-gapped vendor copy)? Grade against the repo's own vendored `.agent/*` files and note in the report that no pin was declared (Minor). A check in this skill that the pinned spec does not contain yet (it arrived in a later spec) is not a finding: list it under Advisory with the spec version that adds it.
 3. Detect language (Go: `go.mod` / Python: `pyproject.toml` or `setup.py`) and locate the build entry (`Makefile`, `build.py`, CI workflow).
 4. Read the tool's declared risk tier (T0/T1/T2) from `SECURITY.md` — it decides which SEC-SPEC checklist items apply.
 5. Note the hosting/distribution context: GitHub with npm-shell releases, internal GitLab, private registry, or source-only. Checks tied to a distribution channel (release workflows, signing, npm shell) apply only where that channel exists — see the conditional rules in both reference files.
@@ -80,7 +80,7 @@ Source of truth for detailed rules: the **target repo's own vendored specs** —
 `.agent/CLI-SPEC.md` §17, `.agent/SKILL-SPEC.md` §10, `.agent/SEC-SPEC.md` §7 each
 end in a checklist; REPO-SPEC's file matrix comes from the spec repo at the
 pinned tag. Never grade from this skill's memory of the spec. Section numbers
-cited in this skill match spec v1.5.0 — before citing one against an older or
+cited in this skill match spec v1.6.3 — before citing one against an older or
 newer pin, verify it in the vendored copy and cite what's actually there.
 
 ### Phase 2 — Dynamic review
@@ -119,8 +119,9 @@ Self-declared release_readiness: <level from live reference output> — reviewer
 ## Advisory (non-scoring)
 <optional: industry best practices the pinned spec does not require —
 e.g. TTY-detected output switching, error `remediation` hints,
-rate-limit retry-after values, `--timeout` flags. Observations only:
-they never affect findings, severities, or the verdict.>
+rate-limit retry-after values, `--timeout` flags — and checks from a
+later spec than the pin, each with the version that adds it. Observations
+only: they never affect findings, severities, or the verdict.>
 ```
 
 Severity rubric:
@@ -138,7 +139,8 @@ The Advisory section is strictly outside the conformance frame: it may note
 agent-UX best practices the pinned spec does not mandate, but nothing in it may
 be filed as a finding or move the verdict. If an advisory observation seems
 important enough to enforce, the correct route is proposing a spec change — not
-grading against an unwritten rule.
+grading against an unwritten rule. For a check from a later spec, the route is
+bumping the target's pin.
 
 ## Reference index
 

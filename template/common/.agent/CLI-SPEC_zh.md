@@ -586,13 +586,13 @@ Skill 是写它那天的能力快照，二进制版本一漂就可能错位：�
 带 `self-update` 的工具，更新成功后**必须打通两条更新链**：
 
 1. 二进制或包本身是最新；
-2. 内置 Agent Skill 目录也是最新，最终状态等同于运行 `npx skills add <repo> -y -g`。
+2. 内置的每个 Agent Skill 目录也是最新，最终状态等同于运行 `npx skills add <repo> -y -g`。
 
-用户首次安装 Skill 仍使用 `npx skills add ...`；CLI 二进制不能暴露单独的 `install-skill` 命令。但在 update 生命周期中，工具需要负责完整更新：要么同步整个 `skills/<tool>/` 目录，要么在结果中显式返回 `skill_sync_status` 与 `skill_sync_command`，让 Agent 在使用新能力前完成同步。
+用户首次安装 Skill 仍使用 `npx skills add ...`；CLI 二进制不能暴露单独的 `install-skill` 命令。但在 update 生命周期中，工具需要负责完整更新：要么同步 `skills/` 下的每个 Skill 目录（运行 `npx skills add <repo> -y -g` 正是这样；只同步 `skills/<tool>/` 会让工具的其他 Skill（SKILL-SPEC §7）停在旧版本），要么在结果中显式返回 `skill_sync_status` 与 `skill_sync_command`，让 Agent 在使用新能力前完成同步。
 
 单命令 update 契约（无叶子子命令、无 confirm token）：
 
-- 裸 `update` 一次调用完成整个更新：解析最新（或 `--target-version`）release、验证完整性、替换二进制/包、再同步 Skill 目录。自更新是单目标、非破坏、自验证的操作，因此**豁免 §7 的 `--dry-run → --confirm <token>` 写门禁**——安全保证来自下面的进程内签名验证，而不是 Agent 对预览的审阅。`update` 没有叶子子命令。
+- 裸 `update` 一次调用完成整个更新：解析最新（或 `--target-version`）release、验证完整性、替换二进制/包、再同步各 Skill 目录。自更新是单目标、非破坏、自验证的操作，因此**豁免 §7 的 `--dry-run → --confirm <token>` 写门禁**——安全保证来自下面的进程内签名验证，而不是 Agent 对预览的审阅。`update` 没有叶子子命令。
 - **按安装方式分派——驱动包管理器执行，而不是只打印命令。**"替换二进制/包"意味着这一次调用要对*每种*安装方式都抵达升级后的终态，而不仅是独立二进制：
   - **独立二进制**（文件归工具自己所有）：下载 → 进程内 Sigstore 验签 → checksum → 原地原子替换；`signature_status: "verified"`。
   - **包管理器管理的安装**（npm / Go / Homebrew——文件归包管理器所有）：工具**不得**原地修改被管理的文件（会让包管理器的元数据失配），也**不得**仅把命令返回给用户去跑。它要**驱动**包管理器——替用户执行安装命令（如 `npm install -g <pkg>@<version>`），再同步 Skill，抵达同样的终态、`status: "updated"`。这条路径的完整性归包管理器自己（registry 完整性/provenance），所以 `signature_status` 为 `not_checked`；新版本在下次调用时生效。安装方式检测必须稳健（别把独立二进制误判为被管理的）；包管理器调用失败时返回错误、`binary_replaced: false` 并附上可手动执行的确切命令。
@@ -868,7 +868,7 @@ message 永不可破的三条铁律：
 - [ ] `reference` 报告 `release_readiness`，`doctor` 检查它
 - [ ] （含 self-update 时）`update` 是单命令（无叶子子命令、无 confirm token）；`--check` / `--dry-run` 为可选只读
 - [ ] （含 self-update 时）release 完整性被校验，签名状态显式返回
-- [ ] （含 self-update 时）整个 Skill 目录同步纳入 update 结果
+- [ ] （含 self-update 时）`skills/` 下每个 Skill 目录的同步纳入 update 结果
 - [ ] （含 self-update 时）更新后回传 previous/current 版本并提示读 changelog
 - [ ] （含 self-update 时）每个 update 失败/中断信封携带 `stage` + `current_version` + `binary_replaced` + `skill_sync_status`；`E_INTEGRITY` 非重试；二进制已换但 Skill 未同步是部分成功而非 `ok`
 - [ ] （含 self-update 时）捕获 SIGINT/SIGTERM，不留半截状态，且仍吐出终态 JSON 信封

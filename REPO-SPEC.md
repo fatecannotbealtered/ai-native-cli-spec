@@ -153,8 +153,8 @@ Cross-language tools distribute via a uniform npm wrapper, so Go binaries and Py
   `update_available` is `false`. A cached update notice for the installed target
   must be cleared or suppressed before later commands attach `meta.notices`.
 - A bare `update` owns the full lifecycle in one call (no confirm token, no leaf
-  subcommands): binary/package update plus whole `skills/<name>/` directory sync,
-  with the same end state as `npx skills add <repo> -y -g`. A standalone binary is
+  subcommands): binary/package update plus a sync of every Skill directory under
+  `skills/`, with the same end state as `npx skills add <repo> -y -g`. A standalone binary is
   replaced in place after in-process Sigstore verification; a package-manager-managed
   install is upgraded by **driving the manager** (running `npm install -g
   <pkg>@<version>` / `go install …` on the user's behalf), never by mutating managed

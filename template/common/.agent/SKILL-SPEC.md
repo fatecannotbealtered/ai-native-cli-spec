@@ -65,6 +65,7 @@ metadata: { "requires": { "bins": [ "outlook-cli" ], "min_version": "1.1.0" } }
 ```
 
 - `metadata.requires.bins`: dependent executable names, a **string array**. Keep the string form so any agent runtime can read it; don't switch to an object array.
+- `metadata.requires.skills`: other Skills this one depends on, a **string array** of Skill names. A domain Skill uses it to name its tool's entry Skill (§7).
 - `metadata.requires.min_version`: the minimum tool version the Skill's commands need. **A Skill is a snapshot of capabilities the day it was written**; an older binary will call commands that don't exist — declare the minimum version, paired with `tool doctor`'s version check (see `CLI-SPEC.md` version negotiation) to stop silent misalignment.
 - When a Skill upgrade uses a new command, raise `min_version` accordingly.
 
@@ -73,6 +74,7 @@ metadata: { "requires": { "bins": [ "outlook-cli" ], "min_version": "1.1.0" } }
 - File is always `SKILL.md`, directory = `name` (kebab-case).
 - Prefer gerunds: `processing-pdfs`, `analyzing-spreadsheets`.
 - Noun phrases acceptable: `pdf-processing`; a tool-style CLI may use the tool name itself: `outlook-cli`.
+- A tool with several Skills (§7): the entry Skill keeps the tool name (`outlook-cli`); the others are `<product>-<area>` (`outlook-calendar`), `<product>` being the tool name without its `-cli` suffix, so the family sorts together.
 - No vague names: `helper`, `utils`, `tools`, `data`.
 
 ## 4. Progressive disclosure (three load levels)
@@ -88,7 +90,7 @@ Conventions:
 - Body < 500 lines; split when approaching the limit.
 - **References only one level deep**: all reference files link directly from `SKILL.md`; no A→B→C chained nesting (some runtimes may only preview nested files, losing information).
 - For reference files > 100 lines, add a table of contents at the top (so a partial preview still shows the whole scope).
-- Multi-domain tools split files by domain (`reference/mail.md`, `reference/calendar.md`) to avoid loading irrelevant context.
+- Multi-domain tools split files by domain (`reference/mail.md`, `reference/calendar.md`) to avoid loading irrelevant context. That is the default; a separate Skill per domain (§7) is for domains users ask for in different words.
 - Paths always forward-slash `reference/guide.md`, never backslash (cross-platform).
 
 ## 5. Match degrees of freedom
@@ -101,9 +103,9 @@ Choose granularity by task fragility:
 
 ## 6. CLI-front-door conventions (specific to AI-native CLI tools)
 
-This is what distinguishes an "AI-native CLI tool" Skill from an ordinary one; it must include:
+This is what distinguishes an "AI-native CLI tool" Skill from an ordinary one; it must include (with several Skills, §7 says which Skill carries each item):
 
-1. **Install block**: copy-paste-runnable install commands at the top, CLI and Skill listed separately, plus a line like "please install X and use it for all Y operations going forward." The Skill install path uses `npx skills add ...`; the CLI binary must not expose its own `install-skill` command. The binary in the install block must match `metadata.requires.bins`.
+1. **Install block**: copy-paste-runnable install commands at the top, CLI and Skill listed separately, plus a line like "please install X and use it for all Y operations going forward." The Skill install path uses `npx skills add ...`; the CLI binary must not expose its own `install-skill` command. The binary in the install block must match `metadata.requires.bins`. With several Skills (§7) the install block lives in the entry Skill, and one `npx skills add <repo> -y -g` installs all of them.
 2. **Trigger list**: keywords / scenarios that activate this Skill, and clearly **when not to call it**.
 3. **Capability-discovery pointer**: tell the agent explicitly "run `tool reference` first for capabilities and params, don't rely on this doc or `--help`."
 4. **Pre-flight check**: before acting, run `tool context` / `tool doctor` to confirm credentials, environment, and **whether the version meets `requires.min_version`**, rather than hitting `E_AUTH` or calling a missing command.
@@ -125,7 +127,7 @@ This is what distinguishes an "AI-native CLI tool" Skill from an ordinary one; i
    ```
    `update` is a single command — no `--confirm` token, no leaf subcommands
    (`--check` / `--dry-run` are optional read-only probes). See CLI-SPEC §14.
-   Recipe rule: **after self-update, before continuing, ensure the whole Skill
+   Recipe rule: **after self-update, before continuing, ensure every Skill
    directory was synced and read the delta via `changelog --since`**, or you'll
    be blind to the new commands you just gained. Skill sync must have the same
    end state as running `npx skills add <repo> -y -g`; the CLI must not expose a
@@ -156,6 +158,65 @@ Conventions:
 - Make scripts explicit: "execute" vs "read as reference" — "run `helper.py`" vs "see `helper.py` for the algorithm."
 - Scripts must be self-contained and fault-tolerant, not punting errors to the agent; no magic constants (justify every constant).
 
+### Several Skills for one tool
+
+A repository may ship more than one Skill. The Skills of one tool form a family:
+one entry Skill and any number of domain Skills.
+
+```text
+skills/
+├── outlook-cli/          # entry Skill: install, pre-flight, contract, safety
+├── outlook-mail/         # domain Skill
+└── outlook-calendar/     # domain Skill
+```
+
+- **Split by trigger, not by module.** Two Skills are warranted when users ask for
+  them in different words ("draw a schematic" / "align these parts"). If a typical
+  task would load both, keep them as one. Every extra Skill adds its `description`
+  to what the runtime always holds (§4), so a split has to buy a shorter, more
+  relevant body on the tasks that trigger it.
+- **`skills/<tool>/` is the entry Skill.** It keeps the tool name and carries what
+  the family shares: the install block, pre-flight (`context` / `doctor` /
+  `reference`), the write recipe, the error decision tree, the permission and
+  security boundary, the `_untrusted` rule and the self-update recipe (§6). Domain
+  Skills point at it rather than repeat it. Each Skill, the entry one included,
+  still carries its own trigger list, the `STOP CHECKPOINT`s for the writes it
+  describes, and playbooks, eval scenarios and `test-prompts.json` for the
+  requests it triggers on. The §10 checklist is graded across the family on that
+  split.
+- **A domain Skill declares the entry Skill and loads it.** It declares it with
+  `metadata.requires.skills: ["<tool>"]`, next to `requires.bins`, and its body
+  opens by telling the agent to read `../<tool>/SKILL.md` before running any
+  command. If that file is missing, the body says to stop at a `STOP CHECKPOINT`
+  and, once the user agrees, install the family with `npx skills add <repo> -y -g`.
+  The declaration alone loads nothing: runtimes do not resolve `requires.skills`,
+  and `--skill <name>` installs a domain Skill without its entry Skill. Without the
+  instruction, a domain Skill runs without the security boundary and the
+  `_untrusted` rule.
+- **Every description says what it does not cover, and which Skill does** ("…not
+  for board layout — use `<product>-pcb`"). With several Skills from one tool the
+  descriptions are all the runtime has to choose between them, so the boundary
+  belongs in the description, not only in the body.
+- **One version for the family.** Every Skill's `version` and
+  `metadata.requires.min_version` equal the tool version (§2); the version tooling
+  iterates `skills/*/`.
+- **A renamed or merged Skill keeps its old name as a stub**: a Skill under the old
+  name whose description says it applies only when named explicitly and which
+  Skill handles the request, and whose body says to read `../<new>/SKILL.md`, with
+  the same fallback as a domain Skill when that file is missing. References to the
+  old name keep resolving, and the next install overwrites the old copy with the
+  stub: `npx skills add` never deletes an installed Skill that has left the
+  repository. A stub needs only its frontmatter (`version` and
+  `metadata.requires.min_version` included) and that pointer; the other
+  domain-Skill rules do not apply to it.
+- **One install command covers the family.** `npx skills add <repo> -y -g`
+  installs every Skill under `skills/` without `--skill`; `--list` shows them and
+  `--skill <name>` narrows the set. It reads the Git repository, not a package
+  registry, so it works before the CLI's packages are published. If the tool is
+  also published to a Skill registry that binds Skills to the CLI, publish every
+  Skill in the family there, the entry one included, and check whether binding
+  replaces the bound set or appends to it.
+
 ## 8. Content rules
 
 - **No time-sensitive info** ("before Aug 2025 use the old API"). Put history in a `## Old patterns` collapsible section.
@@ -174,6 +235,8 @@ Conventions:
 
 ## 10. Authoring checklist
 
+With several Skills, tick each item for the family, on the split in §7.
+
 - [ ] `name` compliant (≤64, kebab-case, no reserved words / XML)
 - [ ] `description` third person, with what + when + keywords, ≤1024
 - [ ] Body < 500 lines, detail pushed down
@@ -188,7 +251,7 @@ Conventions:
 - [ ] Pre-flight check includes whether version meets `min_version`
 - [ ] Write commands give the fixed `dry-run → confirm` recipe
 - [ ] Dangerous or high-blast-radius actions have explicit `STOP CHECKPOINT` lines
-- [ ] (with self-update) gives the "sync whole Skill directory, then read delta via `changelog --since`" recipe
+- [ ] (with self-update) gives the "sync every Skill directory, then read delta via `changelog --since`" recipe
 - [ ] Has the error decision tree (consumes exit code / retryable)
 - [ ] Declares permission tiers and security boundary
 - [ ] Has the untrusted-content convention (`_untrusted` treated as data, see SEC-SPEC §2)
@@ -197,3 +260,7 @@ Conventions:
 - [ ] All paths forward-slash, consistent terminology, no time-sensitive info
 - [ ] ≥ 3 eval scenarios, tested across models
 - [ ] `test-prompts.json` exists and covers fresh-agent read, write safety or read-only boundary, permission boundary, `_untrusted`, and self-update
+- [ ] (several Skills) the entry Skill is `skills/<tool>/`; every domain Skill declares `metadata.requires.skills: ["<tool>"]` (a stub needs only its frontmatter and pointer, §7)
+- [ ] (several Skills) every domain Skill's body opens by telling the agent to read `../<tool>/SKILL.md`, and to stop at a `STOP CHECKPOINT` when that file is missing
+- [ ] (several Skills) every `description` states what it does not cover and which Skill does
+- [ ] (several Skills) every Skill's `version` and `min_version` equal the tool version

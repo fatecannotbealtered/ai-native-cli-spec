@@ -666,20 +666,22 @@ For tools with `self-update`, after a successful update they **must close both
 refresh loops**:
 
 1. the binary/package is current;
-2. the bundled Agent Skill directory is current, with the same end state as
+2. every bundled Agent Skill directory is current, with the same end state as
    running `npx skills add <repo> -y -g`.
 
 The user-facing Skill install command stays `npx skills add ...`; the binary
 must not expose a separate `install-skill` command. During update, however, the
-tool owns the full lifecycle and must either sync the entire `skills/<tool>/`
-directory or return an explicit `skill_sync_status` and `skill_sync_command`
+tool owns the full lifecycle and must either sync every Skill directory under
+`skills/` — running `npx skills add <repo> -y -g` does exactly that, and syncing
+only `skills/<tool>/` would leave a tool's other Skills (SKILL-SPEC §7) behind —
+or return an explicit `skill_sync_status` and `skill_sync_command`
 that the agent can execute before using new behavior.
 
 Single-command update contract (no leaf commands, no confirm token):
 
 - A bare `update` performs the whole update in ONE call: resolve the latest (or
   `--target-version`) release, verify its integrity, replace the binary/package,
-  then sync the Skill directory. Self-update is a single-target, non-destructive,
+  then sync the Skill directories. Self-update is a single-target, non-destructive,
   self-verifying operation, so it is **exempt from the §7 `--dry-run → --confirm
   <token>` write gate** — the safety guarantee is the in-process signature
   verification below, not an agent's review of a preview. There are no `update`
@@ -1048,7 +1050,7 @@ These three patterns are **not for everyone**: implement them if your tool needs
 - [ ] `reference` reports `release_readiness`, and `doctor` checks it
 - [ ] (with self-update) `update` is a single command (no leaf subcommands, no confirm token); `--check` / `--dry-run` are optional read-only
 - [ ] (with self-update) release integrity is verified, and signature status is explicit
-- [ ] (with self-update) whole Skill directory sync is part of the update result
+- [ ] (with self-update) syncing every Skill directory under `skills/` is part of the update result
 - [ ] (with self-update) post-update returns previous/current version and hints to read changelog
 - [ ] (with self-update) every update failure/interruption envelope carries `stage` + `current_version` + `binary_replaced` + `skill_sync_status`; `E_INTEGRITY` is non-retryable; binary-replaced-but-Skill-unsynced is partial success, not `ok`
 - [ ] (with self-update) SIGINT/SIGTERM is trapped, leaves nothing half-applied, and still emits the terminal JSON envelope

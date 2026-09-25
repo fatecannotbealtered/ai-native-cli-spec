@@ -33,7 +33,7 @@ note "waived by channel overlay" instead of filing a finding.
 
 ## 2. Repo skeleton (REPO-SPEC §1, §5)
 
-MUST files: `README.md`, `CHANGELOG.md` (Keep a Changelog with `Unreleased`), `CONTRIBUTING.md`, `SECURITY.md`, `.gitignore`, CI config (`.github/workflows/ci.yml`, `.gitlab-ci.yml`, or the platform's equivalent — what matters is lint + test on push/PR, not the filename), `AGENTS.md`, `.agent/*`, `skills/<tool>/SKILL.md`.
+MUST files: `README.md`, `CHANGELOG.md` (Keep a Changelog with `Unreleased`), `CONTRIBUTING.md`, `SECURITY.md`, `.gitignore`, CI config (`.github/workflows/ci.yml`, `.gitlab-ci.yml`, or the platform's equivalent — what matters is lint + test on push/PR, not the filename), `AGENTS.md`, `.agent/*`, `skills/<tool>/SKILL.md` (the entry Skill when the tool ships several — SKILL-SPEC §7).
 
 Conditional MUSTs:
 
@@ -69,11 +69,18 @@ otherwise whatever manifest the repo declares — `pyproject.toml`, VERSION file
 Apply the full checklist from the target's `.agent/SKILL-SPEC.md` §10. Highest-weight items:
 
 - Frontmatter: `name` kebab-case ≤64, no reserved words; `description` third-person, what+when, ≤1024; `version` = tool version = `metadata.requires.min_version` (three equal numbers); `metadata.requires.bins` is a string array.
+- Several Skills (SKILL-SPEC §7, v1.6.3+), checked per Skill under `skills/`:
+  - `skills/<tool>/` carries the install block, pre-flight, write recipe, error decision tree, security boundary, `_untrusted` rule and self-update recipe; grade those against it, not against each domain Skill. Each Skill carries its own triggers, STOP CHECKPOINTs, playbooks, eval scenarios and `test-prompts.json`; a renamed- or merged-Skill stub is graded only on its frontmatter (`version` and `min_version` included) and its pointer with the missing-file fallback.
+  - Every domain Skill declares `metadata.requires.skills: ["<tool>"]` (Minor if absent).
+  - Every domain Skill's body opens by telling the agent to read `../<tool>/SKILL.md`, and to stop at a STOP CHECKPOINT if that file is missing. Absent → Major: nothing resolves `requires.skills`, so without the instruction the domain Skill runs without the entry Skill's security boundary and `_untrusted` rule.
+  - Every description names what it does not cover and which Skill does. Two descriptions that both claim the same request with no boundary → Major: the runtime has only the descriptions to choose between them.
+  - All Skills carry the same `version` / `min_version` (§4 of this review).
+  - If the tool self-updates, `update` syncs every Skill (CLI-SPEC §14). Running `npx skills add <repo> -y -g` does; passing `--skill <tool>` or copying only `skills/<tool>/` leaves the domain Skills stale → Major. Check the update source statically — the dynamic review never runs a bare `update`.
 - Body < 500 lines; references one level deep; forward slashes only.
 - No drift-prone duplication: flags, schemas, error lists must point to `reference`, not be copied in (Major).
 - Install block on top uses `npx skills add ...`; CLI has no `install-skill` command.
-- Required AI-native sections present: triggers incl. "do not use", First Step (context/doctor/reference + min_version check), write recipe (dry-run → confirm) or explicit read-only boundary, STOP CHECKPOINTs, error decision tree, security boundary, `_untrusted` rule, self-update recipe (if the tool self-updates), 3–6 playbooks, `## Eval Scenarios`.
-- `test-prompts.json` exists, prompts are tool-specific (not template stubs), covering: fresh-agent read, write safety or read-only boundary, permission boundary, `_untrusted`, self-update.
+- Required AI-native sections present (with several Skills, across the family on the split above): triggers incl. "do not use", First Step (context/doctor/reference + min_version check), write recipe (dry-run → confirm) or explicit read-only boundary, STOP CHECKPOINTs, error decision tree, security boundary, `_untrusted` rule, self-update recipe (if the tool self-updates), 3–6 playbooks, `## Eval Scenarios`.
+- `test-prompts.json` exists (in every Skill but a stub), prompts are tool-specific (not template stubs), covering across the family: fresh-agent read, write safety or read-only boundary, permission boundary, `_untrusted`, self-update.
 - Leftover `{{...}}` placeholders anywhere in the repo → Blocker: `grep -rnE '\{\{[A-Z_0-9]+\}\}' --exclude-dir=node_modules --exclude-dir=.git .` (pattern excludes legitimate `${{ ... }}` in workflows and `{{ .Var }}` in goreleaser).
 
 ## 6. Security posture (SEC-SPEC §7, tier-gated)
@@ -81,7 +88,7 @@ Apply the full checklist from the target's `.agent/SKILL-SPEC.md` §10. Highest-
 - Risk tier declared in `SECURITY.md` and in `reference` output (cross-check in dynamic phase).
 - T0+: `_untrusted` annotation implemented — grep source for `_untrusted`; commands returning external content (mail bodies, comments, scraped text, upstream records) must emit it (Blocker if absent where external content flows).
 - T1+: default read-only posture; credential storage follows keyring three-tier (secrets in OS keychain; config file has zero secrets — grep config-writing code for token/password fields); encrypted-file fallback visible via `context.data.credentials` backend field.
-- T1+ supply chain: lockfile committed; CI runs `npm audit` / `pip-audit`. If the tool publishes binary releases with self-update: the release pipeline signs `checksums.txt` (cosign `--new-bundle-format` on GitHub; an equivalent signing step on other platforms) and self-update verifies in-process (imports `sigstore-go` / `sigstore`, no cosign exec). No binary distribution / no self-update → these are N/A.
+- T1+ supply chain (SEC-SPEC §5): lockfile committed; CI runs a fail-closed dependency audit for **every ecosystem the tool ships in** (v1.6.0+) — a Go binary behind an npm wrapper needs both `govulncheck ./...` and `npm audit`, a Python binary behind the same wrapper needs `pip-audit` and `npm audit`. Auditing only the wrapper → Major: the binary's own dependencies go unexamined. If a release pipeline exists it runs the same audits and the spec/contract drift guard before anything is signed or published (v1.6.3+); a release path weaker than the merge path → Major. If the tool publishes binary releases with self-update: the release pipeline signs `checksums.txt` (cosign `--new-bundle-format` on GitHub; an equivalent signing step on other platforms) and self-update verifies in-process (imports `sigstore-go` / `sigstore`, no cosign exec). No binary distribution / no self-update → these are N/A.
 - T2: dangerous ops gated behind `--dangerous` (or documented equivalent) on top of confirm; blast radius documented in `reference` / `SECURITY.md`.
 - Secrets hygiene: grep for obvious leaks — `--password` flags promoted as the recommended path, tokens interpolated into log lines, `Authorization` headers in error details.
 - Source-level injection surface (concretizes SEC-SPEC §2/§3 — agents pass hallucinated or attacker-influenced values into every parameter):
@@ -95,7 +102,7 @@ Apply the full checklist from the target's `.agent/SKILL-SPEC.md` §10. Highest-
 - FCC guard test exists (Go: `cmd/fcc_guard_test.go`; Python: `tests/test_fcc_guard.py`) and enumerates leaf commands from live `reference` output.
 - Command-level tests exist per public command covering: success, bad args, auth/config failure, upstream failure (mock), envelope shape, exit codes, stdout/stderr boundary, non-interactive behavior.
 - Mock-upstream tests cover failure paths, not just happy path (spot-check 2–3 command test files).
-- CI runs lint + tests on push/PR; if a release pipeline exists, it gates on version consistency.
+- CI runs lint + tests on push/PR; if a release pipeline exists, it gates on version consistency (its audit and drift-guard gates are checked in §6).
 
 ## 8. Docs & i18n (REPO-SPEC §3)
 
