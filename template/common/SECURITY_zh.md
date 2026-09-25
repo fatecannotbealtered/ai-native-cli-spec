@@ -65,7 +65,7 @@
 - **签名 release checksum**：release 使用 tagged GitHub Actions release workflow 的 Sigstore/Cosign keyless 签名来签署 `checksums.txt`。standalone 安装/更新路径必须把签名验证状态与 checksum 校验分开报告；不能把 checksum 单独当成发布者身份验证。
 - **自更新同步 Skill**：裸 `update`（单命令、无 confirm token）成功后应同步整个内置 `skills/{{TOOL_NAME}}/` 目录，或返回等价于 `npx skills add {{REPO_SLUG}} -y -g` 的 `skill_sync_command`。
 - **npm 安装无运行时下载器**：npm wrapper 只解析已安装的平台包并执行其中的二进制；不运行安装期下载器。
-- **依赖锁定 + 审计**：锁文件入库，CI 跑 `npm audit --audit-level=high`（Python 变体跑 `pip-audit`），拦截高危依赖。
+- **依赖锁定 + 审计**：锁文件入库；CI 对工具分发涉及的每个生态做审计——二进制用 `govulncheck`（Go）或 `pip-audit`（Python），npm wrapper 用 `npm audit`——失败即阻断，每次合并都跑，发布签名或上架之前再跑一次。
 - **可追溯构建**：发布产物由 CI 从打 tag 的源码构建 —— 不手工上传二进制。
 
 把 `{{TOOL_NAME}}` 接入自动化或 AI Agent 流程前，请先审阅这些假设。

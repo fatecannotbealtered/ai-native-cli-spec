@@ -119,6 +119,10 @@ Fallback and channel rules:
   Python: `pip-audit`. `govulncheck` also covers the Go standard library, so a
   toolchain-level CVE turns CI red and is fixed by moving the `go` directive in
   `go.mod` (§4 of the repo spec pins the toolchain there, and CI reads it).
+  The release pipeline runs the same audits, and the spec/contract drift guard
+  (repo spec §5c), before anything is signed or published: an advisory published
+  after the last green merge would otherwise ship in a signed release that nothing
+  examined.
 - **Traceable builds**: release artifacts are built by CI from tagged source, no hand-uploaded unknown binaries.
 - **No remote scripts in postinstall**: don't execute code freshly pulled from the network at install time.
 
@@ -145,7 +149,7 @@ Fallback and channel rules:
 
 - [ ] Default `read-only`, agent cannot self-escalate
 - [ ] Credentials follow the keyring three-part pattern (password discarded / secrets in the OS keyring / zero-secret config); file encryption only as a visible fallback
-- [ ] Distribution checksum verified, hard-fail on mismatch; release checksum is signed or signature status is explicitly reported; dependencies locked + audited
+- [ ] Distribution checksum verified, hard-fail on mismatch; release checksum is signed or signature status is explicitly reported; dependencies locked + audited in every shipped ecosystem, on the release path as well as the merge path
 
 **T2 (high-risk / irreversible)**
 

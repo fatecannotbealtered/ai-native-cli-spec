@@ -65,7 +65,7 @@ Externally controlled text returned by the upstream service — titles, descript
 - **Signed release checksum**: releases sign `checksums.txt` with Sigstore/Cosign keyless signing from the tagged GitHub Actions release workflow. Standalone install/update paths must report signature verification status separately from checksum verification; a checksum alone is not treated as publisher authenticity.
 - **Self-update Skill sync**: a successful bare `update` (single command, no confirm token) syncs the whole bundled `skills/{{TOOL_NAME}}/` directory or returns a `skill_sync_command` equivalent to `npx skills add {{REPO_SLUG}} -y -g`.
 - **No runtime downloader in npm install**: the npm wrapper resolves the already-installed platform package and executes the bundled binary; it does not run an install-time downloader.
-- **Dependency locking + audit**: the lockfile is committed and CI runs `npm audit --audit-level=high` (and `pip-audit` for the Python variant), blocking high-severity dependencies.
+- **Dependency locking + audit**: lockfiles are committed, and CI audits every ecosystem the tool ships in — `govulncheck` (Go) or `pip-audit` (Python) for the binary, `npm audit` for the npm wrapper — fail-closed, on every merge and again before a release is signed or published.
 - **Traceable builds**: release artifacts are built by CI from tagged source — no hand-uploaded binaries.
 
 Review these assumptions before integrating `{{TOOL_NAME}}` into automation or AI-agent workflows.

@@ -58,17 +58,24 @@ jobs:
         if: runner.os == 'Linux'
         run: pip-audit -r requirements.txt
 
-      # REPO-SPEC §5c: refuse to publish a binary whose vendored spec or
-      # generated contract module has drifted from the pinned tag. ruff comes
-      # from the dev extra installed above, which gen-contract.js needs.
       - uses: actions/setup-node@v7
         if: runner.os == 'Linux'
         with:
           node-version: "20"
 
+      # The npm wrapper ships too: the same audit ci.yml runs on it.
+      - name: Audit npm wrapper
+        if: runner.os == 'Linux'
+        run: npm audit --omit=dev
+
+      # REPO-SPEC §5c: refuse to publish a binary whose vendored spec or
+      # generated contract module has drifted from the pinned tag. The full
+      # check, as in ci.yml: a fetch that fails degrades to a warning instead
+      # of failing the release. ruff comes from the dev extra installed above,
+      # which gen-contract.js needs.
       - name: Verify spec/contract sync
         if: runner.os == 'Linux'
-        run: node scripts/check-spec.js --local-only
+        run: node scripts/check-spec.js
 
       - name: Build binary
         run: python build.py

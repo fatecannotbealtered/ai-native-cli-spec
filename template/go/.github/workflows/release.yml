@@ -83,9 +83,32 @@ jobs:
           CGO_ENABLED: "1"
         run: go test -race ./...
 
+  # SEC-SPEC §5: the npm wrapper ships too, so the release path runs the npm
+  # half of the audit as well — the same install and audit steps as ci.yml's
+  # npm-audit job. It is a separate job so node_modules never lands in the tree
+  # the ci job tests.
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install package metadata
+        run: npm install --ignore-scripts --omit=optional --no-audit --no-fund
+
+      - name: Audit npm dependencies
+        run: npm audit --audit-level=high --omit=optional
+
   release:
     name: Release
-    needs: ci
+    needs: [ci, npm-audit]
     runs-on: ubuntu-latest
     permissions:
       contents: write
