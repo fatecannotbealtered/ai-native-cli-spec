@@ -65,10 +65,10 @@ jobs:
           node-version: "20"
 
       # gen-contract.js pipes the generated Python through `ruff format`, and
-      # falls back to unformatted output when ruff is missing. Without ruff on
-      # PATH the step below would regenerate a differently-formatted
-      # contract_gen.py and report drift against the correctly-formatted
-      # committed one. The codegen verifier needs the codegen's own toolchain.
+      # check-spec.js re-runs it to byte-compare against the committed module.
+      # Without ruff on PATH the generator fails closed rather than emitting
+      # unformatted output, so the codegen verifier is given the codegen's own
+      # toolchain.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
