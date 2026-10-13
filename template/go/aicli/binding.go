@@ -175,6 +175,9 @@ func (a *App) bindInvocation(st *runState, cmd *cobra.Command, m *Meta, key []by
 		if failure != nil || !f.Changed || contains(excludedFromBinding, f.Name) {
 			return
 		}
+		if f.Name == "profile" && a.Settings != nil {
+			return // the active profile is bound below, whatever chose it
+		}
 		if bound, isFile := m.FileInputs[f.Name]; isFile {
 			fi, e := a.fileInput(st, cmd, f.Name)
 			if e != nil {
@@ -222,6 +225,7 @@ func (a *App) bindInvocation(st *runState, cmd *cobra.Command, m *Meta, key []by
 			b.add("args", string(enc), shown, "args")
 		}
 	}
+	a.bindSettings(b, cmd, key)
 	sum, err := canonicalJSON(b.digests)
 	if err != nil {
 		return nil, internalError("The invocation could not be encoded.")
@@ -231,10 +235,53 @@ func (a *App) bindInvocation(st *runState, cmd *cobra.Command, m *Meta, key []by
 }
 
 func (b *binding) add(name, value string, shown any, label string) {
+	b.bind(name, value, label)
+	b.display[snake(name)] = shown
+}
+
+// bind records a bound value without showing it in preview.inputs.
+func (b *binding) bind(name, value, label string) {
 	b.values[name] = value
 	b.digests[name] = "sha256:" + sha256Hex([]byte(value))
-	b.display[snake(name)] = shown
 	b.labels[name] = label
+}
+
+// bindSettings binds the active profile and every declared setting when the tool
+// declares settings (CLI-054, CLI-101, B1): the profile's name, whatever chose it
+// ("" when none), as the input profile, and each setting's resolved value as the
+// input setting.<name>; a Secret setting binds as a keyed digest, like a secret
+// flag, and a setting that cannot be resolved binds its error. A token made under
+// one profile, or with one setting value, then refuses a confirm under another
+// (token_mismatch naming profile or setting.<name>). preview.inputs shows them as
+// profile and setting: {<name>: value}, secrets as "***".
+func (a *App) bindSettings(b *binding, cmd *cobra.Command, key []byte) {
+	if a.Settings == nil {
+		return
+	}
+	ps := a.profileState()
+	profile := ps.name
+	if profile == "" {
+		profile = ps.requested // a profile a Meta.NewProfile command creates (P6)
+	}
+	b.add("profile", claimString(profile), displayString(profile), "profile")
+	shown := map[string]any{}
+	for _, s := range a.Settings {
+		name := "setting." + s.Name
+		value, _, err := a.Setting(cmd, s.Name)
+		if err != nil {
+			value = "error: " + err.Message
+		}
+		if s.Secret {
+			b.bind(name, secretDigest(key, name, []byte(value)), name)
+			shown[s.Name] = "***"
+			continue
+		}
+		b.bind(name, claimString(value), name)
+		shown[s.Name] = displayString(value)
+	}
+	if _, taken := b.display["setting"]; !taken && len(shown) > 0 {
+		b.display["setting"] = shown
+	}
 }
 
 // labelFor names the parameter of a file-bound value: the literal flag when the
@@ -280,7 +327,9 @@ func sha256Hex(b []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// displayFlag is a flag's value as shown in preview.inputs.
+// displayFlag is a flag's value as shown in preview.inputs. An input named id, iid
+// or *_id shows as a string whatever the flag's type, since ids are strings
+// (CLI-007, P2): --iid 5 shows "iid":"5".
 func displayFlag(f *pflag.Flag) any {
 	if sv, ok := f.Value.(pflag.SliceValue); ok {
 		list := sv.GetSlice()
@@ -291,6 +340,9 @@ func displayFlag(f *pflag.Flag) any {
 		return out
 	}
 	s := f.Value.String()
+	if isIDName(snake(f.Name)) {
+		return displayString(s)
+	}
 	switch typ, _ := flagType(f); typ {
 	case "boolean":
 		if v, err := strconv.ParseBool(s); err == nil {
@@ -302,6 +354,11 @@ func displayFlag(f *pflag.Flag) any {
 		}
 	}
 	return displayString(s)
+}
+
+// isIDName reports a name CLI-007 reserves for ids: id, iid, or one ending in _id.
+func isIDName(name string) bool {
+	return name == "id" || name == "iid" || strings.HasSuffix(name, "_id")
 }
 
 // displayString shows a value, or its digest and size when it is long.

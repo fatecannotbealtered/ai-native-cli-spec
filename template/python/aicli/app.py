@@ -12,8 +12,10 @@ import contextlib
 import contextvars
 import datetime as _dt
 import os
+import ssl
 import sys
 import time
+import urllib.parse
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -31,15 +33,15 @@ from ._tree import (
 )
 from ._util import Ordered, go_json, truncate_runes, utc
 from .binding import BindingMixin
-from .builtins import BuiltinsMixin, Check
-from .contract_gen import DEFAULT_FORMAT, FORMAT_VALUES
-from .envelope import EnvelopeMixin, RunState
+from .builtins import BuiltinsMixin, Check, dev_version
+from .contract_gen import CORE_CODES, DEFAULT_FORMAT, FORMAT_VALUES, SPEC_VERSION
+from .envelope import EnvelopeMixin, Result_, RunState
 from .errors import CodeSpec, Error, ErrorsMixin, internal_error, new_error, usage
 from .gate import GateMixin
 from .journal import JournalMixin
 from .keystore import KeystoreMixin
 from .query import QueryMixin
-from .registry import Registry, RegistryMixin, _short_of
+from .registry import Registry, RegistryMixin, _short_of, with_twins
 from .scope import ScopeMixin
 from .selfupdate import SelfUpdateMixin
 from .settings import Setting, SettingsMixin
@@ -48,6 +50,10 @@ from .update import UpdateConfig
 from .ux import UXMixin
 
 _CURRENT: contextvars.ContextVar[App | None] = contextvars.ContextVar("aicli_app", default=None)
+
+# Secret values shorter than this are not redacted: replacing them would garble
+# the text around them, and they protect nothing.
+MIN_SECRET_LEN = 4
 
 
 @dataclass
@@ -82,6 +88,17 @@ _GLOBALS = (
     ("confirm", "string", "", "Run a previewed write with the confirm token from its preview"),
     ("dangerous", "bool", "false", "Required in both steps of a dangerous write"),
 )
+
+
+def panic_error(exc: BaseException) -> Error:
+    """A crash inside the library or the tool as E_UNKNOWN, its text in
+    details.cause (untrusted; secrets are redacted with the rest of the error)."""
+    e = internal_error(
+        "The command failed with an internal error; details.cause has the panic text."
+    )
+    e.details["cause"] = truncate_runes(f"{type(exc).__name__}: {exc}", 300)
+    e.untrusted = ["cause"]
+    return e
 
 
 def current_app() -> App:
@@ -244,6 +261,8 @@ class App(
         self.defects: list[str] = []
         # set by run_conformance: no network use (doctor skips the update refresh)
         self._offline = False
+        # secrets the tool registered with add_secret (redacted from errors and debug)
+        self._added_secrets: list[str] = []
 
     # ---------------------------------------------------------------- basics
 
@@ -263,17 +282,68 @@ class App(
         if msg not in self.defects:
             self.defects.append(msg)
 
+    def _version(self) -> str:
+        """The tool version the whole run reports and uses (CLI-080, P14): App.version
+        when it is a semantic version; otherwise, for a development build ("dev",
+        empty), the next patch after the newest version in App.changelog with the
+        prerelease dev ("1.2.17" gives "1.2.18-dev"; no released version gives
+        "0.0.0-dev"). version, reference, changelog, context, doctor, the update
+        notice, update and the confirm token all see it."""
+        if self._dev_build():
+            return dev_version(self.changelog)
+        return self.version
+
+    def _dev_build(self) -> bool:
+        """A build whose App.version is not a semantic version (P14)."""
+        from .selfupdate import parse_version
+
+        try:
+            parse_version(self.version)
+        except ValueError:
+            return True
+        return False
+
+    def ssl_context(self) -> ssl.SSLContext:
+        """The TLS settings of CLI-110 (P10), for the tool's upstream client and
+        aicli's own requests: TLS 1.2 or newer, always verified, against the system
+        roots plus the PEM file <PREFIX>_CA_FILE names. An unusable CA file is
+        E_CONFIG. Build the upstream client on it with the proxy from the environment
+        (HTTPS_PROXY, HTTP_PROXY, NO_PROXY), a per-request timeout of at most 30 s and
+        user_agent(), and never re-send a write (CLI-110)."""
+        ctx = ssl.create_default_context()  # system roots, verification on
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        prefix = self._prefix()
+        path = (self._env(prefix + "_CA_FILE") or "").strip()
+        if path:
+            try:
+                ctx.load_verify_locations(cafile=path)
+            except (OSError, ssl.SSLError, ValueError):
+                raise new_error(
+                    "E_CONFIG",
+                    f"{prefix}_CA_FILE names {path}, which is not a readable PEM certificate file.",
+                    {
+                        "dispatch_state": "not_started",
+                        "next_action": f"Point {prefix}_CA_FILE at a PEM file of CA certificates, "
+                        "or unset it.",
+                    },
+                ) from None
+        return ctx
+
+    def user_agent(self) -> str:
+        """The User-Agent of every request (CLI-110): <tool>/<version>
+        aicli/<spec version>."""
+        return f"{self.tool_name()}/{self._version()} aicli/{SPEC_VERSION}"
+
     def debug(self, message: str) -> None:
         """A diagnostic line (CLI-102): when <PREFIX>_DEBUG is set to anything but
-        empty or 0, "debug: <message>" goes to stderr, never to stdout; output and
-        exit codes do not change. The values of the running command's secret
-        parameters (Meta.secrets) and of secret settings are replaced by ***."""
-        flag = self._env(self._prefix() + "_DEBUG")
+        empty or 0 (spaces trimmed), "debug: <message>" goes to stderr, never to
+        stdout; output and exit codes do not change. Secret values (redaction_values)
+        are replaced by ***, and line breaks are escaped so every line starts with
+        "debug:"."""
+        flag = self._env(self._prefix() + "_DEBUG").strip()
         if flag in ("", "0"):
             return
-        text = str(message)
-        for secret in sorted(set(self._secret_values()), key=len, reverse=True):
-            text = text.replace(secret, "***")
+        text = self.redact(str(message)).replace("\r", "\\r").replace("\n", "\\n")
         with contextlib.suppress(Exception):
             self._write(self._stderr(), ("debug: " + text + "\n").encode("utf-8", "replace"))
 
@@ -286,22 +356,64 @@ class App(
             st.debugged.add(message)
         self.debug(message)
 
-    def _secret_values(self) -> list[str]:
-        """The values to redact from diagnostics: the running command's secret
-        flags and the secret settings that are set."""
-        out: list[str] = []
+    def add_secret(self, value: str) -> None:
+        """Register a secret the tool obtained at run time (a token read from the
+        keyring), so errors and debug lines show it as *** like a secret flag
+        (CLI-102, SEC-021). Values shorter than 4 characters are ignored."""
+        if isinstance(value, str) and len(value) >= MIN_SECRET_LEN:
+            self._added_secrets.append(value)
+
+    def redaction_values(self) -> list[str]:
+        """What debug lines replace with ***, longest first: the running command's
+        secret flags (Meta.secrets, their file twins and the flags of Secret
+        settings) and the content of its secret file inputs, the values of Secret
+        settings (from their flag, the environment or the default) and the values
+        registered with add_secret; each also URL query-escaped, path-escaped, and
+        path-escaped keeping "/" (P17). Errors use error_redaction_values."""
+        base: set[str] = set(self._added_secrets)
         st = self._run
-        node = st.cmd if st is not None else None
+        node = (st.cmd or st.parsed) if st is not None else None
         m = self.meta_for(node) if node is not None and self._prepared else None
-        if node is not None and m is not None:
+        if st is not None and node is not None and m is not None:
             for name in m.secrets:
                 f = node.flag(name)
                 if f is None or not f.changed:
                     continue
-                out.extend(v for v in (f.slice_strings() if f.multiple else [f.string()]) if v)
+                if f.multiple:
+                    base.update(f.slice_strings())
+                base.add(f.string())
+            for file, bound in m.file_inputs.items():
+                fi = st.files.get(file)
+                if fi is not None and (m.is_secret(file) or m.is_secret(bound)):
+                    text = bytes(fi.content).decode("utf-8", "replace")
+                    base.update((text, text.strip()))
         with contextlib.suppress(Exception):
-            out.extend(self.secret_setting_values())
-        return out
+            base.update(self.secret_setting_values())
+        out: set[str] = set()
+        for v in base:
+            if not isinstance(v, str) or not v:
+                continue
+            out.add(v)
+            with contextlib.suppress(UnicodeError):
+                out.add(urllib.parse.quote_plus(v, safe=""))  # Go's url.QueryEscape
+                out.add(urllib.parse.quote(v, safe="$&+:=@"))  # Go's url.PathEscape
+                # the path-escaped form that keeps "/" (P17): Go's
+                # strings.ReplaceAll(url.PathEscape(v), "%2F", "/")
+                out.add(urllib.parse.quote(v, safe="$&+:=@/"))
+        out.discard("")
+        return sorted(out, key=lambda s: (-len(s.encode("utf-8", "surrogatepass")), s))
+
+    def error_redaction_values(self) -> list[str]:
+        """redaction_values without values shorter than 4 characters, which would
+        mangle the text of an error without protecting anything (D1, D2)."""
+        return [v for v in self.redaction_values() if len(v) >= MIN_SECRET_LEN]
+
+    def redact(self, text: str, values: list[str] | None = None) -> str:
+        """text with every secret value (redaction_values) replaced by ***."""
+        for v in self.redaction_values() if values is None else values:
+            if v in text:
+                text = text.replace(v, "***")
+        return text
 
     def tool_name(self) -> str:
         if self.name:
@@ -342,7 +454,7 @@ class App(
                 st.panic_err = internal_error(
                     "App.execute was called twice on one App; build a new App for each run."
                 )
-                return self._finish(st)
+                return self._finish_guarded(st)
             self._executed = True
             try:
                 if self.root is None or not isinstance(self.root, click.Group):
@@ -360,16 +472,27 @@ class App(
             except KeyboardInterrupt:
                 st.cmd_err = new_error("E_INTERRUPTED", "The command was interrupted.")
             except Exception as exc:  # a library crash: report it, never a traceback
-                e = internal_error(
-                    "The command failed with an internal error; details.cause has the panic text."
-                )
-                e.details["cause"] = truncate_runes(f"{type(exc).__name__}: {exc}", 300)
-                e.untrusted = ["cause"]
-                st.panic_err = e
-            return self._finish(st)
+                st.panic_err = panic_error(exc)
+            return self._finish_guarded(st)
         finally:
             self._run = prev
             _CURRENT.reset(token)
+
+    def _finish_guarded(self, st: RunState) -> int:
+        """_finish, with a crash while writing the response reported as E_UNKNOWN
+        instead of a traceback; if even that cannot be written, the exit code of
+        E_UNKNOWN is returned (D9)."""
+        try:
+            return self._finish(st)
+        except Exception as exc:  # the response itself failed: report that instead
+            st.panic_err = panic_error(exc)
+            st.gate = Result_()
+            st.stream = None
+            st.notices = []
+        try:
+            return self._finish(st)
+        except Exception:
+            return CORE_CODES["E_UNKNOWN"].exit
 
     def main(self, args: list[str] | None = None) -> None:
         """execute and exit the process with its exit code."""
@@ -456,6 +579,16 @@ class App(
                     )
                 )
             n._merged = None
+        # The flag of a Secret setting is a secret flag of every command that has it
+        # (CLI-100, B2), as if Meta.secrets named it.
+        flags = sorted({s.flag for s in self.settings or [] if s.secret and s.flag})
+        for n in root.walk():
+            m = self._reg.meta.get(n.cmd) if n.cmd is not None else None
+            if m is None or not flags:
+                continue
+            add = [f for f in flags if n.flag(f) is not None and f not in m.secrets]
+            if add:
+                m.secrets = with_twins([*m.secrets, *add], m.file_inputs)
 
     def _build(self, cmd: click.Command, name: str, parent: Node, *, builtin: bool) -> Node:
         node = Node(name, cmd, parent, builtin=builtin)
@@ -621,6 +754,7 @@ class App(
     def _dispatch(self, st: RunState, args: list[str]) -> None:
         """Find the command, parse its flags and run it (cobra's ExecuteC)."""
         node, rest = find(self._root, args)
+        st.parsed = node  # errors redact its secret flags even before it runs
         try:
             positionals = parse_flags(node, rest, self._click_ctx(node))
         except FlagParseError as err:
@@ -639,6 +773,13 @@ class App(
             return
         self.validate_args(node, positionals)
         self.prepare_run(node, positionals)
+        if self.settings is not None and not node.builtin and not self._creates_profile(node):
+            # An unknown profile stops every tool command before it runs; the
+            # built-ins still run, and context reports the problem (CLI-101), and so
+            # does a command that creates the profile (Meta.new_profile, P6).
+            ps = self._profile_state()
+            if ps.unknown and not ps.reason:
+                raise self._profile_unknown(ps)
         self._invoke(st, node, positionals)
 
     def _click_ctx(self, node: Node) -> click.Context | None:

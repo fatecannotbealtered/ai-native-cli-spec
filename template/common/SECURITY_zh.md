@@ -76,7 +76,7 @@
 
 ## 对外连接
 
-`{{TOOL_NAME}}` 只连接你配置的 {{THIRD_PARTY}} 主机，以及在 `update` 和 `doctor` 中连接它的发布源：`{{REPO_SLUG}}` 的 GitHub API 和发布下载，以及校验它们所用的 Sigstore 信任根服务；`update` 刷新信任根时，使用与它的其他请求相同的超时、代理、CA 文件和 User-Agent。它不发送遥测、分析数据、崩溃报告或使用情况上报（SEC-022）。每个请求都校验 TLS；私有 CA 放在 `{{ENV_PREFIX}}_CA_FILE` 中，没有任何设置能关掉校验。代理取自 `HTTPS_PROXY`、`HTTP_PROXY` 和 `NO_PROXY`（CLI-110）。
+`{{TOOL_NAME}}` 只连接你配置的 {{THIRD_PARTY}} 主机，以及在 `update` 和 `doctor` 中连接它的发布源：`{{REPO_SLUG}}` 的 GitHub API 和发布下载，以及校验它们所用的 Sigstore 信任根服务；`update` 刷新信任根时，使用与它的其他请求相同的超时、代理、CA 文件和 User-Agent（Python 工具刷新时使用代理和超时，但不使用 CA 文件和 User-Agent）。它不发送遥测、分析数据、崩溃报告或使用情况上报（SEC-022）。每个请求都校验 TLS；私有 CA 放在 `{{ENV_PREFIX}}_CA_FILE` 中，没有任何设置能关掉校验。代理取自 `HTTPS_PROXY`、`HTTP_PROXY` 和 `NO_PROXY`（CLI-110）。
 
 <!-- SEC-022：在这里列出某个功能需要的其他任何目的地（身份提供方的令牌端点、提供附件的 CDN），并写明发送了什么。 -->
 

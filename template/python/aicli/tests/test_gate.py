@@ -307,7 +307,7 @@ def test_unknown_outcome_blocks_the_target_until_resolved(h: THarness) -> None:
     assert blocked.details().get("active_operation") == op_id, blocked
     other = h.run("note", "update", "2", "--title", "Y", "--dry-run")
     assert other.exit == 0, other
-    lst = h.run("operation", "list", "--status", "unknown")
+    lst = h.run("operation", "list", "--state", "unknown")
     assert lst.exit == 0 and lst.data()["count"] == 1, lst
     h.scope_on = False
     res = h.run(
@@ -336,7 +336,7 @@ def test_resolve_refuses_while_the_lease_is_live(h: THarness) -> None:
     problems: list[str] = []
 
     def hook(kind: str, nid: str) -> None:
-        lst = h.run("operation", "list", "--status", "dispatching")
+        lst = h.run("operation", "list", "--state", "dispatching")
         items = lst.data().get("items") or []
         if len(items) != 1:
             problems.append(f"want one dispatching operation, got {lst}")
@@ -368,7 +368,7 @@ def test_expired_lease_reads_as_unknown(h: THarness) -> None:
 
     def hook(kind: str, nid: str) -> None:
         clock[0] += _dt.timedelta(minutes=10)  # the process "hangs" past its lease
-        lst = h.run("operation", "list", "--status", "unknown")
+        lst = h.run("operation", "list", "--state", "unknown")
         if lst.data().get("count") != 1:
             problems.append(f"an expired lease must read as unknown: {lst}")
         return None
@@ -402,9 +402,11 @@ def test_verification_mismatch_is_verify_failed(h: THarness) -> None:
 def test_idempotency_key_replays_the_original_receipt(h: THarness) -> None:
     args = ["note", "create", "--title", "Once", "--idempotency-key", "k-1"]
     tok = h.must_token(*args)
+    # A token issued before the first confirm meets the applied operation at its own
+    # confirm (a dry-run after it is answered with the replay at once, P4).
+    tok2 = h.must_token(*args)
     first = h.run(*args, "--confirm", tok)
     assert first.exit == 0 and h.up.writes() == 1, first
-    tok2 = h.must_token(*args)
     second = h.run(*args, "--confirm", tok2)
     assert second.exit == 0 and h.up.writes() == 1, second
     rec = second.data()["receipt"]
@@ -552,7 +554,7 @@ def test_replay_requires_the_same_target(h: THarness) -> None:
     args = ["note", "create", "--title", "Same", "--idempotency-key", "k-9"]
     first = h.run(*args, "--confirm", h.must_token(*args))
     assert first.exit == 0 and h.up.writes() == 1 and keys == ["k-9"], first
-    replay = h.run(*args, "--confirm", h.must_token(*args))
+    replay = h.run(*args, "--dry-run")  # the replay is answered at once (P4)
     assert (
         replay.exit == 0 and replay.data()["receipt"]["replayed"] is True and h.up.writes() == 1
     ), replay

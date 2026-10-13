@@ -18,10 +18,15 @@
 //	{"tool": "gitlab-cli",
 //	 "set_env": {"GITLAB_CLI_HOST": "http://localhost:8929", "GITLAB_CLI_TOKEN": "...", "GITLAB_CLI_NO_UPDATE_CHECK": "1"},
 //	 "drop_env": ["GITLAB_TOKEN", "GITLAB_HOST"],
-//	 "drop_env_prefixes": ["GITLAB_CLI_"]}
+//	 "drop_env_prefixes": ["GITLAB_CLI_"],
+//	 "trial_env": ["GITLAB_CLI_HOST"]}
 //
 // The trial folder is the folder holding this copy of the recorder when it contains run-config.json,
-// else EVAL_RUN_DIR (the single shared copy run.py puts on PATH).
+// else EVAL_RUN_DIR (the single shared copy run.py puts on PATH). Its run-config.json names the real
+// binary and may override variables of set_env for that trial ({"real_bin": "...", "set_env":
+// {"GITLAB_CLI_HOST": "http://127.0.0.1:50123"}}, how a lost-reply trial reaches the fault proxy), but
+// only those the private config lists in trial_env; any other is refused, so a file in the agent's
+// workspace cannot inject a variable such as the tool's scope-file variable.
 package main
 
 import (
@@ -47,10 +52,12 @@ type privateConfig struct {
 	SetEnv          map[string]string `json:"set_env"`
 	DropEnv         []string          `json:"drop_env"`
 	DropEnvPrefixes []string          `json:"drop_env_prefixes"`
+	TrialEnv        []string          `json:"trial_env"`
 }
 
 type runConfig struct {
-	RealBin string `json:"real_bin"`
+	RealBin string            `json:"real_bin"`
+	SetEnv  map[string]string `json:"set_env"`
 }
 
 type record struct {
@@ -62,6 +69,7 @@ type record struct {
 	StdoutBytes int      `json:"stdout_bytes"`
 	StderrBytes int      `json:"stderr_bytes"`
 	StdoutSHA   string   `json:"stdout_sha256"`
+	TrialEnv    []string `json:"trial_env,omitempty"` // variables run-config.json overrode (names only)
 	Error       string   `json:"error,omitempty"`
 }
 
@@ -99,6 +107,12 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "recorder: run-config.json names no real_bin")
 		return 1
 	}
+	setEnv, envErr := trialSetEnv(priv, cfg)
+	if envErr != nil {
+		fmt.Fprintln(os.Stderr, "recorder:", envErr)
+		return 1
+	}
+	priv.SetEnv = setEnv
 
 	home := filepath.Join(runDir, "home")
 	for _, d := range []string{home, filepath.Join(home, "AppData", "Roaming"), filepath.Join(home, "AppData", "Local"), filepath.Join(runDir, "calls")} {
@@ -138,11 +152,16 @@ func run() int {
 	sum := sha256.Sum256(stdout.Bytes())
 	_ = os.WriteFile(filepath.Join(runDir, "calls", id+".out"), stdout.Bytes(), 0o600)
 	_ = os.WriteFile(filepath.Join(runDir, "calls", id+".err"), stderr.Bytes(), 0o600)
+	overridden := make([]string, 0, len(cfg.SetEnv))
+	for k := range cfg.SetEnv {
+		overridden = append(overridden, k)
+	}
+	sort.Strings(overridden)
 	rec := record{
 		ID: id, Start: start.UTC().Format(time.RFC3339Nano), DurationMS: dur.Milliseconds(),
 		Argv: os.Args[1:], Exit: exit,
 		StdoutBytes: stdout.Len(), StderrBytes: stderr.Len(),
-		StdoutSHA: hex.EncodeToString(sum[:]), Error: errText,
+		StdoutSHA: hex.EncodeToString(sum[:]), TrialEnv: overridden, Error: errText,
 	}
 	if line, err := json.Marshal(rec); err == nil {
 		if f, err := os.OpenFile(filepath.Join(runDir, "calls.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
@@ -194,6 +213,36 @@ func childEnv(environ []string, priv privateConfig, home string) []string {
 		env = append(env, k+"="+priv.SetEnv[k])
 	}
 	return env
+}
+
+// trialSetEnv is the private config's set_env with the trial's overrides from run-config.json applied.
+// A trial may override only the variables listed in trial_env (compared case-insensitively).
+func trialSetEnv(priv privateConfig, cfg runConfig) (map[string]string, error) {
+	out := make(map[string]string, len(priv.SetEnv)+len(cfg.SetEnv))
+	for k, v := range priv.SetEnv {
+		out[k] = v
+	}
+	allowed := map[string]bool{}
+	for _, k := range priv.TrialEnv {
+		allowed[strings.ToUpper(k)] = true
+	}
+	keys := make([]string, 0, len(cfg.SetEnv))
+	for k := range cfg.SetEnv {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if !allowed[strings.ToUpper(k)] {
+			return nil, fmt.Errorf("run-config.json sets %s, which trial_env in the private config does not allow", k)
+		}
+		for existing := range out {
+			if strings.EqualFold(existing, k) {
+				delete(out, existing)
+			}
+		}
+		out[k] = cfg.SetEnv[k]
+	}
+	return out, nil
 }
 
 func hasAnyPrefix(upperKey string, prefixes []string) bool {

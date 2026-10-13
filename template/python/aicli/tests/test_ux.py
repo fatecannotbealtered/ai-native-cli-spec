@@ -113,7 +113,7 @@ def test_missing_and_invalid_values(h: THarness) -> None:
     assert "many" not in r.env["error"]["message"], "the message echoed the input value"
     r = h.run("note", "list", "--limit")
     assert r.exit == 2 and r.details()["problem"] == "missing_parameter", r
-    r = h.run("operation", "list", "--status", "weird")
+    r = h.run("operation", "list", "--state", "weird")
     assert (
         r.exit == 2
         and r.details()["problem"] == "invalid_value"

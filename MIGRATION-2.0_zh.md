@@ -15,7 +15,7 @@ node ../ai-native-cli-spec-2.0.0/template/common/scripts/sync-spec.js --from ../
 node scripts/check-spec.js
 ```
 
-这会把 `v2.0.0` 写入 `.agent/SPEC_VERSION`，并以副本方式引入五份规范（`VERIFY-SPEC.md` 是新增的）、`contract/contract.json`、`contract/schemas/`、带 `MANIFEST.json` 的库（`internal/aicli/` 或 `<pkg>/_aicli/`）以及同步脚本（REPO-061）。以后的同步用 `node scripts/sync-spec.js`。Go 库需要 cobra、pflag 和 sigstore-go（运行 sync-spec 打印出的 `go get` 那一行，再运行 `go mod tidy`）；Python 库需要 Python ≥ 3.10、click 和 sigstore。绝不要编辑内置副本文件（REPO-063）。保留 `contract/contract-ext.json`，按 CLI-018 检查其中的错误码，并在 `App.ExtCodes` 中向库声明它们。
+这会把 `v2.0.0` 写入 `.agent/SPEC_VERSION`，并以副本方式引入五份规范（`VERIFY-SPEC.md` 是新增的）、`contract/contract.json`、`contract/schemas/`、带 `MANIFEST.json` 的库（`internal/aicli/` 或 `<pkg>/_aicli/`）以及同步脚本（REPO-061）。以后的同步用 `node scripts/sync-spec.js`。Go 库需要 cobra、pflag 和 sigstore-go（运行 sync-spec 打印出的 `go get` 那一行，再运行 `go mod tidy`）；Python 库需要 Python ≥ 3.10、click 和 sigstore。绝不要编辑内置副本文件（REPO-063）。`contract/contract-ext.json` 中工具仍可能返回的错误码要保留，按 CLI-018 检查，并在 `App.ExtCodes` 中向库声明它们；2.0 中不可能再出现的错误码要删掉（gitlab-cli 唯一的一个 `E_CANCELLED` 来自交互式提示），一个都不剩时连文件一起删掉。
 
 ## 2. 把信封和错误交给 aicli
 
@@ -30,7 +30,6 @@ func NewApp(env func(string) string) *aicli.App {
 		Shortcuts:    map[string][]string{"branch": {"repo", "branch"}, "member": {"project", "members"}},
 		ShortFlags:   map[string]string{"p": "project", "R": "project"},
 		FlagAliases:  map[string]string{"repo": "project"},                  // accepted
-		VerbSynonyms: map[string][]string{"view": {"get"}, "show": {"get"}}, // suggested; Meta.Aliases accepts
 		FlagSynonyms: map[string][]string{"all": {"limit"}}}                 // suggested
 	registerCommands(app) // step 3
 	return app
@@ -46,7 +45,7 @@ func main() { os.Exit(cmd.NewApp(os.Getenv).Execute(os.Args[1:])) }
 | `failArg("--project is required")` | `return aicli.Usage("missing_parameter", "--project", "--project is required; pass the project path, for example --project acme/web.")` |
 | 读命令里的 `handleAPIError(err, jsonMode)` | 一个 `readError(err)` 辅助函数，返回 `aicli.FromHTTP(apiErr.StatusCode, message, apiErr.Error(), 0)`，其中的 `message` 是写给模型的一句话（CLI-017）；状态码 `0`（没有建立连接）得到 `E_NETWORK`（CLI-016） |
 | `failWithCode`、`emitError`、退出码常量、`exitCodeForStatus` | `aicli.NewError(code, message, details)` 及各个构造函数；库会补上退出码、`retryable`，以及默认的 `dispatch_state` 和 `next_action`（CLI-010、CLI-011） |
-| `--format`、`--json`、`--compact`、`--fields` 的处理；`agent_ux*.go` 里的别名和建议 | App 和上面那些字段（CLI-003、CLI-022）；ref 和 URL 的解析仍留在工具里（CLI-048） |
+| `--format`、`--json`、`--compact`、`--fields` 的处理；`cmd/agent.go` 中的 Agent 安全开关、手工维护的别名和建议 | App 和上面那些字段（CLI-003、CLI-022）；ref 和 URL 的解析仍留在工具里（CLI-048） |
 
 ## 3. 用 Meta 注册每个命令
 
@@ -71,6 +70,7 @@ app.Schema("merge_request", aicli.SchemaDef{Shape: "object",
 - **默认字段**来自用户会问的问题（CLI-040）。评测中，MR 列表项带上指派人、标签和流水线状态，再加上 `--pipeline-status`，把「哪些 MR 的流水线失败了」的调用次数从 13.6 降到了 6.1。
 - **示例**：每个写命令都展示预演（dry-run）和确认这一对，每个危险命令都带 `--dangerous`（符合性检查 R02）。
 - **成熟度**取代 `release_readiness`（CLI-027、VER-005）：有录制的真实运行覆盖过的命令是 `verified`，只用 mock 测过的是 `experimental`，没测过的是 `draft`；`stable` 需要 Agent 评测（VER-006）。
+- **分批迁移。** 大的工具可以一组一组地迁移：用构建标签排除尚未迁移的文件（`go mod tidy` 仍会读取它们，所以在最后一组完成之前，保留它们导入的包），并且每个快捷方式、别名和同义词都与它指向的那一组一起加入，因为命令树检查会拒绝目标尚未注册的快捷方式。
 - **命令树形状**（CLI-021）：内置名称（`reference`、`context`、`doctor`、`changelog`、`update`、`operation`、`help`、`version`）是保留的；一个路径要么是命令组，要么是命令，不能两者都是（符合性检查 R02）。
 
 ## 4. 让每个写入都经过 App.Write
@@ -80,7 +80,7 @@ app.Schema("merge_request", aicli.SchemaDef{Shape: "object",
 | `if done, err := prepareWrite(cmd, action, detail); done \|\| err != nil { return err }`，然后调用 API | `return app.Write(cmd, aicli.WriteSpec{Target, Preview, Apply})` |
 | `dryRunOutput`、`buildPreview`、`confirmRequiredWithPreview` | 写入门控（write gate）在预演时输出 `data.preview`，在拒绝响应里给出同一份预览（CLI-051、CLI-052） |
 | `requireConfirm`、`validateConfirmToken`、`newConfirmToken` | 写入门控（CLI-053 至 CLI-055） |
-| 手工拼装的 `detail` / `confirmPayload` map、`bindInvocation` | 不需要：写入门控绑定解析后的调用（CLI-054） |
+| 手工拼装的 `detail` / `confirmPayload` map | 不需要：写入门控绑定解析后的调用（CLI-054） |
 | 复制进 payload 的 `updatedAt` 或 `sha` | `Preview.BaseVersion` 和 `BaseSource`，确认时重新读取（`state_drift`，CLI-057） |
 | `isDangerousCommand`、`dangerousFlagRequired` | `Meta.Dangerous`（CLI-056） |
 | `prepareBatchWrite`、`parsePluralFlag`、`batchItem` | `app.WriteBatch(cmd, aicli.BatchSpec{Items: ...})` 配合 `Meta.BatchFlag`（CLI-063） |
@@ -125,6 +125,7 @@ RunE: func(cmd *cobra.Command, args []string) error {
 },
 ```
 
+- **目标键**是规范化的（SEC-012），而授权范围的子树选择器只在 `/`、`!`、`#`、`:` 和 `@` 处断开。没有这类符号的对象，给它一个与网页路径对应的路径式键，例如 `acme/web/-/labels/bug` 或 `acme/web/-/milestones/3`，这样对 `acme/web` 的授予就能覆盖它；输入时仍然接受 GitLab 的 `~bug` 和 `%3` 形式。
 - **Preview** 只读。在这里把名字解析成 ID，这样预览展示的就是将要发送的内容。`Changes` 列出请求要改的每个字段，带 `Before`/`After`（集合用 `Add`/`Remove`）。写入无法执行时（MR 已合并、分支受保护），返回 `CanApply: false` 并附上 `BlockedBy`；写入门控随后返回不带令牌的预览。绝不要把机密值放进 `Changes`。
 - **Apply** 只发送一次写入，然后报告它观察到的结果：来自写入响应或重新读取的已改字段放进 `Observed`。评测中，写入结果带上已改字段之后，最后一次写入之后的核实调用从 1.00 次降到了 0.37 次。你永远不用自己设置 `ok`：写入门控会根据回执推导出它和错误码（CLI-059）。
 - **对 Apply 的错误分类**，依据是什么到达了上游（CLI-015）。拿不准时，原样返回错误、不做包装：结果未知是安全的，错报「未执行」则会招来重复写入。
@@ -143,11 +144,11 @@ func classifyWriteError(err error) error {
 }
 ```
 
-- **HTTP 客户端不要再重试写入**。gitlab-cli 的 `doWithRetry` 对所有方法的 5xx 和网络错误都会重试，所以一个超时的 POST 可能被执行两次；只重试读取。1.6 的 `handleAPIError` 还会把任何非 HTTP 失败报成可重试的 `E_NETWORK`，即使写入已经发出去了。
+- **HTTP 客户端不要再重试写入**。gitlab-cli 的 `doWithRetry` 对所有方法的 5xx 和网络错误都会重试，所以一个超时的 POST 可能被执行两次；只重试读取。1.6 的 `handleAPIError` 还会把任何非 HTTP 失败报成可重试的 `E_NETWORK`，即使写入已经发出去了。不要向忽略 `Idempotency-Key` 请求头的 API 发送它，GitLab 的 REST API 就忽略它：Go 的 `net/http` 认为这样的请求可以安全重复，在复用的连接失败后会重新发送（CLI-062）。在 `Preview` 和 `Apply` 内部构造客户端，或者在 `App.Write` 开始之后构造，不要在它之前：先构造的客户端会在写入门控检查配置档之前就读取设置。
 
 ## 5. 删除旧的写入门控和生成的契约
 
-删除工具自己的确认代码以及支撑它的代码；现在由符合性测试套件测试写入门控。在 gitlab-cli 中要删的是：`cmd/confirm.go`、`cmd/confirm_secret.go`、`cmd/confirm_consumed.go` 及其测试；`cmd/agent_ux.go` 中的 `bindInvocation` 和 `controlFlags`；`GITLAB_CLI_LEGACY_CONFIRM_BINDING` 开关；`cmd/release_readiness.go`；`cmd/fcc_guard_test.go`；`internal/contract/contract_gen.go`（Python：`<pkg>/contract_gen.py`）以及重新生成它的 CI 步骤；手写的 `cmd/reference.go` 和 `cmd/reference_schema.go`。那 75 个用手工拼装的 payload 生成令牌的旧测试，要么改写成经由 App 先预演再确认，要么在套件已覆盖时直接删掉。
+删除工具自己的确认代码以及支撑它的代码；现在由符合性测试套件测试写入门控。在 gitlab-cli 中要删的是：`cmd/confirm.go`、`cmd/confirm_secret.go`、`cmd/confirm_consumed.go` 及其测试；`cmd/root.go` 中的 `prepareWrite`、`dryRunOutput` 和确认辅助函数；`cmd/batch.go` 中的 `prepareBatchWrite` 和 `batchItem`；`cmd/release_readiness.go`；`cmd/fcc_guard_test.go`；`internal/contract/contract_gen.go`（Python：`<pkg>/contract_gen.py`）以及重新生成它的 CI 步骤；手写的 `cmd/reference.go` 和 `cmd/reference_schema.go`。那些用手工拼装的 payload 生成令牌的旧测试，要么改写成经由 App 先预演再确认，要么在套件已覆盖时直接删掉。
 
 旧的状态文件 `~/.gitlab-cli/confirm.secret` 和 `confirm-consumed.json` 不再被读取；2.0 的密钥是 `<state_dir>/confirm.key`（SEC-030）。1.6 生成的令牌会以 `token_mismatch` 被拒绝；Agent 会重新预演。
 
@@ -171,12 +172,12 @@ func TestConformance(t *testing.T) {
 		// commands and destinations for deliver commands (SEC-012).
 		Scope: map[string]any{"scope_id": "scp_conformance", "tool": "gitlab-cli", "granted_by": "conformance",
 			"granted_at": "2026-10-12T00:00:00Z", "expires_at": nil,
-			"effects": []string{"change", "configure", "artifact"}, "dangerous": true, "outputs": []string{artifacts}},
+			"effects": []string{"change", "configure", "artifact"}, "dangerous": true, "outputs": []string{artifacts}, "roots": []string{artifacts}}, // roots: the checks repeat the sample, which overwrites its file
 	})
 }
 ```
 
-缺少样例的写命令会让套件失败（G00），所以套件也能告诉你第 4 步什么时候算做完。为预览、回执和输出保留按命令的测试（VER-004）。FCC 守卫测试的替代品是 R06（VER-003）：在 `TestMain` 中，于 `m.Run()` 之前把 `GITLAB_CLI_COVERAGE_FILE` 指向一个临时文件，这样库会记录你的测试执行过的每个命令；完整运行之后（没有 `-run` 或 `-skip` 过滤），用 harness 调用 `aicli.CheckCoverage`，并把其中的 `CoverageFile` 设为那个文件。注册表中每个没有测试运行过的命令，都会让它报失败。代码见 `template/INSTANTIATE.md` 第 8 步和 `template/go/example/notes_test.go`。Python：在一个 pytest 测试中调用 `run_conformance`，并在所有测试跑完后调用一次 `check_coverage`。
+缺少样例的写命令会让套件失败（G00），所以套件也能告诉你第 4 步什么时候算做完。为预览、回执和输出保留按命令的测试（VER-004）。FCC 守卫测试的替代品是 R06（VER-003）：在 `TestMain` 中，于 `m.Run()` 之前把 `GITLAB_CLI_COVERAGE_FILE` 指向一个临时文件（用 `os.Setenv`，或者放进测试通过 `App.Env` 注入的环境中），这样库会记录你的测试执行过的每个命令；完整运行之后（没有 `-run` 或 `-skip` 过滤），用 harness 调用 `aicli.CheckCoverage`，并把其中的 `CoverageFile` 设为那个文件。注册表中每个没有测试运行过的命令，都会让它报失败。代码见 `template/INSTANTIATE.md` 第 8 步和 `template/go/example/notes_test.go`。Python：在一个 pytest 测试中调用 `run_conformance`，并在所有测试跑完后调用一次 `check_coverage`。
 
 ## 7. 向用户说明授权范围文件
 
@@ -215,11 +216,11 @@ app.Update = &aicli.UpdateConfig{
 
 之后，aicli 的 `update` 会在每个版本号进入命令行之前用 `CheckUpdateTarget` 检查它，发布的 `tag_name` 也不例外：在 Windows 上 `npm` 是 `npm.cmd`，它在 cmd.exe 下运行；2026-10 的审计在 cnstock-cli 中通过构造的 `--target-version`（`1.0.12&calc`）复现了命令执行，wechat-mp-cli 也有同样的缺陷。它用 `PackageManagerArgs` 运行包管理器，不经过 shell；在二进制路径上，先对照确切的身份 `https://github.com/fatecannotbealtered/gitlab-cli/.github/workflows/release.yml@refs/tags/v<version>` 校验 Sigstore 签名包，再校验校验和；并从已安装的包把 Skill 复制到已经安装了它们的 Skill 目录中。`skill_sync_command` 现在是 `gitlab-cli update`。`update --check` 和 `doctor` 会维护通知缓存，所以删掉工具自己对 `RecordUpdateCheck` 的调用（CLI-071）。
 
-保持 aicli 所要求的发布布局：归档命名为 `gitlab-cli-<version>-<os>-<arch>.tar.gz`（Windows 上为 `.zip`），根目录下放二进制和 `skills/`，旁边是 `checksums.txt` 和 `checksums.txt.sigstore.json`，模板中的 `.goreleaser.yml` 就是这样构建的（REPO-043）。凡是还残留 `npx skills add <repo> -y -g` 的地方都删掉；README 的安装代码块对已安装的包使用固定版本的安装器：`npx skills@<version> add "$(npm root -g)/@fateforge/gitlab-cli" -y -g`。
+采用 aicli 所要求的发布布局（gitlab-cli 1.2.17 只发布二进制）：归档命名为 `gitlab-cli-<version>-<os>-<arch>.tar.gz`（Windows 上为 `.zip`），根目录下放二进制和 `skills/`，旁边是 `checksums.txt` 和 `checksums.txt.sigstore.json`，模板中的 `.goreleaser.yml` 就是这样构建的（REPO-043）。模块路径没有 `/v2` 后缀的 Go 模块无法用 `go install …@v2.x.y` 安装：要么在这次主版本发布中加上后缀，要么让 `GoPackage` 留空，并让 `go install` 的用户改用二进制或 npm。凡是还残留 `npx skills add <repo> -y -g` 的地方都删掉；README 的安装代码块对已安装的包使用固定版本的安装器：`npx skills@<version> add "$(npm root -g)/@fateforge/gitlab-cli" -y -g`。
 
 ## 10. 设置、配置档、标志名和弃用
 
-- **设置**（CLI-100）：在 `App.Settings` 中声明设置，用 `app.Setting(cmd, name)` 读取，它依次取标志、`GITLAB_CLI_<SETTING>`、当前生效的配置档和默认值；删掉工具自己的配置加载代码。aicli 从 `~/.gitlab-cli/settings.json`（或 `GITLAB_CLI_SETTINGS_FILE`）读取设置，采用 CLI-100 规定的严格结构，拒绝含有未知键或机密的文件（每个读取设置的命令都返回 `E_CONFIG`），并且绝不读取 1.x 的 `~/.gitlab-cli/config.json`。把 1.x 中的值迁移到 `settings.json` 的配置档里，其中的机密挪进钥匙串（SEC-040）：提供一个经过写入门控、负责迁移的 `configure` 命令，或者在发布说明中写明迁移步骤。
+- **设置**（CLI-100）：在 `App.Settings` 中声明设置，用 `app.Setting(cmd, name)` 读取，它依次取标志、`GITLAB_CLI_<SETTING>`、当前生效的配置档和默认值；删掉工具自己的配置加载代码。aicli 从 `~/.gitlab-cli/settings.json`（或 `GITLAB_CLI_SETTINGS_FILE`）读取设置，采用 CLI-100 规定的严格结构，拒绝含有未知键或机密的文件（每个读取设置的命令都返回 `E_CONFIG`），并且绝不读取 1.x 的 `~/.gitlab-cli/config.json`。把 1.x 中的值迁移到 `settings.json` 的配置档里，其中的机密挪进钥匙串（SEC-040）：提供一个经过写入门控、负责迁移的 `configure` 命令，或者在发布说明中写明迁移步骤。gitlab-cli 1.x 把令牌加密保存，所以用户要用 `auth login` 重新登录，或者设置 `GITLAB_CLI_TOKEN`；`auth login` 声明 `Meta.NewProfile`，用 `app.SetProfileSettings` 写入主机，并且作为危险的 `configure` 写操作，第一次需要一个授予 `configure` 和 `dangerous` 的授权范围，发布说明必须写明这一点。
 
 ```go
 app.Settings = []aicli.Setting{
@@ -228,10 +229,10 @@ app.Settings = []aicli.Setting{
 }
 ```
 
-- **配置档**（CLI-101）：同时使用公司 GitLab 和 gitlab.com 的用户，每个各用一个配置档，不必开两个 shell。aicli 会加上 `--profile` 和 `GITLAB_CLI_PROFILE`，把 `--profile` 绑定进令牌，并在 `context` 中报告当前生效的配置档，所以删掉工具自己用来切换账户的标志。登录类命令是 `auth login`（`configure`；令牌放进钥匙串，主机写进配置档）、`auth status`（向 GitLab 核验令牌的读命令）和 `auth logout`（`configure`）。
+- **配置档**（CLI-101）：同时使用公司 GitLab 和 gitlab.com 的用户，每个各用一个配置档，不必开两个 shell。aicli 会加上 `--profile` 和 `GITLAB_CLI_PROFILE`，把当前配置档和每个设置绑定进令牌，在任何命令运行之前拒绝未知的配置档，并在 `context` 中报告当前生效的配置档，所以删掉工具自己用来切换账户的标志。钥匙串条目按 `app.Profile()` 区分，配置档的主机写进 `app.SettingsPath()`。登录类命令是 `auth login`（`configure`；令牌放进钥匙串，主机写进配置档）、`auth status`（向 GitLab 核验令牌的读命令）和 `auth logout`（`configure`）。
 - **标志名**（CLI-028、CLI-029）：把标志改成共享词汇中的名称（`--per-page` 改为 `--limit`，`--search` 改为 `--query`，分页令牌改为 `--cursor`），每个旧名称都作为已弃用的标志（`Meta.DeprecatedFlags`）继续可用，直到下一个 MAJOR 版本；对常见的同义写法，aicli 已经会建议标准名称。标准动词也要核对：没有匹配的 `list` 返回空页，`update` 只修改给出的字段，`delete` 的目标不存在时在预演阶段返回 `E_NOT_FOUND`。
 - **弃用**（CLI-081）：将要移除的命令设置 `Meta.Deprecated`，写明替代写法。aicli 会在帮助和 `reference` 中标出它，每次使用都附加一条 `deprecated` 通知，并把它从 Skill 的命令地图中略去。在 `CHANGELOG.md` 中把它列在 `Deprecated` 之下，至少保留一个 MINOR 版本和 90 天，只在 MAJOR 版本中移除。
-- **诊断与网络**（CLI-102、CLI-110）：把任何 `--verbose` 或 `--debug` 标志换成 `GITLAB_CLI_DEBUG` 和 `app.Debugf`。给每个 HTTP 客户端设置最长 30 s 的超时，只重试读取（第 4 步），遵守 `HTTPS_PROXY`、`HTTP_PROXY` 和 `NO_PROXY`；用私有 CA 的用户改用 `GITLAB_CLI_CA_FILE`，不再提供任何关闭 TLS 校验的开关。
+- **诊断与网络**（CLI-102、CLI-110）：把任何 `--verbose` 或 `--debug` 标志换成 `GITLAB_CLI_DEBUG` 和 `app.Debugf`。这些标志在这次发布中直接删除：与改名的标志不同，它们不保留为弃用标志，因为 CLI-102 禁止它们。把从钥匙串读出的令牌用 `app.AddSecret` 登记，aicli 就会在错误和调试行中把它脱敏。给每个 HTTP 客户端设置最长 30 s 的超时；只重试幂等的读取，最多两次，只在连接失败或 HTTP 429、502、503、504 之后重试，并遵守 `Retry-After`，但最多等 10 s（第 4 步）；发送 `User-Agent: gitlab-cli/<version> aicli/<spec version>`；遵守 `HTTPS_PROXY`、`HTTP_PROXY` 和 `NO_PROXY`；用私有 CA 的用户改用 `GITLAB_CLI_CA_FILE`，不再提供任何关闭 TLS 校验的开关。除重试之外，这些都由 `app.HTTPTransport()` 和 `app.UserAgent()` 提供。
 - **对外连接**（SEC-022）：工具只连接配置的 GitLab 主机，以及在 `update` 和 `doctor` 中连接它的发布源。删掉任何遥测，并把其他目的地列进 `SECURITY.md`。
 - **README**（REPO-010、REPO-011）：加上 Configuration 一节，写明各项设置、设置文件及其配置档；再加上 Uninstall 一节，说明怎样移除包、`~/.gitlab-cli`、钥匙串条目（`gitlab-cli auth logout`）和 Skill 目录。
 
@@ -252,7 +253,7 @@ app.Settings = []aicli.Setting{
 - `schema_version` 是 `"2.0"`；JSON 默认紧凑输出，`--pretty` 输出缩进格式，`--compact` 仍然可用（CLI-002、CLI-003）。
 - 键名用 snake_case（CLI-007）：`webUrl` → `web_url`，`hasMore` → `has_more`，`pipelineStatus` → `pipeline_status`，`updatedAt` → `updated_at`。ID 是字符串；时间用带 `Z` 的 UTC。
 - `meta.untrusted` 在每个响应中列出一次外部内容的路径，来源是 schema 的 `Untrusted` 字段或 `app.OK(cmd, data, "data.description")`；从对象里删掉 `_untrusted`（CLI-046）。`meta` 里只有 `duration_ms`、`notices` 和 `untrusted`。
-- 列表（CLI-041）带 `items`、`count`、`has_more`，并配上 `next_cursor`、`next_offset` 或 `continuation_reason`，被截断时带 `truncated_reason`，还有 `scope` 和 `sort`，此外没有别的键（分页 schema 禁止其他键）：去掉 `limit`、`page`、`total` 和 `all`，把实际生效的上限和过滤条件放进 `scope` 回显。覆盖范围比名字所示更窄的列表要说明这一点：`project members` 只列直接成员，这曾导致一个参与评测的 Agent 把错误的信息告诉了用户。
+- 列表（CLI-041）带 `items`、`count`、`has_more`，并配上 `next_cursor`、`next_offset` 或 `continuation_reason`，上游报告了总数时带 `total`，被截断时带 `truncated: true` 和 `truncated_reason`，还有 `scope` 和 `sort`，除 `offset` 外没有别的键（分页 schema 禁止其他键）：去掉 `limit`、`page` 和 `all`，把实际生效的上限和过滤条件放进 `scope` 回显。覆盖范围比名字所示更窄的列表要说明这一点：`project members` 只列直接成员，这曾导致一个参与评测的 Agent 把错误的信息告诉了用户。
 - 每个资源都带一个 `ref`（`acme/web!5`），它也可以作为输入传回（CLI-048）。
 - 每个错误都有 `dispatch_state` 和 `next_action`。上游返回 403 时，如果知道所需角色，就加上 `details.required`（CLI-014）；评测中，拿到一个不带任何说明的 403 之后，Agent 要花 2 到 4 次调用去试探。
 - 已确认的写入返回 `operation_id`、`receipt` 和 `result`；部分成功的批量操作是 `ok: false`，并带 `E_PARTIAL`（CLI-059、CLI-063）。

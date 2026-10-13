@@ -178,7 +178,7 @@
       }
     },
     "E_CONFLICT": {
-      "description": "A precondition failed (CLI-013): token_mismatch names the first differing parameter; unresolved_operation and lock_held name the active operation. The gate's own conflicts are found before anything is sent; upstream_conflict is the upstream's 409 or 412 (CLI-016): not_started on a read, dispatched on a write, with its receipt.",
+      "description": "A precondition failed (CLI-013): token_mismatch names the first differing parameter; unresolved_operation names the active operation, and lock_held does when the lock's owner is known. The gate's own conflicts are found before anything is sent; upstream_conflict is the upstream's 409 or 412 (CLI-016): not_started on a read, dispatched on a write, with its receipt.",
       "required": ["conflict"],
       "allOf": [
         {
@@ -192,7 +192,7 @@
         {
           "if": {
             "required": ["conflict"],
-            "properties": {"conflict": {"enum": ["unresolved_operation", "lock_held"]}}
+            "properties": {"conflict": {"const": "unresolved_operation"}}
           },
           "then": {"required": ["active_operation"]}
         }

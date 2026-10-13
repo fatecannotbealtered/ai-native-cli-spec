@@ -173,10 +173,14 @@ func TestUnknownProfileIsConfigError(t *testing.T) {
 	h := settingsHarness(t)
 	path := writeSettings(t, h, `{"profiles": {"work": {}, "home": {}}}`)
 	r := h.run("probe", "--profile", "wrk")
-	if r.exit != 4 || r.code() != "E_CONFIG" || r.message() != "No profile named `wrk` in "+path+"." {
+	if r.exit != 4 || r.code() != "E_CONFIG" || r.message() != "The requested profile is not in the settings file." {
 		t.Fatalf("unknown profile: %s", r)
 	}
-	mustJSON(t, "details", r.details(), `{"dispatch_state":"not_started","next_action":"Use one of the profiles `+"`notes context`"+` lists, or ask the user to add `+"`wrk`"+`.","did_you_mean":["work"]}`)
+	mustJSON(t, "details", r.details(), `{"dispatch_state":"not_started","next_action":"Use one of the profiles in details.did_you_mean, or add the profile to `+
+		strings.Trim(jsonString(path), `"`)+`.","profile":"wrk","source":"flag","did_you_mean":["work"]}`)
+	if !listHasString(r.env["meta"].(map[string]any)["untrusted"], "error.details.profile") {
+		t.Fatalf("the requested name is untrusted: %s", r)
+	}
 	if p := contextProfile(t, h, "--profile", "wrk"); p["name"] != nil || p["source"] != "none" || len(p["profiles"].([]any)) != 2 {
 		t.Fatalf("context with an unknown profile: %v", p)
 	}
@@ -185,7 +189,7 @@ func TestUnknownProfileIsConfigError(t *testing.T) {
 		t.Fatalf("doctor: %v", c)
 	}
 	h.env["NOTES_PROFILE"] = "nope"
-	if c := checkNamed(h.run("doctor"), "settings"); c["status"] != "fail" || c["message"] != "No profile named `nope` in "+path+"." {
+	if c := checkNamed(h.run("doctor"), "settings"); c["status"] != "fail" || c["message"] != "The requested profile is not in the settings file." {
 		t.Fatalf("doctor with an unknown profile: %v", c)
 	}
 }

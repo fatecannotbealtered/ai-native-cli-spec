@@ -254,8 +254,12 @@ func (a *App) WriteOutput(cmd *cobra.Command, spec OutputSpec) error {
 		return NotDispatched(conflictError("state_drift", "The output file appeared or changed since the preview; nothing was written.",
 			"Run the command again with --dry-run and check the new preview."))
 	}
+	// planned is the file's state the last Preview saw: at confirm, the re-check
+	// that runs just before Apply.
+	planned := ""
 	preview := func(context.Context) (Preview, error) {
 		exists, version := state()
+		planned = version
 		var blocks []Block
 		switch {
 		case version == "directory":
@@ -279,12 +283,20 @@ func (a *App) WriteOutput(cmd *cobra.Command, spec OutputSpec) error {
 		if err != nil {
 			return Result{}, NotDispatched(err)
 		}
-		exists, _ := state()
-		if exists && !overwrites {
+		// Checked again at write time (C1): a file that appeared since the confirm's
+		// checks is an overwrite, which the scope's roots must allow.
+		exists, version := state()
+		if exists && !a.overwriteAllowed(path) {
+			return Result{}, NotDispatched(a.overwriteRefused(cmd, path))
+		}
+		if version != planned || (exists && !overwrites) {
 			return Result{}, appeared()
 		}
 		if err := writeOutputFile(path, content, exists); err != nil {
 			if errors.Is(err, fs.ErrExist) {
+				if !a.overwriteAllowed(path) {
+					return Result{}, NotDispatched(a.overwriteRefused(cmd, path))
+				}
 				return Result{}, appeared()
 			}
 			return Result{}, NotDispatched(ioError("The output file could not be written; nothing was saved.",
@@ -305,6 +317,37 @@ func (a *App) WriteOutput(cmd *cobra.Command, spec OutputSpec) error {
 	}
 	return a.Write(cmd, WriteSpec{Target: Target{Key: path, Kind: "file", Label: filepath.Base(path)},
 		Preview: preview, Apply: apply, Timeout: spec.Timeout})
+}
+
+// overwriteAllowed reports whether the current scope's roots cover path, an existing
+// file (C1, SEC-011): absent roots, nothing may be overwritten.
+func (a *App) overwriteAllowed(path string) bool {
+	state, e := a.stateDirPath()
+	if e != nil {
+		return false
+	}
+	sc := a.loadScope(state)
+	return sc.status == "granted" && pathWithin(path, sc.file.Roots)
+}
+
+// overwriteRefused is WriteOutput's write-time refusal of a file that appeared under
+// a grant that only allows new files (C1): E_FORBIDDEN with details.scope naming
+// the file under missing.roots, and nothing written.
+func (a *App) overwriteRefused(cmd *cobra.Command, path string) *Error {
+	state, _ := a.stateDirPath()
+	sc := a.loadScope(state)
+	need := scopeNeed{outputs: []string{path}}
+	if m := a.metaFor(cmd); m != nil {
+		need.effects, need.dangerous = m.effectStrings(), m.dangerous()
+	}
+	status := sc.status
+	if status == "granted" {
+		status = "insufficient"
+	}
+	e := a.scopeRefusal(sc, status, need, map[string]any{"roots": []string{path}}, 0)
+	e.Message = "The output file already exists and the scope does not allow overwriting it; nothing was written."
+	e.Details["next_action"] = "Ask the user to add the directory to the scope's roots, or choose a new file name."
+	return e
 }
 
 // writeOutputFile writes content to path atomically: a synced temporary file in the

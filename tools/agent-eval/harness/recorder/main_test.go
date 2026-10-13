@@ -48,3 +48,37 @@ func TestChildEnv(t *testing.T) {
 		}
 	}
 }
+
+func TestTrialSetEnv(t *testing.T) {
+	priv := privateConfig{
+		SetEnv:   map[string]string{"TOOL_HOST": "http://upstream.test", "TOOL_TOKEN": "agent-token"},
+		TrialEnv: []string{"tool_host"},
+	}
+	// no overrides: the private set_env as it is
+	got, err := trialSetEnv(priv, runConfig{RealBin: "bin"})
+	if err != nil || len(got) != 2 || got["TOOL_HOST"] != "http://upstream.test" {
+		t.Fatalf("no overrides: got %v, %v", got, err)
+	}
+	// an allowed override replaces the value, whatever the case of its name
+	got, err = trialSetEnv(priv, runConfig{RealBin: "bin", SetEnv: map[string]string{"Tool_Host": "http://127.0.0.1:5000"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["Tool_Host"] != "http://127.0.0.1:5000" || got["TOOL_TOKEN"] != "agent-token" || len(got) != 2 {
+		t.Errorf("allowed override: got %v", got)
+	}
+	if _, ok := got["TOOL_HOST"]; ok {
+		t.Errorf("the overridden variable is still set under its old spelling: %v", got)
+	}
+	// anything not in trial_env is refused, set_env keys included
+	for _, k := range []string{"TOOL_SCOPE_FILE", "TOOL_TOKEN"} {
+		if _, err := trialSetEnv(priv, runConfig{RealBin: "bin", SetEnv: map[string]string{k: "x"}}); err == nil {
+			t.Errorf("%s: override accepted, want an error", k)
+		}
+	}
+	// a private config without trial_env allows no override
+	priv.TrialEnv = nil
+	if _, err := trialSetEnv(priv, runConfig{RealBin: "bin", SetEnv: map[string]string{"TOOL_HOST": "x"}}); err == nil {
+		t.Error("override accepted without trial_env")
+	}
+}

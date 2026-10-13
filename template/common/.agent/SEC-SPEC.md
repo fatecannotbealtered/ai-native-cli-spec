@@ -67,7 +67,7 @@ Check: G07 (no scope: dry-run and confirm return `E_FORBIDDEN` with `details.sco
 
 ### SEC-011 Scope file format and resolution
 
-A person writes the scope file; the CLI MUST NOT create, edit, move or delete it, or offer a command or flag that does. It reads the file named by `<PREFIX>_SCOPE_FILE` when that is set, else `<state_dir>/scope.json`; there is no CLI flag. Parsing is strict: invalid JSON, a duplicate key, an unknown key, a value of the wrong type or outside its enum, a `tool` other than this tool, or a relative path in `outputs` or `roots` makes the file `invalid`, and an invalid file grants nothing.
+A person writes the scope file; the CLI MUST NOT create, edit, move or delete it, or offer a command or flag that does. It reads the file named by `<PREFIX>_SCOPE_FILE` (an absolute path) when that is set, else `<state_dir>/scope.json`; there is no CLI flag. Parsing is strict: invalid JSON, a duplicate key, an unknown key or a known one spelled with other capitals, a value of the wrong type or outside its enum, a `tool` other than this tool, or a relative path in `outputs` or `roots` makes the file `invalid`, and so does, on POSIX, a file not owned by the user or writable by anyone else; an invalid file grants nothing.
 
 ```json
 {
@@ -97,7 +97,7 @@ A person writes the scope file; the CLI MUST NOT create, edit, move or delete it
 | `destinations` | no | where `deliver` commands may send; absent or empty means nowhere |
 | `outputs` | no | absolute directories where new local files may be created (`artifact`); absent means none |
 | `roots` | no | absolute directories whose existing files may be overwritten (`persist`); absent means none |
-| `limits.max_operations` | no | operations that may be confirmed under this `scope_id` |
+| `limits.max_operations` | no | operations that may be confirmed under this `scope_id`, counted in `<state_dir>/scope-usage.json`, which pruning the journal never resets |
 | `revoked` | no | `true` withdraws the grant |
 | `notes` | no | free text for people |
 
@@ -108,7 +108,7 @@ How a person grants a scope:
 3. Run `<tool> doctor`: its `authorization` check says whether the file is valid and what it grants.
 4. To withdraw the grant, set `"revoked": true` or delete the file. For a one-off task, keep a task-specific file elsewhere and set `<PREFIX>_SCOPE_FILE` in the environment the agent runs in.
 
-Why: authority must come from a person, not from the agent or anything it reads. Unknown keys are rejected because a typo would otherwise be silent and could widen the grant: `"target": [...]` leaves `targets` absent, which means every target. Duplicate keys are rejected because parsers disagree on which value wins, so a reviewer could read one grant while the tool applies another. Relative paths are rejected because they would resolve against whatever directory the agent runs in.
+Why: authority must come from a person, not from the agent or anything it reads. Unknown keys are rejected because a typo would otherwise be silent and could widen the grant: `"target": [...]` leaves `targets` absent, which means every target. Duplicate keys, and keys that differ only in capitals, are rejected because parsers disagree on which value wins, so a reviewer could read one grant while the tool applies another: Go's JSON decoder applied `"Dangerous": true` from a file that also said `"dangerous": false`. Relative paths are rejected because they would resolve against whatever directory the agent runs in.
 
 Check: aicli scope tests (unknown key, duplicate key, wrong `tool`, relative path: all `invalid`); review that no command writes to the scope path.
 
@@ -120,12 +120,12 @@ At dry-run, at the refusal of a bare call and at confirm, the gate MUST refuse u
 - every non-`observe` effect of the command is in `effects`, and a dangerous command has `"dangerous": true` (`insufficient`);
 - when `targets` is present, a selector matches the target key (`insufficient`). `exact` matches an equal key. `subtree` matches an equal key, or a key that continues with `/`, `!`, `#`, `:` or `@`; a selector key that ends in one of those characters matches anything after it. So `ops/` covers `ops/n-42` and `acme/web` covers `acme/web!5`, but neither covers `ops-archive/n-1` or `acme/webstore`;
 - every destination in the preview matches a `destinations` entry (`insufficient`), by the destination rule, not the target rule (contract.json `scope.destination_match`). An entry containing `://` matches an equal destination, or one with the same scheme and host and a path at or below the entry's, compared by whole segments; a destination with user info, a query, a fragment or a dot segment matches only an equal entry. Any other entry (an email address, a handle, a channel id) matches only an equal destination, or, when the entry ends with `/`, a destination that continues after it at a `/` boundary. `@`, `:`, `#` and `!` are ordinary characters here, so `bob` does not cover `bob@evil.example`;
-- every local path the command writes, after resolving symlinks and `..`, lies inside `outputs` (new files) or `roots` (overwritten files) (`insufficient`);
-- fewer than `limits.max_operations` operations have been confirmed under this `scope_id`, counted from the journal (`budget_spent`).
+- every local path the command writes, after resolving symlinks and `..`, lies inside `outputs` when it does not exist yet and inside `roots` when it does, so absent `roots` means nothing may be overwritten (`insufficient`, with `missing.outputs` or `missing.roots`); a junction or other reparse point in the path that cannot be resolved fails the check, and `WriteOutput` checks again when it writes;
+- fewer than `limits.max_operations` operations have been dispatched under this `scope_id`, counted in `scope-usage.json`, under its own lock, in the same step that consumes the token (`budget_spent`), so concurrent confirms cannot overrun it and pruning cannot refill it.
 
 The scope file's digest is bound into the token (CLI-054); a file changed between dry-run and confirm is `E_CONFLICT` `scope_changed` (CLI-057). Target keys MUST be canonical: one spelling per object after URL, name and alias resolution, so `ACME/Web` and `acme/web` are one key when the upstream treats them alike. Otherwise a second spelling could fall outside a selector the person wrote, or inside one they did not mean.
 
-Why: re-checking at confirm makes a narrowed or revoked scope apply to tokens already issued. Boundary-aware matching keeps `ops` from covering `ops-archive`; a separate destination rule keeps a grant for one recipient from covering an address that merely starts with it; and resolving symlinks keeps a path inside `outputs` from writing somewhere else.
+Why: re-checking at confirm makes a narrowed or revoked scope apply to tokens already issued. Boundary-aware matching keeps `ops` from covering `ops-archive`; a separate destination rule keeps a grant for one recipient from covering an address that merely starts with it; and resolving symlinks keeps a path inside `outputs` from writing somewhere else. In the 2.0 release review, a Windows junction under an allowed directory let a write land outside it, because Go's `filepath.EvalSymlinks` no longer follows junctions, and a grant of `outputs` alone let a command overwrite an existing file there.
 
 Check: G07, G10; aicli tests for each status, selector boundaries, destination matching, symlink escape and budget counting; review how the tool builds target keys.
 
@@ -151,14 +151,14 @@ Every non-`observe` command MUST go through aicli's gate (CLI-050). For reviewer
 |---|---|---|---|
 | Shared implementation | no tool-local token, binding, key or single-use store | CLI-050 | review |
 | Preview first | a token exists only with the preview that produced it: a dry-run, or the refusal of a bare call | CLI-051, CLI-052 | G01, G02 |
-| Complete binding | command path; every supplied flag and positional after normalisation, except the declared control flags; content digests of file and stdin inputs; resolved account, host and target; scope digest; tool version; base version | CLI-053, CLI-054 | G03 |
+| Complete binding | command path; every supplied flag and positional after normalisation, except the declared control flags; content digests of file and stdin inputs; resolved account, host and target; the active profile and every declared setting; scope digest; tool version; base version | CLI-053, CLI-054 | G03 |
 | Keyed tokens | HMAC-SHA256 with a 32-byte machine-local key, never an unkeyed fallback; expiry at most 15 minutes | CLI-055 | G08 |
 | Canonical encoding | only `^ct2_[a-z2-7]{26}_[0-9a-f]{32}$` is accepted; single use is keyed by operation id | CLI-055 | G05 |
 | Atomic single use | one exclusive-create marker per operation, across processes | CLI-055 | G04 |
 | Fail closed | no usable key, no token; a journal that cannot be written, or a corrupt record, no write | CLI-055, CLI-058 | G08 |
 | No mode bypass | no output mode, flag or environment variable turns the gate off | CLI-055 | G06 |
 | Dangerous second flag | `--dangerous` in both steps | CLI-056 | G09 |
-| Re-check at confirm | scope, base version and plan (`state_drift`), account, host and target | CLI-057 | G10 |
+| Re-check at confirm | scope, base version and plan (`state_drift`), account, host and target, under a per-target lock held until the record says `dispatching` | CLI-057 | G10 |
 | Record before send | the operation record is written before dispatch, or nothing is sent | CLI-058 | G08 |
 
 No library can check the following, so review MUST:
@@ -183,7 +183,7 @@ Check: the conformance suite runs in CI with a sample for every write command (V
 
 ### SEC-021 Secrets
 
-Values of parameters declared `secret` (CLI-024), credentials, and tokens derived from them MUST NOT appear in stdout, stderr, previews (shown as `"***"`), confirm tokens, operation records, logs, notices, error details or `reference` examples. A tool MUST NOT publish an unsalted hash of a secret, whole or truncated; where a fingerprint is needed to tell credentials apart, it MUST be a keyed hash (HMAC with a machine-local key). aicli binds secret values as HMAC digests under the confirm key and never stores them raw.
+Values of parameters declared `secret` (CLI-024), credentials, and tokens derived from them MUST NOT appear in stdout, stderr, previews (shown as `"***"`), confirm tokens, operation records, logs, notices, error details or `reference` examples. A tool MUST NOT publish an unsalted hash of a secret, whole or truncated; where a fingerprint is needed to tell credentials apart, it MUST be a keyed hash (HMAC with a machine-local key). aicli binds secret values as HMAC digests under the confirm key and never stores them raw. It replaces with `***` every value it knows to be secret, also in its URL-escaped forms, in error messages and details (an HTTP client's error often quotes the request URL) and in debug lines: secret parameters, the flag of a secret setting and the literal twin of a secret file input (CLI-100, CLI-048), secret settings, and values the tool registers with `App.AddSecret` (a token read from the keyring).
 
 Why: an unsalted hash of a token or password can be matched or brute-forced offline, so publishing it leaks the secret. The 2026-10 fleet audit found a login dry-run that printed the full unsalted SHA-256 of an access token, and a token payload that carried an unsalted SHA-256 of an argument list including a password.
 
@@ -191,7 +191,7 @@ Check: every credential-carrying parameter is listed in `Meta.Secrets`; the tool
 
 ### SEC-022 Outbound contact
 
-A tool MUST connect only to the upstream services the user configured (the hosts in its settings or credentials, CLI-100) and, in `update` and `doctor`, to its release source: the GitHub API and release downloads, and the Sigstore trust-root service that verifies them (CLI-070, CLI-071). `update` refreshes the trust root with the same timeout, proxy, CA file and User-Agent as its other requests (CLI-110). It MUST NOT send telemetry, analytics, crash reports or usage pings, to its authors or to anyone else. Any other destination a feature needs (an identity provider's token endpoint, a CDN that serves attachments) MUST be listed in SECURITY.md with what is sent there.
+A tool MUST connect only to the upstream services the user configured (the hosts in its settings or credentials, CLI-100) and, in `update` and `doctor`, to its release source: the GitHub API and release downloads, and the Sigstore trust-root service that verifies them (CLI-070, CLI-071). `update` refreshes the trust root with the same timeout, proxy, CA file and User-Agent as its other requests (CLI-110); the Python library's refresh ignores the CA file and the User-Agent (CLI-070). It MUST NOT send telemetry, analytics, crash reports or usage pings, to its authors or to anyone else. Any other destination a feature needs (an identity provider's token endpoint, a CDN that serves attachments) MUST be listed in SECURITY.md with what is sent there.
 
 Why: the tool runs with the user's credentials over the user's data, and neither the user nor the agent sees what it sends besides its answer, so every destination has to be readable in one place. A usage ping would also carry the commands an agent ran, and those describe the user's work.
 
@@ -199,7 +199,7 @@ Check: review every network call site and hard-coded host against SECURITY.md; n
 
 ### SEC-030 State store
 
-The state directory is `App.StateDir` (tests), else `<PREFIX>_STATE_DIR`, else `~/.<tool>`. It holds `confirm.key`, `operations/` (records and single-use markers), the default `scope.json`, the default `settings.json` (CLI-100) and `update-check.json`. aicli MUST:
+The state directory is `App.StateDir` (tests), else `<PREFIX>_STATE_DIR`, else `~/.<tool>`. It holds `confirm.key`, `operations/` (records and single-use markers), `locks/` (per-target confirm locks, CLI-057), `scope-usage.json` (the operation budget per `scope_id`, SEC-012), the default `scope.json`, the default `settings.json` (CLI-100) and `update-check.json`. aicli MUST:
 
 - on POSIX, create the directory 0700 and its files 0600, setting the mode at creation, and report `posix-0700` in `context.state.protection`;
 - on Windows, report what was verified for the resolved state directory: `windows-profile-acl` when it lies inside the user profile, `windows-explicit-acl` when an explicit owner-only ACL was set and verified, otherwise `windows-unverified` (and `doctor`'s `state_store` check warns). Never claim owner-only access that was not set;

@@ -296,7 +296,7 @@ def test_operation_builtins(h: THarness) -> None:
     for i in range(3):
         tok = h.must_token("note", "update", "1", "--title", f"T{i}")
         h.run("note", "update", "1", "--title", f"T{i}", "--confirm", tok)
-    r = h.run("operation", "list", "--status", "applied", "--limit", "2")
+    r = h.run("operation", "list", "--state", "applied", "--limit", "2")
     assert (
         r.exit == 0
         and len(r.data()["items"]) == 2

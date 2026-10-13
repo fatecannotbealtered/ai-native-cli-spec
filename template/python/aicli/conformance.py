@@ -12,6 +12,7 @@ and R01-R06 for the tool, run against a Harness. From pytest:
 
 from __future__ import annotations
 
+import datetime as _dt
 import decimal
 import io
 import json
@@ -210,6 +211,13 @@ class _Arg:
 
 
 _NUMBER = re.compile(r"-?[0-9]+")
+_FLOAT = re.compile(r"-?[0-9]+\.[0-9]+")
+_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+_COLOUR = re.compile(r"#[0-9A-Fa-f]{6}")
+_DATE_TIME = re.compile(
+    r"([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(\.[0-9]+)?"
+    r"(Z|[+-][0-9]{2}:[0-9]{2})"
+)
 
 
 def _is_token(x: Any) -> bool:
@@ -264,8 +272,6 @@ class _Suite:
     def scope_object(self) -> dict[str, Any]:
         if self.h.scope is not None:
             return dict(self.h.scope)
-        import datetime as _dt
-
         now = _dt.datetime.now(_dt.timezone.utc)
         return {
             "scope_id": "scp_aicli_conformance",
@@ -282,6 +288,8 @@ class _Suite:
         obj.update(change or {})
         with open(st.scope_file, "w", encoding="utf-8", newline="\n") as fh:
             json.dump(obj, fh, indent=2)
+        if os.name != "nt":
+            os.chmod(st.scope_file, 0o600)  # only its owner may write a scope file (SEC-011)
 
     def writes(self) -> int:
         return self.h.writes()
@@ -592,20 +600,22 @@ class _Suite:
         self.check_mutations(st, c, m, sample, token)
 
         # G04: the exact confirm dispatches; a repeat is token_used. A command whose
-        # only effects are local files (artifact, persist) writes no upstream
-        # request; its receipt must say the file was saved instead.
+        # only effects are configure, persist or artifact may change only local
+        # things (the tool's keyring entry, its settings file, a local file) and send
+        # nothing upstream: a receipt with change applied or persistence saved counts
+        # as its one write (P7).
         r = self.run(st, "G04", gate("--confirm", token))
         reported = r.data().get("receipt") is not None or r.details().get("receipt") is not None
         if m.batch_flag:
             reported = (
                 r.data().get("items") is not None and r.data().get("summary") is not None
             ) or (r.details().get("items") is not None and r.details().get("summary") is not None)
-        local_only = not m.has_effect("change", "deliver", "configure")
-        if local_only and not _saved_locally(r):
+        local_only = not m.has_effect("change", "deliver")
+        if local_only and r.writes < 1 and not _applied_locally(r):
             self.errorf(
                 "G04",
-                f"{path}: the exact confirm saved no local file (receipt persistence is not "
-                f"saved): {r.describe()}",
+                f"{path}: the exact confirm sent no write, and its receipt shows no applied "
+                f"change or saved file: {r.describe()}",
             )
         elif not local_only and r.writes < 1:
             self.errorf("G04", f"{path}: the exact confirm sent no write: {r.describe()}")
@@ -1001,13 +1011,23 @@ def is_stream_output(raw: bytes) -> bool:
     return bool(rest) and rest[0] == "{" and "\n" not in head[:end]
 
 
-def _saved_locally(r: _Run) -> bool:
-    """A confirmed write whose receipt saved a local file."""
-    receipt = r.data().get("receipt")
-    if not isinstance(receipt, dict):
-        receipt = r.details().get("receipt")
-    outcome = receipt.get("outcome") if isinstance(receipt, dict) else None
-    return isinstance(outcome, dict) and outcome.get("persistence") == "saved"
+def _applied_locally(r: _Run) -> bool:
+    """A confirmed write whose receipt (or a batch item's) shows change applied or
+    persistence saved (P7)."""
+    receipts: list[Any] = []
+    for part in (r.data(), r.details()):
+        receipts.append(part.get("receipt"))
+        items = part.get("items")
+        for it in items if isinstance(items, list) else []:
+            if isinstance(it, dict):
+                receipts.append(it.get("receipt"))
+    for receipt in receipts:
+        outcome = receipt.get("outcome") if isinstance(receipt, dict) else None
+        if isinstance(outcome, dict) and (
+            outcome.get("change") == "applied" or outcome.get("persistence") == "saved"
+        ):
+            return True
+    return False
 
 
 def strip_path(sample: list[str], path: str) -> list[str]:
@@ -1070,8 +1090,45 @@ def _format_f(x: float) -> str:
     return s
 
 
+def _next_day(value: str) -> str | None:
+    """An ISO date (YYYY-MM-DD) or an RFC 3339 date-time one day later, in the
+    same form (Go's time.DateOnly and time.RFC3339Nano): the fraction keeps its
+    digits without trailing zeros, and a zero offset is Z. None when value is
+    neither."""
+    if _DATE.fullmatch(value):
+        try:
+            d = _dt.date.fromisoformat(value)
+            return (d + _dt.timedelta(days=1)).isoformat()
+        except (ValueError, OverflowError):
+            return None
+    m = _DATE_TIME.fullmatch(value)
+    if m is None:
+        return None
+    zone = m.group(8)
+    try:
+        d = _dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        t = _dt.time(int(m.group(4)), int(m.group(5)), int(m.group(6)))
+        if zone != "Z":
+            hours, minutes = int(zone[1:3]), int(zone[4:6])
+            if hours > 23 or minutes > 59:
+                return None
+            if hours == 0 and minutes == 0:
+                zone = "Z"
+        d += _dt.timedelta(days=1)
+    except (ValueError, OverflowError):
+        return None
+    frac = (m.group(7) or "").rstrip("0")
+    if frac == ".":
+        frac = ""
+    return f"{d.isoformat()}T{t.isoformat()}{frac}{zone}"
+
+
 def mutate_value(f: Flag | None, m: Meta, name: str, value: str) -> str:
-    """A different value of the same type."""
+    """A different value of the same type, so G03 reaches the gate instead of
+    failing the tool's own validation (P9): another allowed value of an enum, a
+    boolean flipped, an integer or a float plus 1, an ISO date or date-time one day
+    later, a #rrggbb colour inverted; anything else with -mutated appended. A list
+    gets one more element."""
     if f is not None:
         doc = m.params.get(name)
         enum = list(doc.enum) if doc is not None and doc.enum else []
@@ -1082,9 +1139,11 @@ def mutate_value(f: Flag | None, m: Meta, name: str, value: str) -> str:
                 if e != value:
                     return e
         if f.multiple:
-            items = f.slice_strings()
-            if items and _NUMBER.fullmatch(items[-1]):
-                return value + "," + str(int(items[-1]) + 1000)
+            # The sample's own last element decides: a list of integers gets another
+            # integer.
+            last = value.split(",")[-1].strip()
+            if _NUMBER.fullmatch(last):
+                return value + "," + str(int(last) + 1000)
             return value + ",aicli-mutated"
         typ, _ = flag_type(f)
         if typ == "boolean":
@@ -1099,6 +1158,13 @@ def mutate_value(f: Flag | None, m: Meta, name: str, value: str) -> str:
                 pass
     if _NUMBER.fullmatch(value):
         return str(int(value) + 1)
+    if _FLOAT.fullmatch(value):
+        return _format_f(float(value) + 1)
+    if _COLOUR.fullmatch(value):
+        return f"#{0xFFFFFF ^ int(value[1:], 16):06x}"
+    later = _next_day(value)
+    if later is not None:
+        return later
     return value + "-mutated"
 
 

@@ -372,7 +372,8 @@
       "unresolved_operation",
       "lock_held",
       "upstream_conflict",
-      "idempotency_mismatch"
+      "idempotency_mismatch",
+      "idempotency_resolved"
     ],
     "gate_conflict": [
       "token_mismatch",
@@ -381,7 +382,8 @@
       "state_drift",
       "scope_changed",
       "unresolved_operation",
-      "lock_held"
+      "lock_held",
+      "idempotency_resolved"
     ],
     "gate_conflict_meaning": "the conflicts the gate finds itself, before anything is sent: their errors are always dispatch_state not_started",
     "human_action": [
@@ -400,9 +402,10 @@
       "state_drift": "the target changed since the dry run (base version differs)",
       "scope_changed": "the scope file changed since the dry run",
       "unresolved_operation": "an earlier operation on the same target has an unknown outcome (details.active_operation)",
-      "lock_held": "an operation on the same target is still running (details.active_operation)",
+      "lock_held": "an operation on the same target is still running (details.active_operation when its owner is known)",
       "upstream_conflict": "the upstream refused because of its current state (HTTP 409/412)",
-      "idempotency_mismatch": "the idempotency key was used before for a different request"
+      "idempotency_mismatch": "the idempotency key was used before for a different request",
+      "idempotency_resolved": "the earlier request with this idempotency key was resolved by hand as applied or partial (details.operation_id); it is not sent again"
     }
   },
   "control_flags": {
@@ -854,6 +857,10 @@
       "operations/<id>.json": "operation record",
       "operations/<id>.consumed": "single-use marker (exclusive create)",
       "scope.json": "default scope file (human-written)",
+      "scope-usage.json": "operations dispatched per scope_id, for limits.max_operations; never pruned",
+      "settings.json": "settings and profiles (human-written, CLI-100)",
+      "locks/<hash>.lock": "per-target lock held from the confirm checks until the dispatching record is written",
+      "locks/scope-usage.lock": "lock around scope-usage.json",
       "update-check.json": "update notice cache"
     },
     "protection": [
@@ -911,7 +918,9 @@
     "known_types": {
       "update_available": "a newer release is cached (CLI-071)",
       "deprecated": "the command or a flag used is deprecated and names its replacement (CLI-081)",
-      "items_omitted": "operation show listed only some items of a large batch and names the paging command (CLI-061)"
+      "items_omitted": "operation show listed only some items of a large batch and names the paging command (CLI-061)",
+      "journal_write_failed": "the final operation record could not be written; the result is still returned (CLI-057)",
+      "result_unencodable": "the write was dispatched, but the tool's result could not be encoded, so data.result is empty; operation show has the receipt (CLI-057)"
     }
   },
   "size_budgets": {
@@ -1114,7 +1123,10 @@
       ],
       "optional_data_keys": [
         "since",
-        "count"
+        "count",
+        "truncated",
+        "truncated_reason",
+        "omitted"
       ],
       "entry_keys": [
         "version",
@@ -1180,11 +1192,11 @@
         "E_INTERRUPTED"
       ],
       "stage_codes": {
-        "discover": "E_USAGE (a bad --target-version, or no such release), E_UNSUPPORTED (runs from source, or no release has a semver tag; other non-semver tags are skipped), E_NETWORK, E_RATE_LIMITED, E_TIMEOUT",
-        "download": "E_UNSUPPORTED (no build for this platform), E_NETWORK, E_RATE_LIMITED, E_TIMEOUT",
+        "discover": "E_USAGE (a bad --target-version, or no such release), E_UNSUPPORTED (runs from source, a development build, or no release has a semver tag; other non-semver tags are skipped), E_CONFIG (an unusable <PREFIX>_CA_FILE), E_NETWORK, E_RATE_LIMITED, E_TIMEOUT",
+        "download": "E_UNSUPPORTED (no build for this platform, or an asset not served over https), E_IO (the running executable cannot be located), E_NETWORK (including a redirect to plain http), E_RATE_LIMITED, E_TIMEOUT",
         "verify_signature": "E_INTEGRITY; E_NETWORK when the Sigstore trust root cannot be loaded",
         "verify_checksum": "E_INTEGRITY",
-        "replace": "E_IO, E_CONFIG (package unknown or manager missing), E_INTEGRITY (an unsafe archive entry, or the new binary reports another version)",
+        "replace": "E_IO, E_CONFIG (package unknown or manager missing), E_UNSUPPORTED (the package manager cannot install the target, such as pip and a prerelease), E_INTEGRITY (an unsafe archive entry, or the new binary reports another version)",
         "skill_sync": "E_PARTIAL",
         "any stage before the swap": "E_INTERRUPTED"
       },

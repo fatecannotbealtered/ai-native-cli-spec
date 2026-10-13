@@ -11,7 +11,7 @@
       "problem": "bad_flag",
       "parameter": "--all",
       "did_you_mean": ["--limit"],
-      "usage": "gitlab-cli pipeline list --project <project> [--status <status>] [--branch <name>] [--limit <1-100>] [--cursor <cursor>]"
+      "usage": "gitlab-cli pipeline list --project <project> [--state <state>] [--branch <name>] [--limit <1-100>] [--cursor <cursor>]"
     }
   },
   "meta": {"duration_ms": 2}

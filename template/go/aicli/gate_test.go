@@ -361,9 +361,9 @@ func TestUnknownOutcomeBlocksTheTargetUntilResolved(t *testing.T) {
 	if other := h.run("note", "update", "2", "--title", "Y", "--dry-run"); other.exit != 0 {
 		t.Fatalf("another target was blocked: %s", other)
 	}
-	list := h.run("operation", "list", "--status", "unknown")
+	list := h.run("operation", "list", "--state", "unknown")
 	if list.exit != 0 || list.data()["count"].(interface{ String() string }).String() != "1" {
-		t.Fatalf("operation list --status unknown: %s", list)
+		t.Fatalf("operation list --state unknown: %s", list)
 	}
 	// resolving needs a scope covering the operation's effects
 	h.scopeOn = false
@@ -391,7 +391,7 @@ func TestResolveRefusesWhileTheLeaseIsLive(t *testing.T) {
 	var id string
 	h.up.hook = func(string, string) error {
 		// While Apply runs, another process tries to resolve the operation.
-		list := h.run("operation", "list", "--status", "dispatching")
+		list := h.run("operation", "list", "--state", "dispatching")
 		items := list.data()["items"].([]any)
 		if len(items) != 1 {
 			t.Errorf("want one dispatching operation, got %s", list)
@@ -421,7 +421,7 @@ func TestExpiredLeaseReadsAsUnknown(t *testing.T) {
 	tok := h.mustToken("note", "update", "1", "--title", "X")
 	h.up.hook = func(string, string) error {
 		now = now.Add(10 * time.Minute) // the process "hangs" past its lease
-		list := h.run("operation", "list", "--status", "unknown")
+		list := h.run("operation", "list", "--state", "unknown")
 		if list.data()["count"].(interface{ String() string }).String() != "1" {
 			t.Errorf("an expired lease must read as unknown: %s", list)
 		}
@@ -469,11 +469,13 @@ func TestIdempotencyKeyReplaysTheOriginalReceipt(t *testing.T) {
 	h := newHarness(t)
 	args := []string{"note", "create", "--title", "Once", "--idempotency-key", "k-1"}
 	tok := h.mustToken(args...)
+	// A token issued before the first confirm meets the applied operation at its own
+	// confirm (a dry-run after it is answered with the replay at once, P4).
+	tok2 := h.mustToken(args...)
 	first := h.run(append(args, "--confirm", tok)...)
 	if first.exit != 0 || h.up.Writes() != 1 {
 		t.Fatalf("first: %s", first)
 	}
-	tok2 := h.mustToken(args...)
 	second := h.run(append(args, "--confirm", tok2)...)
 	if second.exit != 0 || h.up.Writes() != 1 {
 		t.Fatalf("replay wrote again: %s", second)

@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"time"
@@ -65,10 +66,11 @@ type Preview struct {
 // the refusal and again at confirm. Apply performs the change; its error decides the
 // outcome: NotDispatched (nothing was sent), Rejected (the upstream definitively
 // refused; nothing changed), anything else an unknown outcome (E_OUTCOME_UNKNOWN).
-// Timeout is the lease and Apply's deadline (default 2 minutes). ReadBack is the
-// read command, without the tool name, that shows whether the change landed (for
-// example "note get 1"); an unknown outcome's next_action names it. Build it from
-// the registry path and validated inputs only, never from upstream text (SEC-002).
+// Timeout is Apply's deadline (default 2 minutes); the record's lease ends 5 s after
+// it (CLI-058). ReadBack is the read command, without the tool name, that shows
+// whether the change landed (for example "note get 1"); an unknown outcome's
+// next_action names it. Build it from the registry path and validated inputs only,
+// never from upstream text (SEC-002).
 type WriteSpec struct {
 	Target   Target
 	Preview  func(ctx context.Context) (Preview, error)
@@ -78,7 +80,19 @@ type WriteSpec struct {
 }
 
 // Op is handed to Apply: the operation id and the idempotency key to send upstream.
+// Apply MUST honour its context: return by the context's deadline (the write's
+// Timeout) and stop when it is cancelled. Once the lease (the deadline plus 5 s) has
+// passed, operation resolve may record an outcome by hand; a confirm whose record
+// was resolved while Apply still ran reports E_OUTCOME_UNKNOWN (CLI-058).
 type Op struct{ ID, IdempotencyKey string }
+
+// leaseGrace is how long a record's lease outlasts Apply's deadline (CLI-058), so
+// operation resolve cannot start while Apply may still be running.
+const leaseGrace = 5 * time.Second
+
+// targetLockWait is how long a confirm waits for another confirm on the same target
+// (CLI-057 step 9) before it answers lock_held.
+var targetLockWait = 10 * time.Second
 
 // BatchItem is one target of a batch write.
 type BatchItem struct {
@@ -138,14 +152,18 @@ type gateRun struct {
 	confirmSet    bool
 	dangerousFlag bool
 	idem          string
+	// dispatched is the operation id once its dispatching record is written
+	// (CLI-057 step 14): from then on no error says that nothing was sent.
+	dispatched string
 }
 
 // Write runs a single-target write through the gate.
-func (a *App) Write(cmd *cobra.Command, spec WriteSpec) error {
+func (a *App) Write(cmd *cobra.Command, spec WriteSpec) (err error) {
 	g, err := a.startGate(cmd, false)
 	if g == nil {
 		return err
 	}
+	defer g.recoverAfterDispatch(&err)
 	if spec.Preview == nil || spec.Apply == nil || strings.TrimSpace(spec.Target.Key) == "" {
 		return g.fail(internalError("App.Write needs WriteSpec.Target.Key, Preview and Apply."))
 	}
@@ -232,12 +250,42 @@ func (g *gateRun) fail(e *Error) error {
 func (g *gateRun) succeed(data map[string]any, untrusted []string) error {
 	gen, err := toGenericData(data)
 	if err != nil {
+		if g.dispatched != "" {
+			return g.fail(g.unknownAfterDispatch(g.dispatched))
+		}
 		return g.fail(internalError("The write result cannot be encoded as JSON."))
 	}
 	if !g.st.gate.set {
 		g.st.gate = result{set: true, data: gen, raw: data, untrusted: untrusted, fromGate: true}
 	}
 	return nil
+}
+
+// unknownAfterDispatch is the error of a failure the library cannot classify once
+// the write was dispatched (CLI-057, A2): the outcome is unknown, never "nothing was
+// sent".
+func (g *gateRun) unknownAfterDispatch(id string) *Error {
+	lookup := fmt.Sprintf("%s operation show --id %s", g.tool(), id)
+	return NewError("E_OUTCOME_UNKNOWN", "The write may have been applied, but its result could not be reported; nothing will be retried.",
+		map[string]any{"operation_id": id, "lookup": lookup, "dispatch_state": "unknown",
+			"next_action": fmt.Sprintf("Run `%s` and re-read the target before anything else; do not resend.", lookup)})
+}
+
+// recoverAfterDispatch turns a panic after the dispatching record was written into
+// E_OUTCOME_UNKNOWN with the operation id (A2); before that point the panic goes on
+// to Execute, which reports it as an internal error (nothing was sent).
+func (g *gateRun) recoverAfterDispatch(err *error) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	if g.dispatched == "" {
+		panic(r)
+	}
+	e := g.unknownAfterDispatch(g.dispatched)
+	e.Details["cause"] = truncateRunes(fmt.Sprint(r), 300)
+	e.Untrusted = append(e.Untrusted, "cause")
+	*err = g.fail(e)
 }
 
 func (g *gateRun) tool() string { return g.a.toolName() }
@@ -461,7 +509,7 @@ func (g *gateRun) previewObject(id string, t Target, pv Preview, inputs map[stri
 }
 
 func (g *gateRun) claims(id string, b *binding, ident Identity, target, scope, base string, exp time.Time) claims {
-	return claims{V: 2, Tool: claimString(g.tool()), ToolVersion: claimString(g.a.Version), Op: id, Cmd: claimString(g.path),
+	return claims{V: 2, Tool: claimString(g.tool()), ToolVersion: claimString(g.a.version()), Op: id, Cmd: claimString(g.path),
 		Inv: b.inv, Inputs: b.digests, Account: claimString(ident.Account), Host: claimString(ident.Host),
 		Target: target, Scope: scope, Base: base, Idem: g.idem, Exp: timeString(exp)}
 }
@@ -502,7 +550,7 @@ func stringsAt(m map[string]any, key string) []string {
 // (it is read-only), so the person granting the scope sees what was asked for, and
 // widens the refusal to the destinations and outputs the preview names, so that one
 // grant covers the whole write.
-func (g *gateRun) withPreview(e *Error, spec WriteSpec, sc scopeState, need scopeNeed, j *journal) *Error {
+func (g *gateRun) withPreview(e *Error, spec WriteSpec, sc scopeState, need scopeNeed, state string) *Error {
 	pv, perr := g.callPreview(spec.Preview)
 	if perr != nil {
 		return e
@@ -510,7 +558,7 @@ func (g *gateRun) withPreview(e *Error, spec WriteSpec, sc scopeState, need scop
 	if len(need.destinations)+len(need.outputs) == 0 && len(pv.Destinations)+len(pv.Outputs) > 0 {
 		full := need
 		full.destinations, full.outputs = pv.Destinations, pv.Outputs
-		if wider := g.a.checkScope(sc, full, j); wider != nil && wider.Code == e.Code {
+		if wider := g.a.checkScope(sc, full, state); wider != nil && wider.Code == e.Code {
 			e = wider
 		}
 	}
@@ -549,7 +597,8 @@ func (g *gateRun) scratchKey() []byte {
 }
 
 // issued is a planned write: its preview, operation id and token (nil, with a nil
-// expiry, when the write cannot apply).
+// expiry, when the write cannot apply); or, when replay is set, the answer to a
+// repeated idempotent request found before Preview (P4).
 type issued struct {
 	pobj      map[string]any
 	id        string
@@ -557,6 +606,7 @@ type issued struct {
 	expires   any
 	canApply  bool
 	untrusted []string
+	replay    map[string]any
 }
 
 // mint issues the token for a plan that can apply.
@@ -608,7 +658,7 @@ func (g *gateRun) withFreshPlan(e *Error, spec WriteSpec) *Error {
 	if g.m.dangerous() && !g.dangerousFlag {
 		return e
 	}
-	p, pe := g.prepareSingle(spec)
+	p, pe := g.prepareSingle(spec, false)
 	if pe != nil || !p.canApply {
 		return e
 	}
@@ -628,16 +678,40 @@ func (g *gateRun) planSingle(spec WriteSpec) error {
 	if g.m.dangerous() && !g.dangerousFlag {
 		return g.fail(g.dangerousRefusal(spec))
 	}
-	p, e := g.prepareSingle(spec)
+	p, e := g.prepareSingle(spec, true)
 	if e != nil {
 		return g.fail(e)
+	}
+	if p.replay != nil {
+		return g.succeed(p.replay, p.untrusted)
 	}
 	return g.issue(p)
 }
 
-// prepareSingle runs the plan steps of a single write (CLI-051): scope, unresolved
-// operations, the read-only preview, the binding, the planned record and the token.
-func (g *gateRun) prepareSingle(spec WriteSpec) (*issued, *Error) {
+// lookupKey is the idempotency lookup of a dry-run or bare call (P4): it runs
+// before Preview, so an earlier request with this --idempotency-key is answered
+// even when a Preview would refuse the duplicate. It returns the operation to
+// replay, or the mismatch, resolved or unresolved conflict, as at confirm.
+func (g *gateRun) lookupKey(j *journal, state, target string) (*record, *Error) {
+	ident, e := g.identity()
+	if e != nil {
+		return nil, e
+	}
+	key, e := g.a.loadKey(state, true)
+	if e != nil {
+		return nil, e
+	}
+	b, e := g.a.bindInvocation(g.st, g.cmd, g.m, key)
+	if e != nil {
+		return nil, e
+	}
+	return g.idempotent(j, b, "", target, ident, true)
+}
+
+// prepareSingle runs the plan steps of a single write (CLI-051): scope, the
+// idempotency lookup when a key is given (lookup; P4), unresolved operations, the
+// read-only preview, the binding, the planned record and the token.
+func (g *gateRun) prepareSingle(spec WriteSpec, lookup bool) (*issued, *Error) {
 	state, e := g.a.ensureStateDir()
 	if e != nil {
 		return nil, e
@@ -648,8 +722,18 @@ func (g *gateRun) prepareSingle(spec WriteSpec) (*issued, *Error) {
 	}
 	sc := g.a.loadScope(state)
 	need := g.need([]string{spec.Target.Key}, nil, nil, 1)
-	if e := g.a.checkScope(sc, need, j); e != nil {
-		return nil, g.withPreview(e, spec, sc, need, j)
+	if e := g.a.checkScope(sc, need, state); e != nil {
+		return nil, g.withPreview(e, spec, sc, need, state)
+	}
+	if lookup && g.idem != "" {
+		prev, e := g.lookupKey(j, state, claimString(spec.Target.Key))
+		if e != nil {
+			return nil, e
+		}
+		if prev != nil {
+			data, untrusted, _, _ := g.replayOf(j, prev)
+			return &issued{replay: data, untrusted: untrusted}, nil
+		}
 	}
 	if e := g.checkUnresolved(j, []string{spec.Target.Key}, nil); e != nil {
 		return nil, e
@@ -662,8 +746,8 @@ func (g *gateRun) prepareSingle(spec WriteSpec) (*issued, *Error) {
 		return nil, e
 	}
 	need.destinations, need.outputs = pv.Destinations, pv.Outputs
-	if e := g.a.checkScope(sc, need, j); e != nil {
-		return nil, g.withPreview(e, spec, sc, need, j)
+	if e := g.a.checkScope(sc, need, state); e != nil {
+		return nil, g.withPreview(e, spec, sc, need, state)
 	}
 	ident, e := g.identity()
 	if e != nil {
@@ -677,7 +761,7 @@ func (g *gateRun) prepareSingle(spec WriteSpec) (*issued, *Error) {
 	if e != nil {
 		return nil, e
 	}
-	if _, e := g.idempotent(j, b, "", spec.Target.Key); e != nil {
+	if _, e := g.idempotent(j, b, "", claimString(spec.Target.Key), ident, false); e != nil {
 		return nil, e
 	}
 	id, err := newOperationID(false)
@@ -720,7 +804,10 @@ func (g *gateRun) loadRecord(j *journal, part, kind string) (*record, *Error) {
 	return r, nil
 }
 
-// verifyStoredToken runs confirm steps 1-6: format, key, record, MAC, expiry, single use.
+// verifyStoredToken runs confirm steps 1-6: format, key, record, MAC, single use,
+// expiry. Single use comes before expiry (A1): a used token answers token_used
+// whatever its age, and never comes back as token_expired with a fresh plan that
+// would send the write a second time.
 func (g *gateRun) verifyStoredToken(kind string) (string, []byte, *journal, *record, *Error) {
 	part, macHex, ok := parseToken(g.confirm)
 	if !ok {
@@ -755,10 +842,6 @@ func (g *gateRun) verifyStoredToken(kind string) (string, []byte, *journal, *rec
 	if rec.Claims == nil || rec.Claims.Op != rec.OperationID || !verifyMAC(key, *rec.Claims, macHex) {
 		return "", nil, nil, nil, g.tokenMismatch("--confirm", "The confirm token does not match its operation.")
 	}
-	if exp, ok := parseTime(rec.Claims.Exp); !ok || !g.a.now().Before(exp) {
-		return "", nil, nil, nil, conflictError("token_expired", "The confirm token has expired; nothing was sent.",
-			"Run the same command again with --dry-run to get a new token.")
-	}
 	used, e := j.isConsumed(rec.OperationID)
 	if e != nil {
 		return "", nil, nil, nil, e
@@ -766,7 +849,134 @@ func (g *gateRun) verifyStoredToken(kind string) (string, []byte, *journal, *rec
 	if used || rec.Status != "planned" {
 		return "", nil, nil, nil, g.tokenUsed(rec.OperationID)
 	}
+	if exp, ok := parseTime(rec.Claims.Exp); !ok || !g.a.now().Before(exp) {
+		return "", nil, nil, nil, conflictError("token_expired", "The confirm token has expired; nothing was sent.",
+			"Run the same command again with --dry-run to get a new token.")
+	}
 	return state, key, j, rec, nil
+}
+
+// lockTargets takes the per-target confirm locks (CLI-057 step 9, A3): one file per
+// target, <state>/locks/<first 32 hex characters of SHA-256(target key)>.lock, taken
+// in sorted order (a batch takes one per item) and held from the confirm checks
+// until the dispatching record is written, so two confirms on one target never
+// interleave. A lock still held after 10 s is lock_held. owner, the operation id,
+// is written into each file so a waiting confirm can name it.
+func (g *gateRun) lockTargets(state string, keys []string, owner string) (func(), *Error) {
+	dir := filepath.Join(state, "locks")
+	if e := ensurePrivateDir(dir); e != nil {
+		return nil, e
+	}
+	byPath := map[string]string{}
+	for _, k := range keys {
+		byPath[filepath.Join(dir, sha256Hex([]byte(k))[:32]+".lock")] = k
+	}
+	var held []func()
+	release := func() {
+		for i := len(held) - 1; i >= 0; i-- {
+			held[i]()
+		}
+		held = nil
+	}
+	deadline := time.Now().Add(targetLockWait)
+	for _, path := range sortedKeys(byPath) {
+		unlock, holder, err := acquireLock(path, owner, max(time.Until(deadline), 0))
+		if err != nil {
+			release()
+			if errors.Is(err, errLockBusy) {
+				return nil, g.lockHeld(byPath[path], holder)
+			}
+			return nil, ioError("The confirm lock cannot be taken; nothing was sent.", fmt.Sprintf("Check that %s is writable.", dir), err)
+		}
+		held = append(held, unlock)
+	}
+	return release, nil
+}
+
+// lockHeld is the conflict of a confirm that waited 10 s for another confirm on the
+// same target (A3).
+func (g *gateRun) lockHeld(target, holder string) *Error {
+	e := conflictError("lock_held", "Another confirm on the same target is still running; nothing was sent.",
+		"Run the same command again in a few seconds; the confirm token stays valid until it expires.")
+	e.Details["target"] = target
+	if validOperationID(holder) {
+		e.Details["active_operation"] = holder
+	}
+	return e
+}
+
+// consumeCounted is confirm step 13: under the budget lock it creates the single-use
+// marker of operation id and adds n operations to its scope's count in
+// scope-usage.json (A4). A marker that exists is token_used; a count that would pass
+// limits.max_operations is the budget_spent refusal, and then no marker is created.
+// n is 0 for a replay, which sends nothing.
+func (g *gateRun) consumeCounted(j *journal, state string, sc scopeState, need scopeNeed, id string, n int, now time.Time) *Error {
+	unlock, e := lockScopeUsage(state, id)
+	if e != nil {
+		return e
+	}
+	defer unlock()
+	used, e := j.isConsumed(id)
+	if e != nil {
+		return e
+	}
+	if used {
+		return g.tokenUsed(id)
+	}
+	if scopeID := sc.id(); scopeID != nil && n > 0 {
+		usage, e := readScopeUsage(state)
+		if e != nil {
+			return e
+		}
+		count := usage.Scopes[*scopeID]
+		if limit := sc.limit(); limit > 0 && count+n > limit {
+			need.operations = n
+			return g.a.scopeRefusal(sc, "budget_spent", need, map[string]any{}, count)
+		}
+		usage.Scopes[*scopeID] = count + n
+		if e := writeScopeUsage(state, usage); e != nil {
+			return e
+		}
+	}
+	created, e := j.consume(id, now)
+	if e != nil {
+		return e
+	}
+	if !created {
+		return g.tokenUsed(id)
+	}
+	return nil
+}
+
+// recheckUsed is the single-use check again, under the target lock (CLI-057 step 9):
+// the loser of a race on one token gets token_used, never a drift with a fresh plan.
+func (g *gateRun) recheckUsed(j *journal, id string) *Error {
+	used, e := j.isConsumed(id)
+	if e != nil {
+		return e
+	}
+	if used {
+		return g.tokenUsed(id)
+	}
+	return nil
+}
+
+// idempotencyResolved refuses a request whose idempotency key belongs to an
+// operation resolved by hand as applied or partial, or that ended partial (A5).
+func (g *gateRun) idempotencyResolved(id string) *Error {
+	e := conflictError("idempotency_resolved", "A request with this idempotency key was already resolved by hand; nothing was sent.",
+		fmt.Sprintf("Run `%s operation show --id %s` to see what was recorded; if the change is missing, repeat the request with a new --idempotency-key.",
+			g.tool(), id))
+	e.Details["operation_id"] = id
+	return e
+}
+
+// resolvedDuringApply is the report of a write whose record was resolved by hand
+// while Apply still ran (A6): what Apply returned no longer decides anything.
+func (g *gateRun) resolvedDuringApply(id string) *Error {
+	return NewError("E_OUTCOME_UNKNOWN", "The operation was resolved by hand while it was still running; its outcome is unknown.",
+		map[string]any{"operation_id": id, "lookup": fmt.Sprintf("%s operation show --id %s", g.tool(), id), "dispatch_state": "unknown",
+			"next_action": fmt.Sprintf("Run `%s operation show --id %s` and re-read the target before anything else; do not resend.", g.tool(), id)})
 }
 
 // compareInputs runs confirm step 7: the command, the tool version and every bound
@@ -775,7 +985,7 @@ func (g *gateRun) compareInputs(c *claims, b *binding) string {
 	if c.Tool != claimString(g.tool()) || c.Cmd != claimString(g.path) {
 		return "command"
 	}
-	if c.ToolVersion != claimString(g.a.Version) {
+	if c.ToolVersion != claimString(g.a.version()) {
 		return "tool_version"
 	}
 	names := map[string]bool{}
@@ -838,8 +1048,8 @@ func isFileShown(v any) bool {
 
 // labelOf names a bound input that is absent from the current invocation.
 func (g *gateRun) labelOf(name string) string {
-	if name == "args" {
-		return "args"
+	if name == "args" || name == "profile" || strings.HasPrefix(name, "setting.") {
+		return name
 	}
 	if lookupFlag(g.cmd, name) != nil {
 		return "--" + name
@@ -897,10 +1107,19 @@ func (g *gateRun) confirmSingle(spec WriteSpec) error {
 	if g.m.dangerous() && !g.dangerousFlag {
 		return g.fail(g.dangerousRequired())
 	}
+	// Steps 9 to 14 run under the target's lock (A3).
+	unlock, e := g.lockTargets(state, []string{spec.Target.Key}, rec.OperationID)
+	if e != nil {
+		return g.fail(e)
+	}
+	defer func() { unlock() }()
+	if e := g.recheckUsed(j, rec.OperationID); e != nil {
+		return g.fail(e)
+	}
 	stored := decodeGeneric(rec.Preview)
 	sc := g.a.loadScope(state)
 	need := g.need([]string{spec.Target.Key}, stringsAt(stored, "destinations"), stringsAt(stored, "outputs"), 0)
-	if e := g.a.checkScope(sc, need, j); e != nil {
+	if e := g.a.checkScope(sc, need, ""); e != nil {
 		return g.fail(e)
 	}
 	if sc.digest != rec.Claims.Scope {
@@ -908,7 +1127,7 @@ func (g *gateRun) confirmSingle(spec WriteSpec) error {
 			"Run the same command again with --dry-run to get a token under the current scope."))
 	}
 	need.operations = 1
-	if e := g.a.checkScope(sc, need, j); e != nil {
+	if e := g.a.checkScope(sc, need, state); e != nil {
 		return g.fail(e)
 	}
 	if e := g.checkUnresolved(j, []string{spec.Target.Key}, map[string]bool{rec.OperationID: true}); e != nil {
@@ -936,25 +1155,16 @@ func (g *gateRun) confirmSingle(spec WriteSpec) error {
 	case claimString(spec.Target.Key) != rec.Claims.Target:
 		return g.fail(g.tokenMismatch("target", "The confirm token was issued for a different target."))
 	}
-	prev, e := g.idempotent(j, b, rec.OperationID, spec.Target.Key)
+	prev, e := g.idempotent(j, b, rec.OperationID, claimString(spec.Target.Key), ident, true)
 	if e != nil {
 		return g.fail(e)
 	}
 	now := g.a.now()
 	if prev != nil {
-		switch st := effectiveStatus(prev, now); {
-		case st == "applied" && rawPresent(prev.Receipt):
-			return g.replay(j, rec, prev, now)
-		case unresolved(st):
-			return g.fail(g.unresolvedConflict(prev.OperationID))
-		}
+		return g.replay(j, state, sc, rec, prev, now)
 	}
-	created, e := j.consume(rec.OperationID, now)
-	if e != nil {
+	if e := g.consumeCounted(j, state, sc, need, rec.OperationID, 1, now); e != nil {
 		return g.fail(e)
-	}
-	if !created {
-		return g.fail(g.tokenUsed(rec.OperationID))
 	}
 	timeout := spec.Timeout
 	if timeout <= 0 {
@@ -962,55 +1172,102 @@ func (g *gateRun) confirmSingle(spec WriteSpec) error {
 	}
 	rec.Status = "dispatching"
 	rec.DispatchedAt = strPtr(timeString(now))
-	rec.LeaseUntil = strPtr(timeString(now.Add(timeout)))
+	rec.LeaseUntil = strPtr(timeString(now.Add(timeout + leaseGrace)))
 	if e := j.write(rec); e != nil {
 		return g.fail(e)
 	}
+	g.dispatched = rec.OperationID
+	unlock() // the dispatching record now blocks the target (step 15)
+	unlock = func() {}
 	res, applyErr := g.callApply(spec.Apply, Op{ID: rec.OperationID, IdempotencyKey: g.idem}, timeout)
 	out := g.classify(rec.OperationID, spec.Target, stored, res, applyErr)
-	g.finishRecord(j, rec, out)
+	if resolved := g.finishRecord(j, rec, out); resolved {
+		return g.fail(g.resolvedDuringApply(rec.OperationID))
+	}
 	return g.report(rec.OperationID, out, res, spec)
 }
 
-// idempotent finds an earlier dispatched operation with the same idempotency key
-// (CLI-062). A replay needs the same command path, key, inputs digest and resolved
-// target key (decision 32); any difference under the same key is
-// idempotency_mismatch, so a reused key never answers with another target's receipt.
-func (g *gateRun) idempotent(j *journal, b *binding, self, target string) (*record, *Error) {
+// idempotent is the idempotency lookup (CLI-062, CLI-057 step 12, A5) over every
+// earlier operation of any command, single write or batch, confirmed with this
+// --idempotency-key. They match only when the command path, inputs digest, target,
+// account and host are all equal; any difference is idempotency_mismatch naming the
+// latest one that differs, so a reused key never answers with another request's
+// receipt. At confirm (full) their states then decide, the one that never sends a
+// write twice first: one still unknown → unresolved_operation; one resolved by hand
+// as applied or partial, or ended partial → idempotency_resolved; one applied → it
+// is returned, to replay; otherwise (not applied, failed, resolved as not applied)
+// nil, and the request may be sent again. target is the claim value (a batch's is
+// the digest of its target list).
+func (g *gateRun) idempotent(j *journal, b *binding, self, target string, ident Identity, full bool) (*record, *Error) {
 	if g.idem == "" {
 		return nil, nil
 	}
-	prev, e := j.findIdempotent(g.path, g.idem, self)
-	if e != nil || prev == nil {
+	found, e := j.findIdempotent(g.idem, self)
+	if e != nil || len(found) == 0 {
 		return nil, e
 	}
-	if prev.Claims == nil || prev.Claims.Inv != b.inv || prev.Claims.Target != claimString(target) {
-		ce := conflictError("idempotency_mismatch", "This idempotency key was already used for a different request; nothing was sent.",
-			"Use a new --idempotency-key for a different request, or repeat the original request exactly.")
-		ce.Details["operation_id"] = prev.OperationID
-		return nil, ce
+	for _, prev := range found {
+		c := prev.Claims
+		if prev.Command != g.path || c.Cmd != claimString(g.path) || c.Inv != b.inv || c.Target != target ||
+			c.Account != claimString(ident.Account) || c.Host != claimString(ident.Host) {
+			ce := conflictError("idempotency_mismatch", "This idempotency key was already used for a different request; nothing was sent.",
+				"Use a new --idempotency-key for a different request, or repeat the original request exactly.")
+			ce.Details["operation_id"] = prev.OperationID
+			return nil, ce
+		}
 	}
-	return prev, nil
+	if !full {
+		return nil, nil
+	}
+	now := g.a.now()
+	for _, prev := range found {
+		if prev.Resolution == nil && unresolved(effectiveStatus(prev, now)) {
+			return nil, g.unresolvedConflict(prev.OperationID)
+		}
+	}
+	var replayable *record
+	for _, prev := range found {
+		st := effectiveStatus(prev, now)
+		switch {
+		case prev.Resolution != nil && prev.Resolution.Outcome != "not_applied", prev.Resolution == nil && st == "partial":
+			// Part or all of it took effect: sending it again could apply that twice.
+			return nil, g.idempotencyResolved(prev.OperationID)
+		case prev.Resolution == nil && st == "applied" && (prev.Kind == "batch" || rawPresent(prev.Receipt)):
+			if replayable == nil {
+				replayable = prev
+			}
+		case prev.Resolution == nil && st == "applied":
+			return nil, g.idempotencyResolved(prev.OperationID) // applied, with nothing to replay
+		}
+	}
+	return replayable, nil
 }
 
-// replay answers a repeated idempotent request with the original receipt.
-func (g *gateRun) replay(j *journal, rec, prev *record, now time.Time) error {
-	created, e := j.consume(rec.OperationID, now)
-	if e != nil {
-		return g.fail(e)
+// origin follows replay_of from an applied record to the original operation (a
+// replay of a replay answers with the original). It returns the original's id and
+// the deepest record that can still be read: the original, or the replay whose
+// copies stand in for it once the original was pruned.
+func origin(j *journal, r *record) (string, *record) {
+	id := r.OperationID
+	for hops := 0; hops < 8 && r.ReplayOf != nil; hops++ {
+		id = *r.ReplayOf
+		o, exists, err := j.read(id)
+		if !exists || err != nil {
+			break
+		}
+		r = o
 	}
-	if !created {
-		return g.fail(g.tokenUsed(rec.OperationID))
-	}
-	receipt := decodeGeneric(prev.Receipt)
+	return id, r
+}
+
+// replayOf is the answer to a repeated idempotent request (CLI-062): the original
+// operation's id, its receipt with replayed: true and its result (projected by
+// --fields, P12). It also returns the original's id and the record the answer
+// came from, which a confirm records its replay against.
+func (g *gateRun) replayOf(j *journal, prev *record) (map[string]any, []string, string, *record) {
+	origID, src := origin(j, prev)
+	receipt := decodeGeneric(src.Receipt)
 	receipt["replayed"] = true
-	rec.Status = "applied"
-	rec.FinishedAt = strPtr(timeString(now))
-	rec.ReplayOf = strPtr(prev.OperationID)
-	rec.Receipt = rawJSON(receipt)
-	if e := j.write(rec); e != nil {
-		g.a.Notice(journalNotice())
-	}
 	untrusted := []string{}
 	if obs, ok := receipt["observed"].(map[string]any); ok && len(obs) > 0 {
 		untrusted = append(untrusted, "data.receipt.observed")
@@ -1019,13 +1276,55 @@ func (g *gateRun) replay(j *journal, rec, prev *record, now time.Time) error {
 	// with the replay; its paths of external text are not recorded, so all of it is
 	// declared untrusted.
 	var result any = map[string]any{}
-	if rawPresent(prev.Result) {
-		if r, err := decodeAny(prev.Result); err == nil && r != nil {
-			result = r
+	if rawPresent(src.Result) {
+		if r, err := decodeAny(src.Result); err == nil && r != nil {
+			result = g.projectResult(r)
 			untrusted = append(untrusted, "data.result")
 		}
 	}
-	return g.succeed(map[string]any{"operation_id": prev.OperationID, "receipt": receipt, "result": result}, untrusted)
+	return map[string]any{"operation_id": origID, "receipt": receipt, "result": result}, untrusted, origID, src
+}
+
+// replay answers a repeated idempotent request at confirm with the original receipt
+// and result (CLI-062) and records the replay; nothing is sent and nothing is counted
+// against the budget.
+func (g *gateRun) replay(j *journal, state string, sc scopeState, rec, prev *record, now time.Time) error {
+	data, untrusted, origID, src := g.replayOf(j, prev)
+	if e := g.consumeCounted(j, state, sc, scopeNeed{}, rec.OperationID, 0, now); e != nil {
+		return g.fail(e)
+	}
+	rec.Status = "applied"
+	rec.FinishedAt = strPtr(timeString(now))
+	rec.ReplayOf = strPtr(origID)
+	rec.Receipt = rawJSON(data["receipt"])
+	rec.Result = src.Result
+	if e := j.write(rec); e != nil {
+		g.a.Notice(journalNotice())
+	}
+	return g.succeed(data, untrusted)
+}
+
+// projectResult applies --fields to a confirmed write's result with the command's
+// output schema, as App.OK does for a read (P12). Without --fields the result is
+// returned whole (a write's default fields do not apply); the receipt is never
+// projected.
+func (g *gateRun) projectResult(result any) any {
+	if !g.st.fields.set {
+		return result
+	}
+	gen, err := toGeneric(result)
+	if err != nil || gen == nil {
+		return result
+	}
+	schema := g.a.schemaOf(g.m)
+	shape := schema.Shape
+	if shape == "" {
+		shape = "object"
+		if _, isList := gen.([]any); isList {
+			shape = "array"
+		}
+	}
+	return g.a.project(g.st, g.m, schema, shape, gen)
 }
 
 // decodeAny decodes a stored JSON value with numbers kept exact.
@@ -1053,6 +1352,19 @@ type writeOutcome struct {
 	outcome    Outcome
 	observed   map[string]any
 	resultData any
+	// unencodable: Apply's Result.Data cannot be encoded as JSON, so resultData is {}
+	// and the response carries a result_unencodable notice (A2).
+	unencodable bool
+}
+
+// unencodableResult reports a dispatched write whose result could not be encoded
+// (A2): a result_unencodable notice for the agent and a defect for conformance. The
+// receipt stands; operation show has it.
+func (g *gateRun) unencodableResult(id string) {
+	g.a.Notice(Notice{Type: "result_unencodable", Severity: "warning",
+		Message: fmt.Sprintf("The change was dispatched, but the tool's result could not be encoded, so data.result is empty; run `%s operation show --id %s` for the receipt.",
+			g.tool(), id)})
+	g.a.defect("Apply returned a Result.Data that cannot be encoded as JSON; the gate reported data.result as {} (CLI-057).")
 }
 
 // gateCodes are codes the gate derives itself; they never come from a cause.
@@ -1165,16 +1477,22 @@ func (g *gateRun) classify(id string, t Target, stored map[string]any, res Resul
 		receipt["failed_stage"] = o.FailedStage
 	}
 	var data any = map[string]any{}
+	unencodable := false
 	if applyErr == nil && res.Data != nil {
-		data = res.Data
+		if _, err := json.Marshal(res.Data); err != nil {
+			unencodable = true
+		} else {
+			data = res.Data
+		}
 	}
 	return writeOutcome{receipt: receipt, ok: ok, code: code, cause: cause, dispatch: dispatch,
-		status: recordStatus(ok, code, o), outcome: o, observed: observed, resultData: data}
+		status: recordStatus(ok, code, o), outcome: o, observed: observed, resultData: data, unencodable: unencodable}
 }
 
-// finishRecord stores the final status and receipt (confirm step 15). A record that
-// was resolved meanwhile keeps its resolution; the late receipt is kept beside it.
-func (g *gateRun) finishRecord(j *journal, rec *record, out writeOutcome) {
+// finishRecord stores the final status and receipt (confirm step 18). A record that
+// was resolved meanwhile keeps its resolution, with the late receipt beside it, and
+// finishRecord reports true: what Apply returned no longer decides the outcome (A6).
+func (g *gateRun) finishRecord(j *journal, rec *record, out writeOutcome) bool {
 	unlock, e := j.lock(rec.OperationID)
 	if e == nil {
 		defer unlock()
@@ -1184,7 +1502,7 @@ func (g *gateRun) finishRecord(j *journal, rec *record, out writeOutcome) {
 		if werr := j.write(cur); werr != nil {
 			g.a.Notice(journalNotice())
 		}
-		return
+		return true
 	}
 	now := timeString(g.a.now())
 	rec.Status = out.status
@@ -1206,17 +1524,23 @@ func (g *gateRun) finishRecord(j *journal, rec *record, out writeOutcome) {
 	if werr := j.write(rec); werr != nil {
 		g.a.Notice(journalNotice())
 	}
+	return false
 }
 
-// report emits a confirmed write per the receipt rules (confirm step 16).
+// report emits a confirmed write per the receipt rules (confirm step 19).
 func (g *gateRun) report(id string, out writeOutcome, res Result, spec WriteSpec) error {
 	lookup := fmt.Sprintf("%s operation show --id %s", g.tool(), id)
 	if out.ok {
-		untrusted := prefixPaths("data.result", res.Untrusted)
+		untrusted := []string{}
+		if out.unencodable {
+			g.unencodableResult(id)
+		} else {
+			untrusted = prefixPaths("data.result", res.Untrusted)
+		}
 		if len(out.observed) > 0 {
 			untrusted = append(untrusted, "data.receipt.observed")
 		}
-		return g.succeed(map[string]any{"operation_id": id, "receipt": out.receipt, "result": out.resultData}, untrusted)
+		return g.succeed(map[string]any{"operation_id": id, "receipt": out.receipt, "result": g.projectResult(out.resultData)}, untrusted)
 	}
 	var e *Error
 	switch out.code {
@@ -1255,9 +1579,9 @@ func (g *gateRun) report(id string, out writeOutcome, res Result, spec WriteSpec
 		if len(out.observed) > 0 {
 			e.Untrusted = append(e.Untrusted, "receipt.observed")
 		}
-		if out.dispatch == "not_started" {
+		if na, _ := e.Details["next_action"].(string); out.dispatch == "not_started" && strings.TrimSpace(na) == "" {
 			e.Details["next_action"] = "Nothing was sent. Fix the cause, then run the command again with --dry-run for a new token."
-		} else if na, _ := e.Details["next_action"].(string); na == "" {
+		} else if na == "" {
 			e.Details["next_action"] = "The upstream refused the write and nothing changed; fix the request, then run --dry-run again."
 		}
 		if strings.TrimSpace(e.Message) == "" {
@@ -1278,11 +1602,12 @@ func (g *gateRun) report(id string, out writeOutcome, res Result, spec WriteSpec
 // a summary. The batch is ok only when every item succeeded; otherwise
 // E_OUTCOME_UNKNOWN if any item is unknown, else E_PARTIAL if any item applied, else
 // the first failed item's code. Items are de-duplicated by target key, order kept.
-func (a *App) WriteBatch(cmd *cobra.Command, spec BatchSpec) error {
+func (a *App) WriteBatch(cmd *cobra.Command, spec BatchSpec) (err error) {
 	g, err := a.startGate(cmd, true)
 	if g == nil {
 		return err
 	}
+	defer g.recoverAfterDispatch(&err)
 	var items []BatchItem
 	seen := map[string]bool{}
 	for _, it := range spec.Items {
@@ -1376,8 +1701,23 @@ func (g *gateRun) planBatch(items []BatchItem) error {
 	keys := batchKeys(items)
 	sc := g.a.loadScope(state)
 	need := g.need(keys, nil, nil, len(items))
-	if e := g.a.checkScope(sc, need, j); e != nil {
+	if e := g.a.checkScope(sc, need, state); e != nil {
 		return g.fail(e)
+	}
+	// With --idempotency-key, an earlier batch with this key is answered before any
+	// Preview runs (P4).
+	if g.idem != "" {
+		prev, e := g.lookupKey(j, state, digestList(keys))
+		if e != nil {
+			return g.fail(e)
+		}
+		if prev != nil {
+			data, untrusted, _, _, e := g.batchReplayOf(j, prev)
+			if e != nil {
+				return g.fail(e)
+			}
+			return g.succeed(data, untrusted)
+		}
 	}
 	if e := g.checkUnresolved(j, keys, nil); e != nil {
 		return g.fail(e)
@@ -1390,7 +1730,7 @@ func (g *gateRun) planBatch(items []BatchItem) error {
 		need.destinations = append(need.destinations, p.pv.Destinations...)
 		need.outputs = append(need.outputs, p.pv.Outputs...)
 	}
-	if e := g.a.checkScope(sc, need, j); e != nil {
+	if e := g.a.checkScope(sc, need, state); e != nil {
 		return g.fail(e)
 	}
 	ident, e := g.identity()
@@ -1403,6 +1743,9 @@ func (g *gateRun) planBatch(items []BatchItem) error {
 	}
 	b, e := g.a.bindInvocation(g.st, g.cmd, g.m, key)
 	if e != nil {
+		return g.fail(e)
+	}
+	if _, e := g.idempotent(j, b, "", digestList(keys), ident, false); e != nil {
 		return g.fail(e)
 	}
 	batchID, err := newOperationID(true)
@@ -1508,10 +1851,19 @@ func (g *gateRun) confirmBatch(spec BatchSpec, items []BatchItem) error {
 		itemRecs = append(itemRecs, ir)
 	}
 	keys := batchKeys(items)
+	// Steps 9 to 14 run under every item target's lock (A3).
+	unlock, e := g.lockTargets(state, keys, rec.OperationID)
+	if e != nil {
+		return g.fail(e)
+	}
+	defer func() { unlock() }()
+	if e := g.recheckUsed(j, rec.OperationID); e != nil {
+		return g.fail(e)
+	}
 	stored := decodeGeneric(rec.Preview)
 	sc := g.a.loadScope(state)
 	need := g.need(keys, stringsAt(stored, "destinations"), stringsAt(stored, "outputs"), 0)
-	if e := g.a.checkScope(sc, need, j); e != nil {
+	if e := g.a.checkScope(sc, need, ""); e != nil {
 		return g.fail(e)
 	}
 	if sc.digest != rec.Claims.Scope {
@@ -1519,7 +1871,7 @@ func (g *gateRun) confirmBatch(spec BatchSpec, items []BatchItem) error {
 			"Run the same command again with --dry-run to get a token under the current scope."))
 	}
 	need.operations = len(items)
-	if e := g.a.checkScope(sc, need, j); e != nil {
+	if e := g.a.checkScope(sc, need, state); e != nil {
 		return g.fail(e)
 	}
 	exclude := map[string]bool{rec.OperationID: true}
@@ -1565,13 +1917,17 @@ func (g *gateRun) confirmBatch(spec BatchSpec, items []BatchItem) error {
 	if claimString(ident.Host) != rec.Claims.Host {
 		return g.fail(g.tokenMismatch("host", "The confirm token was issued for a different host."))
 	}
-	now := g.a.now()
-	created, e := j.consume(rec.OperationID, now)
+	// The batch's own key is looked up like a single write's (A5).
+	prev, e := g.idempotent(j, b, rec.OperationID, digestList(keys), ident, true)
 	if e != nil {
 		return g.fail(e)
 	}
-	if !created {
-		return g.fail(g.tokenUsed(rec.OperationID))
+	now := g.a.now()
+	if prev != nil {
+		return g.replayBatch(j, state, sc, rec, itemRecs, prev, now)
+	}
+	if e := g.consumeCounted(j, state, sc, need, rec.OperationID, len(items), now); e != nil {
+		return g.fail(e)
 	}
 	timeout := spec.Timeout
 	if timeout <= 0 {
@@ -1579,10 +1935,13 @@ func (g *gateRun) confirmBatch(spec BatchSpec, items []BatchItem) error {
 	}
 	rec.Status = "dispatching"
 	rec.DispatchedAt = strPtr(timeString(now))
-	rec.LeaseUntil = strPtr(timeString(now.Add(timeout * time.Duration(len(items)))))
+	rec.LeaseUntil = strPtr(timeString(now.Add(timeout*time.Duration(len(items)) + leaseGrace)))
 	if e := j.write(rec); e != nil {
 		return g.fail(e)
 	}
+	g.dispatched = rec.OperationID
+	unlock() // the dispatching batch record now blocks every item's target (step 15)
+	unlock = func() {}
 	continueOnError := !g.m.dangerous()
 	if f := g.cmd.Flags().Lookup("continue-on-error"); f != nil {
 		continueOnError, _ = g.cmd.Flags().GetBool("continue-on-error")
@@ -1590,16 +1949,92 @@ func (g *gateRun) confirmBatch(spec BatchSpec, items []BatchItem) error {
 	if spec.ContinueOnError != nil {
 		continueOnError = *spec.ContinueOnError
 	}
-	return g.runBatch(j, rec, items, itemRecs, timeout, continueOnError)
+	return g.runBatch(j, state, sc, rec, items, itemRecs, timeout, continueOnError)
 }
 
-// runBatch applies the items in order and reports the batch (CLI-063).
-func (g *gateRun) runBatch(j *journal, rec *record, items []BatchItem, itemRecs []*record, timeout time.Duration, continueOnError bool) error {
+// batchReplayOf is the answer to a repeated batch (A5): the original batch's id, its
+// per-item receipts (replayed: true) and results (projected by --fields, P12), and
+// a summary. It also returns the record the answer came from and, per item, the
+// receipt and result a confirm records its replay with. Items that cannot be read
+// make the replay impossible: E_IO, and nothing is sent.
+func (g *gateRun) batchReplayOf(j *journal, prev *record) (map[string]any, []string, *record, [][2]json.RawMessage, *Error) {
+	origID, src := origin(j, prev)
+	var entries []any
+	var copies [][2]json.RawMessage
+	observedAny, resultAny := false, false
+	for _, id := range src.Items {
+		it, exists, err := j.read(id)
+		if !exists || err != nil || it.Target == nil || !rawPresent(it.Receipt) {
+			return nil, nil, nil, nil, ioError("The earlier batch with this idempotency key cannot be read, so its result cannot be repeated; nothing was sent.",
+				fmt.Sprintf("Run `%s operation show --id %s` and ask the user to check the state directory.", g.tool(), origID), err)
+		}
+		receipt := decodeGeneric(it.Receipt)
+		receipt["replayed"] = true
+		entry := map[string]any{"target": it.Target.Key, "operation_id": it.OperationID, "ok": true, "receipt": receipt}
+		if obs, ok := receipt["observed"].(map[string]any); ok && len(obs) > 0 {
+			observedAny = true
+		}
+		if rawPresent(it.Result) {
+			if r, err := decodeAny(it.Result); err == nil && r != nil {
+				entry["result"] = g.projectResult(r)
+				resultAny = true
+			}
+		}
+		entries = append(entries, entry)
+		copies = append(copies, [2]json.RawMessage{rawJSON(receipt), it.Result})
+	}
+	var untrusted []string
+	if observedAny {
+		untrusted = append(untrusted, "data.items[].receipt.observed")
+	}
+	if resultAny {
+		untrusted = append(untrusted, "data.items[].result")
+	}
+	summary := map[string]any{"total": len(entries), "succeeded": len(entries), "failed": 0, "unknown": 0, "skipped": 0}
+	return map[string]any{"operation_id": origID, "items": entries, "summary": summary}, untrusted, src, copies, nil
+}
+
+// replayBatch answers a repeated batch at confirm (A5): nothing is sent, nothing is
+// counted, and the new batch and its items are recorded as replays of the originals.
+func (g *gateRun) replayBatch(j *journal, state string, sc scopeState, rec *record, itemRecs []*record, prev *record, now time.Time) error {
+	data, untrusted, src, copies, e := g.batchReplayOf(j, prev)
+	if e != nil {
+		return g.fail(e)
+	}
+	if e := g.consumeCounted(j, state, sc, scopeNeed{}, rec.OperationID, 0, now); e != nil {
+		return g.fail(e)
+	}
+	for i, ir := range itemRecs {
+		if i >= len(src.Items) {
+			break
+		}
+		ir.Status, ir.FinishedAt, ir.ReplayOf = "applied", strPtr(timeString(now)), strPtr(src.Items[i])
+		ir.Receipt, ir.Result = copies[i][0], copies[i][1]
+		if e := j.write(ir); e != nil {
+			g.a.Notice(journalNotice())
+		}
+	}
+	rec.Status, rec.FinishedAt, rec.ReplayOf = "applied", strPtr(timeString(now)), strPtr(data["operation_id"].(string))
+	if e := j.write(rec); e != nil {
+		g.a.Notice(journalNotice())
+	}
+	return g.succeed(data, untrusted)
+}
+
+// runBatch applies the items in order and reports the batch (CLI-063). Items that
+// were never dispatched (skipped after a stop) give their budget back (A4).
+func (g *gateRun) runBatch(j *journal, state string, sc scopeState, rec *record, items []BatchItem, itemRecs []*record,
+	timeout time.Duration, continueOnError bool) error {
 	var results []any
 	var firstFail *writeOutcome
-	succeeded, failed, unknownN, skipped := 0, 0, 0, 0
+	succeeded, failed, unknownN, skipped, undispatched := 0, 0, 0, 0, 0
 	anyApplied, anyDispatched, stop, observedAny := false, false, false, false
 	var resultUntrusted []string
+	defer func() {
+		if id := sc.id(); id != nil {
+			refundScopeUsage(state, *id, undispatched)
+		}
+	}()
 	for i, it := range items {
 		ir := itemRecs[i]
 		now := g.a.now()
@@ -1618,25 +2053,30 @@ func (g *gateRun) runBatch(j *journal, rec *record, items []BatchItem, itemRecs 
 			}
 			results = append(results, map[string]any{"target": it.Target.Key, "operation_id": ir.OperationID, "ok": false, "receipt": receipt})
 			skipped++
+			undispatched++
 			continue
 		}
 		ir.Status = "dispatching"
 		ir.DispatchedAt = strPtr(timeString(now))
-		ir.LeaseUntil = strPtr(timeString(now.Add(timeout)))
+		ir.LeaseUntil = strPtr(timeString(now.Add(timeout + leaseGrace)))
 		if e := j.write(ir); e != nil {
 			out := writeOutcome{ok: false, code: e.Code, cause: e, dispatch: "not_started"}
 			results = append(results, map[string]any{"target": it.Target.Key, "operation_id": ir.OperationID, "ok": false,
 				"error": g.itemError(out)})
 			failed++
+			undispatched++
 			if firstFail == nil {
 				firstFail = &out
 			}
 			stop = true
 			continue
 		}
-		res, applyErr := g.callApply(it.Apply, Op{ID: ir.OperationID, IdempotencyKey: itemKey(g.idem, ir.OperationID)}, timeout)
+		res, applyErr := g.callApply(it.Apply, Op{ID: ir.OperationID, IdempotencyKey: itemKey(g.idem, it.Target.Key)}, timeout)
 		out := g.classify(ir.OperationID, it.Target, decodeGeneric(ir.Preview), res, applyErr)
-		g.finishRecord(j, ir, out)
+		if resolved := g.finishRecord(j, ir, out); resolved {
+			// Resolved by hand while Apply still ran: the item's outcome is unknown (A6).
+			out.ok, out.code, out.cause, out.dispatch = false, "E_OUTCOME_UNKNOWN", nil, "unknown"
+		}
 		if out.dispatch != "not_started" {
 			anyDispatched = true
 		}
@@ -1652,8 +2092,12 @@ func (g *gateRun) runBatch(j *journal, rec *record, items []BatchItem, itemRecs 
 		switch {
 		case out.ok:
 			succeeded++
-			if res.Data != nil {
+			switch {
+			case out.unencodable:
 				entry["result"] = out.resultData
+				g.unencodableResult(ir.OperationID)
+			case res.Data != nil:
+				entry["result"] = g.projectResult(out.resultData)
 				resultUntrusted = append(resultUntrusted, prefixPaths("data.items[].result", res.Untrusted)...)
 			}
 		case out.code == "E_OUTCOME_UNKNOWN":
@@ -1734,15 +2178,17 @@ func (g *gateRun) runBatch(j *journal, rec *record, items []BatchItem, itemRecs 
 	return g.fail(e)
 }
 
-// itemKey is the upstream idempotency key of one batch item (decision 31): the
-// user's key, which stays bound into the batch token, plus the item's operation
-// id, so an upstream that honours the key never folds item 2..n into item 1. No
+// itemKey is the upstream idempotency key of one batch item (CLI-062, A5): the
+// user's key, which stays bound into the batch token, plus the first 16 hex
+// characters of the SHA-256 of the item's target key. It is the same on every
+// dry-run of the same batch, so an upstream that honours keys recognises a repeated
+// batch, and it differs per target, so it never folds item 2..n into item 1. No
 // user key means no item key.
-func itemKey(userKey, itemID string) string {
+func itemKey(userKey, targetKey string) string {
 	if userKey == "" {
 		return ""
 	}
-	return userKey + "/" + itemID
+	return userKey + "/" + sha256Hex([]byte(targetKey))[:16]
 }
 
 func (g *gateRun) skippedReceipt(id string, t Target, o Outcome) map[string]any {

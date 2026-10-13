@@ -76,7 +76,7 @@ Every command with an effect other than `observe` runs through the write gate of
 
 ## Outbound Contact
 
-`{{TOOL_NAME}}` connects only to the {{THIRD_PARTY}} host you configure and, in `update` and `doctor`, to its release source: the GitHub API and release downloads of `{{REPO_SLUG}}`, and the Sigstore trust-root service that verifies them; `update` refreshes the trust root with the same timeout, proxy, CA file and User-Agent as its other requests. It sends no telemetry, analytics, crash reports or usage pings (SEC-022). Every request verifies TLS; a private CA goes in `{{ENV_PREFIX}}_CA_FILE`, and no setting turns verification off. Proxies come from `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` (CLI-110).
+`{{TOOL_NAME}}` connects only to the {{THIRD_PARTY}} host you configure and, in `update` and `doctor`, to its release source: the GitHub API and release downloads of `{{REPO_SLUG}}`, and the Sigstore trust-root service that verifies them; `update` refreshes the trust root with the same timeout, proxy, CA file and User-Agent as its other requests (a Python tool's refresh uses the proxy and the timeout, but not the CA file or the User-Agent). It sends no telemetry, analytics, crash reports or usage pings (SEC-022). Every request verifies TLS; a private CA goes in `{{ENV_PREFIX}}_CA_FILE`, and no setting turns verification off. Proxies come from `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` (CLI-110).
 
 <!-- SEC-022: list here any other destination a feature needs (an identity provider's token endpoint, a CDN that serves attachments) and what is sent there. -->
 

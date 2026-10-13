@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ._util import Ordered, decode_generic, go_json, parse_time, time_string
+from ._util import Ordered, RawNumber, decode_generic, go_json, parse_time, time_string
 from .contract_gen import (
     MAX_RECORDS,
     OPERATION_STATUS_VALUES,
@@ -142,10 +142,15 @@ class Record:
         return (go_json(self.to_json(), escape_html=True) + "\n").encode("utf-8")
 
 
+def _is_text(v: Any) -> bool:
+    """A JSON string (a number keeps its text as RawNumber, which is not one)."""
+    return isinstance(v, str) and not isinstance(v, RawNumber)
+
+
 def _opt_str(v: Any, name: str) -> str | None:
     if v is None:
         return None
-    if not isinstance(v, str):
+    if not _is_text(v):
         raise ValueError(f"{name} is not a string")
     return v
 
@@ -153,7 +158,7 @@ def _opt_str(v: Any, name: str) -> str | None:
 def _str(v: Any, name: str) -> str:
     if v is None:
         return ""
-    if not isinstance(v, str):
+    if not _is_text(v):
         raise ValueError(f"{name} is not a string")
     return v
 
@@ -161,17 +166,32 @@ def _str(v: Any, name: str) -> str:
 def _str_list(v: Any, name: str) -> list[str] | None:
     if v is None:
         return None
-    if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+    if not isinstance(v, list) or not all(_is_text(x) for x in v):
         raise ValueError(f"{name} is not a list of strings")
     return list(v)
 
 
+# The keys every record carries (decision 46, A8): a record without one of them, or
+# with one of the wrong type, is unreadable like a corrupt file.
+REQUIRED_RECORD_TEXT = ("operation_id", "status", "command", "created_at")
+
+
 def decode_record(raw: bytes) -> Record:
     """A record from its bytes; raises ValueError when the bytes do not decode
-    into the record layout (Go's json.Unmarshal would fail)."""
+    into the record layout (Go's json.Unmarshal would fail), or when a required key
+    (operation_id, status, command, created_at, effects) is missing or has the
+    wrong type."""
     obj = decode_generic(raw)
     if not isinstance(obj, dict):
         raise ValueError("not an object")
+    for k in REQUIRED_RECORD_TEXT:
+        if not _is_text(obj.get(k)) or not obj[k]:
+            raise ValueError(f"{k} is missing or not a string")
+    if not isinstance(obj.get("effects"), list):
+        raise ValueError("effects is missing or not a list")
+    for k in ("preview", "receipt", "late_receipt"):
+        if obj.get(k) is not None and not isinstance(obj[k], dict):
+            raise ValueError(f"{k} is not an object")
     v = obj.get("v", 0)
     v = int(v) if isinstance(v, str) and v.isdigit() else v  # RawNumber
     if isinstance(v, bool) or not isinstance(v, int):
@@ -270,6 +290,15 @@ def effective_status(r: Record, now: _dt.datetime) -> str:
 
 def unresolved(status: str) -> bool:
     return status in UNRESOLVED_STATUS_VALUES
+
+
+def batch_target_keys(r: Record) -> list[str]:
+    """The target keys a batch record's preview lists."""
+    pv = r.preview if isinstance(r.preview, dict) else {}
+    targets = pv.get("targets")
+    if not isinstance(targets, list):
+        return []
+    return [t["key"] for t in targets if isinstance(t, dict) and isinstance(t.get("key"), str)]
 
 
 def rename_retry(src: str, dst: str) -> None:
@@ -431,29 +460,25 @@ class Journal:
         """Serialise read-modify-write of one record between the dispatching process
         and operation resolve. Stale locks (older than 30 s) are broken."""
         path = os.path.join(self.dir, op_id + ".lock")
-        deadline = time.monotonic() + 3
-        while True:
-            try:
-                if exclusive_create(path):
-                    return lambda: _remove_quiet(path)
-            except OSError as exc:
-                raise io_error(
-                    "The operation record cannot be locked.",
-                    f"Check that {self.dir} is writable.",
-                    exc,
-                ) from None
-            try:
-                if time.time() - os.stat(path).st_mtime > 30:
-                    _remove_quiet(path)
-                    continue
-            except OSError:
-                pass
-            if time.monotonic() > deadline:
-                raise io_error(
-                    "The operation record is locked by another process.",
-                    "Run the command again in a moment.",
-                )
-            time.sleep(0.01)
+        try:
+            got = acquire_lock(path, JOURNAL_LOCK_WAIT)
+        except OSError as exc:
+            raise io_error(
+                "The operation record cannot be locked.",
+                f"Check that {self.dir} is writable.",
+                exc,
+            ) from None
+        if not got:
+            raise io_error(
+                "The operation record is locked by another process.",
+                "Run the command again in a moment.",
+            )
+        return lambda: _remove_quiet(path)
+
+    @property
+    def state_dir(self) -> str:
+        """The state directory the journal lives in."""
+        return os.path.dirname(self.dir)
 
     def list(self) -> list[Listed]:
         """Every record in the journal. A missing journal is empty."""
@@ -493,7 +518,10 @@ class Journal:
 
     def blocking(self, targets: list[str], exclude: set[str], now: _dt.datetime) -> str:
         """An operation whose outcome is unresolved on any of targets, or a corrupt
-        record (whose target is unknown, so it blocks every target)."""
+        record (whose target is unknown, so it blocks every target). A batch that is
+        still dispatching blocks every target of its preview: its items wait their
+        turn as planned records, and the batch's record is what blocks them
+        (CLI-057 step 14)."""
         want = set(targets)
         for entry in sorted(self.list(), key=lambda e: e.id):
             if entry.id in exclude:
@@ -502,68 +530,88 @@ class Journal:
                 return entry.id
             r = entry.rec
             assert r is not None
-            if r.kind == "batch" or r.resolution is not None or r.target is None:
+            if r.resolution is not None:
+                continue
+            if r.kind == "batch":
+                if effective_status(r, now) == "dispatching" and any(
+                    k in want for k in batch_target_keys(r)
+                ):
+                    return entry.id
+                continue
+            if r.target is None:
                 continue
             if unresolved(effective_status(r, now)) and r.target.key in want:
                 return entry.id
         return ""
 
-    def count_dispatched(self, scope_id: str) -> int:
-        """Operations confirmed under a scope (for limits.max_operations)."""
-        n = 0
+    def find_idempotent(self, idem: str, exclude: set[str]) -> list[Record]:
+        """Every operation, of any command, that was confirmed with the idempotency
+        key idem (CLI-062): single writes and batches, not those still planned; the
+        latest first."""
+        found = []
         for entry in self.list():
             r = entry.rec
-            if r is None or r.kind == "batch" or r.scope_id is None or r.scope_id != scope_id:
+            if r is None or r.operation_id in exclude or r.claims is None or r.claims.idem != idem:
                 continue
-            if r.dispatched_at is not None:
-                n += 1
-        return n
-
-    def find_idempotent(self, cmd: str, idem: str, exclude: str) -> Record | None:
-        """The latest dispatched record of cmd that used idem."""
-        best: Record | None = None
-        for entry in self.list():
-            r = entry.rec
-            if r is None or r.operation_id == exclude or r.claims is None or r.claims.idem != idem:
+            if r.kind == "item" or r.status == "planned":
                 continue
-            if r.command != cmd or r.status == "planned":
-                continue
-            if best is None or r.created_at > best.created_at:
-                best = r
-        return best
+            found.append(r)
+        found.sort(key=lambda r: (r.created_at, r.operation_id), reverse=True)
+        return found
 
     def prune(self, now: _dt.datetime) -> None:
         """Remove settled records older than the retention window and keep at most
-        MAX_RECORDS, oldest settled first. Unresolved and corrupt records stay."""
+        MAX_RECORDS, oldest settled first. Unresolved and corrupt records stay. A
+        batch's items go with their batch record, by the batch's finish time, and
+        stay while the batch or any item is unresolved. The scope budget
+        (scope-usage.json) is never touched."""
         try:
             entries = self.list()
         except Error:
             return
         horizon = now - _dt.timedelta(days=RETENTION_DAYS)
-        settled: list[tuple[str, str]] = []
+        batches = {e.id for e in entries if e.rec is not None and e.rec.kind == "batch"}
+        groups: dict[str, list[Record]] = {}
+        for e in entries:
+            r = e.rec
+            if r is not None and r.kind == "item" and r.batch_id in batches:
+                groups.setdefault(r.batch_id or "", []).append(r)
+
+        def settled(r: Record) -> bool:
+            st = effective_status(r, now)
+            return not unresolved(st) and st != "planned"
+
+        candidates: list[tuple[str, list[str]]] = []  # (created_at, ids), oldest first later
         kept = 0
-        for entry in entries:
-            if entry.corrupt:
+        for e in entries:
+            r = e.rec
+            if e.corrupt or r is None:
                 kept += 1
                 continue
-            r = entry.rec
-            assert r is not None
-            st = effective_status(r, now)
-            if unresolved(st) or st == "planned":
-                kept += 1
+            if r.kind == "item" and r.batch_id in batches:
+                continue  # counted and removed with its batch
+            members = [r, *groups.get(r.operation_id, [])] if r.kind == "batch" else [r]
+            ids = [m.operation_id for m in members]
+            if not all(settled(m) for m in members):
+                kept += len(ids)
                 continue
             ref = r.finished_at if r.finished_at is not None else r.created_at
             t = parse_time(ref)
             if t is not None and t < horizon:
-                self.remove(entry.id)
+                for op_id in ids:
+                    self.remove(op_id)
                 continue
-            settled.append((entry.id, r.created_at))
-        if kept + len(settled) <= MAX_RECORDS:
+            candidates.append((r.created_at, ids))
+        total = kept + sum(len(ids) for _, ids in candidates)
+        if total <= MAX_RECORDS:
             return
-        settled.sort(key=lambda x: x[1])
-        excess = kept + len(settled) - MAX_RECORDS
-        for op_id, _ in settled[:excess]:
-            self.remove(op_id)
+        candidates.sort(key=lambda x: x[0])
+        for _, ids in candidates:
+            if total <= MAX_RECORDS:
+                break
+            for op_id in ids:
+                self.remove(op_id)
+            total -= len(ids)
 
     def remove(self, op_id: str) -> None:
         _remove_quiet(self.record_path(op_id))
@@ -575,6 +623,174 @@ def _remove_quiet(path: str) -> None:
         os.remove(path)
     except OSError:
         pass
+
+
+# ---------------------------------------------------------------- locks
+
+LOCK_STALE_SECONDS = 30.0  # a lock file older than this is broken
+JOURNAL_LOCK_WAIT = 3.0  # a record's read-modify-write lock
+TARGET_LOCK_WAIT = 10.0  # the confirm checks' per-target lock (CLI-057 step 9)
+
+
+def acquire_lock(path: str, wait: float, payload: bytes = b"") -> bool:
+    """The journal's lock primitive: create path exclusively, holding payload.
+    While another holder has it, retry for up to wait seconds; a lock file older
+    than 30 s is stale and is broken. False when the wait ran out; OSError when the
+    lock cannot be created at all (on Windows a file being deleted refuses access
+    for a moment, so that is retried until the wait runs out)."""
+    deadline = time.monotonic() + wait
+    while True:
+        denied: OSError | None = None
+        try:
+            if exclusive_create(path, payload):
+                return True
+        except PermissionError as exc:
+            if not IS_WINDOWS:
+                raise
+            denied = exc
+        else:
+            try:
+                if time.time() - os.stat(path).st_mtime > LOCK_STALE_SECONDS:
+                    _remove_quiet(path)
+                    continue
+            except OSError:
+                pass
+        if time.monotonic() > deadline:
+            if denied is not None:
+                raise denied
+            return False
+        time.sleep(0.01)
+
+
+def release_lock(path: str, owner: bytes = b"") -> None:
+    """Remove a lock file, unless it now names another owner (ours was broken as
+    stale and taken over)."""
+    if owner:
+        try:
+            with open(path, "rb") as fh:
+                if fh.read(len(owner) + 1) != owner:
+                    return
+        except OSError:
+            return
+    _remove_quiet(path)
+
+
+def lock_holder(path: str) -> str:
+    """The operation id a lock file names, or "" when it cannot be read."""
+    try:
+        with open(path, "rb") as fh:
+            op_id = fh.read(256).decode("utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return ""
+    return op_id if valid_operation_id(op_id) else ""
+
+
+def ensure_private_dir(d: str) -> None:
+    """d (0700) inside the state directory, created when missing; a link, a
+    reparse point or a non-directory is refused (SEC-030). Raises E_IO."""
+    try:
+        st = os.lstat(d)
+    except FileNotFoundError:
+        try:
+            os.mkdir(d, 0o700)
+        except FileExistsError:
+            pass
+        except OSError as exc:
+            raise io_error(
+                "A directory of the state store cannot be created; nothing was sent.",
+                f"Check that {os.path.dirname(d)} is writable.",
+                exc,
+            ) from None
+        st = None
+    try:
+        st = st or os.lstat(d)
+    except OSError as exc:
+        raise io_error(
+            "A directory of the state store cannot be read; nothing was sent.", f"Check {d}.", exc
+        ) from None
+    if is_link_or_reparse(st) or not stat.S_ISDIR(st.st_mode):
+        raise io_error(
+            "A path in the state store is not a directory; the tool refuses writes.",
+            f"Ask the user to inspect {d} and move it aside; the tool recreates it.",
+        )
+
+
+# ---------------------------------------------------------------- scope budget
+
+SCOPE_USAGE = "scope-usage.json"
+
+
+def read_scope_usage(state_dir: str) -> dict[str, int]:
+    """The operations dispatched per scope_id (<state>/scope-usage.json,
+    {"v":1,"scopes":{id: count}}); a missing file counts nothing. A file that
+    cannot be read or trusted refuses the write (E_IO, fail closed)."""
+    path = os.path.join(state_dir, SCOPE_USAGE)
+
+    def broken(exc: BaseException | None = None) -> Error:
+        return io_error(
+            "The scope's operation count cannot be read; nothing was sent.",
+            f"Ask the user to check {path}; deleting it resets the operation count of every scope.",
+            exc,
+        )
+
+    try:
+        raw = read_file_retry(path)
+    except FileNotFoundError:
+        return {}
+    except OSError as exc:
+        raise broken(exc) from None
+    if len(raw) > 1 << 20:
+        raise broken()
+    try:
+        obj = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise broken(exc) from None
+    ok = isinstance(obj, dict) and type(obj.get("v")) is int and obj["v"] == 1
+    scopes = obj.get("scopes") if ok else None
+    if not isinstance(scopes, dict) or set(obj) - {"v", "scopes"}:
+        raise broken()
+    out: dict[str, int] = {}
+    for k, n in scopes.items():
+        if type(n) is not int or n < 0:
+            raise broken()
+        out[k] = n
+    return out
+
+
+def write_scope_usage(state_dir: str, usage: dict[str, int]) -> None:
+    """Replace scope-usage.json atomically. Raises E_IO."""
+    body = Ordered(v=1, scopes={k: usage[k] for k in sorted(usage)})
+    try:
+        write_file_atomic(state_dir, SCOPE_USAGE, (go_json(body) + "\n").encode("utf-8"))
+    except OSError as exc:
+        raise io_error(
+            "The scope's operation count cannot be written; nothing was sent.",
+            f"Check that {state_dir} is writable.",
+            exc,
+        ) from None
+
+
+def lock_scope_usage(state_dir: str, owner: str):  # noqa: ANN201 - returns the unlock function
+    """The budget lock, <state>/locks/scope-usage.lock: every change of
+    scope-usage.json happens under it (A4). Raises E_IO."""
+    d = os.path.join(state_dir, "locks")
+    ensure_private_dir(d)
+    path = os.path.join(d, "scope-usage.lock")
+    try:
+        got = acquire_lock(path, TARGET_LOCK_WAIT, owner.encode("utf-8"))
+    except OSError as exc:
+        raise io_error(
+            "The scope's operation count cannot be locked; nothing was sent.",
+            f"Check that {d} is writable.",
+            exc,
+        ) from None
+    if not got:
+        raise io_error(
+            "The scope's operation count is locked by another process; nothing was sent.",
+            "Run the same command again in a few seconds; the confirm token stays valid until "
+            "it expires.",
+        )
+    return lambda: release_lock(path, owner.encode("utf-8"))
 
 
 class JournalMixin:

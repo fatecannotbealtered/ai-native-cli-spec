@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -87,6 +88,7 @@ type App struct {
 	run               *runState
 	defects           []string // tool bugs the library corrected at run time (RunConformance reports them)
 	debugSeen         map[string]bool
+	secrets           []string       // values registered with AddSecret
 	updateCmd         *cobra.Command // the built-in update, when App.Update is set
 	// skillCopy replaces the Skill directory copy of update's Skill sync (tests).
 	skillCopy func(src, dst string) error
@@ -98,6 +100,52 @@ func (a *App) defect(msg string) {
 	if !contains(a.defects, msg) {
 		a.defects = append(a.defects, msg)
 	}
+}
+
+// version is the tool version the whole run reports and uses (CLI-080, P14):
+// App.Version when it is a semantic version; otherwise, for a development build
+// without -ldflags ("dev", empty), the next patch after the newest version in
+// App.Changelog with the prerelease dev ("1.2.17" gives "1.2.18-dev"; no released
+// version gives "0.0.0-dev"). version, reference, changelog, context, doctor, the
+// update notice, update and the confirm token all see it.
+// It is computed on each call (no cached state), so a tool may call UserAgent from
+// several goroutines.
+func (a *App) version() string {
+	if a.devBuild() {
+		return devVersion(a.Changelog)
+	}
+	return a.Version
+}
+
+// devBuild reports a build whose App.Version is not a semantic version (P14).
+func (a *App) devBuild() bool {
+	_, err := ParseVersion(a.Version)
+	return err != nil
+}
+
+// devVersion is a development build's version: the next patch after the highest
+// version heading of the changelog, with the prerelease dev.
+func devVersion(changelog string) string {
+	var newest *Version
+	for _, e := range parseChangelog(changelog) {
+		if v, err := ParseVersion(e.version); err == nil && (newest == nil || CompareVersions(v, *newest) > 0) {
+			newest = &v
+		}
+	}
+	if newest == nil {
+		return "0.0.0-dev"
+	}
+	return fmt.Sprintf("%d.%d.%d-dev", newest.Major, newest.Minor, newest.Patch+1)
+}
+
+// AddSecret registers a secret the tool obtained at run time, such as a token read
+// from the keyring, so that debug lines and errors show it as *** (CLI-102, D2),
+// also in its URL-escaped forms. Values shorter than 4 characters are ignored.
+func (a *App) AddSecret(value string) {
+	if utf8.RuneCountInString(value) < 4 || contains(a.secrets, value) {
+		return
+	}
+	a.secrets = append(a.secrets, value)
 }
 
 // Identity is the account and host a command acts as.
@@ -202,6 +250,11 @@ func (a *App) Execute(args []string) int {
 		a.prepareTree()
 		norm := a.normalizeArgs(args)
 		st.args = norm
+		// The leaf the arguments name is the run's command before cobra runs any hook,
+		// so Debugf and Setting in a PersistentPreRun(E) know its secrets and flags (D7).
+		if target, _ := a.classify(norm); target != nil && target != a.Root && !hasSubcommands(target) && !isCobraInternal(target) {
+			st.cmd = target
+		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
 		go func() {
@@ -290,6 +343,7 @@ func (a *App) prepareTree() {
 	root.SilenceUsage = true
 	root.CompletionOptions.DisableDefaultCmd = true
 	a.installGlobalFlags()
+	a.normalizeSecrets()
 	root.SetHelpFunc(a.helpFunc)
 	root.SetFlagErrorFunc(a.flagErrorFunc)
 	root.InitDefaultHelpCmd()

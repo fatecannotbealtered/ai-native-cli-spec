@@ -15,7 +15,7 @@ node ../ai-native-cli-spec-2.0.0/template/common/scripts/sync-spec.js --from ../
 node scripts/check-spec.js
 ```
 
-This writes `v2.0.0` to `.agent/SPEC_VERSION` and vendors the five specs (`VERIFY-SPEC.md` is new), `contract/contract.json`, `contract/schemas/`, the library with its `MANIFEST.json` (`internal/aicli/` or `<pkg>/_aicli/`) and the sync scripts (REPO-061). Later syncs use `node scripts/sync-spec.js`. The Go library needs cobra, pflag and sigstore-go (run the `go get` line sync-spec prints, then `go mod tidy`); the Python library needs Python ≥ 3.10, click and sigstore. Never edit vendored files (REPO-063). Keep `contract/contract-ext.json`, check its codes against CLI-018, and declare them to the library in `App.ExtCodes`.
+This writes `v2.0.0` to `.agent/SPEC_VERSION` and vendors the five specs (`VERIFY-SPEC.md` is new), `contract/contract.json`, `contract/schemas/`, the library with its `MANIFEST.json` (`internal/aicli/` or `<pkg>/_aicli/`) and the sync scripts (REPO-061). Later syncs use `node scripts/sync-spec.js`. The Go library needs cobra, pflag and sigstore-go (run the `go get` line sync-spec prints, then `go mod tidy`); the Python library needs Python ≥ 3.10, click and sigstore. Never edit vendored files (REPO-063). Keep the codes in `contract/contract-ext.json` that the tool can still raise, check them against CLI-018 and declare them to the library in `App.ExtCodes`; drop codes 2.0 makes impossible (gitlab-cli's only one, `E_CANCELLED`, came from interactive prompts), and the file when none is left.
 
 ## 2. Hand the envelope and errors to aicli
 
@@ -30,7 +30,6 @@ func NewApp(env func(string) string) *aicli.App {
 		Shortcuts:    map[string][]string{"branch": {"repo", "branch"}, "member": {"project", "members"}},
 		ShortFlags:   map[string]string{"p": "project", "R": "project"},
 		FlagAliases:  map[string]string{"repo": "project"},                  // accepted
-		VerbSynonyms: map[string][]string{"view": {"get"}, "show": {"get"}}, // suggested; Meta.Aliases accepts
 		FlagSynonyms: map[string][]string{"all": {"limit"}}}                 // suggested
 	registerCommands(app) // step 3
 	return app
@@ -46,7 +45,7 @@ func main() { os.Exit(cmd.NewApp(os.Getenv).Execute(os.Args[1:])) }
 | `failArg("--project is required")` | `return aicli.Usage("missing_parameter", "--project", "--project is required; pass the project path, for example --project acme/web.")` |
 | `handleAPIError(err, jsonMode)` on a read | a `readError(err)` helper returning `aicli.FromHTTP(apiErr.StatusCode, message, apiErr.Error(), 0)`, with a one-sentence `message` for the model (CLI-017); status `0` (no connection made) gives `E_NETWORK` (CLI-016) |
 | `failWithCode`, `emitError`, exit-code constants, `exitCodeForStatus` | `aicli.NewError(code, message, details)` and the constructors; the library adds the exit code, `retryable` and default `dispatch_state` and `next_action` (CLI-010, CLI-011) |
-| `--format`, `--json`, `--compact`, `--fields` handling; `agent_ux*.go` aliases and suggestions | the App and the fields above (CLI-003, CLI-022); ref and URL parsing stays in the tool (CLI-048) |
+| `--format`, `--json`, `--compact`, `--fields` handling; the agent-safe switches in `cmd/agent.go`, hand-kept aliases and suggestions | the App and the fields above (CLI-003, CLI-022); ref and URL parsing stays in the tool (CLI-048) |
 
 ## 3. Register every command with Meta
 
@@ -71,6 +70,7 @@ app.Schema("merge_request", aicli.SchemaDef{Shape: "object",
 - **Default fields** come from the questions users ask (CLI-040). In the eval, MR items with assignees, labels and pipeline status plus `--pipeline-status` cut "which MRs have failed pipelines" from 13.6 to 6.1 calls.
 - **Examples**: every write shows the dry-run and confirm pair, every dangerous command includes `--dangerous` (conformance R02).
 - **Maturity** replaces `release_readiness` (CLI-027, VER-005): commands a recorded live run exercised are `verified`, mock-only ones `experimental`, untested ones `draft`; `stable` needs an agent eval (VER-006).
+- **Staged migration.** A large tool can move group by group: exclude the unmigrated files with a build tag (`go mod tidy` still reads them, so keep the packages they import until the last group is done), and add each shortcut, alias and synonym together with the group it points to, because the tree check rejects one whose target is not registered.
 - **Tree shape** (CLI-021): built-in names (`reference`, `context`, `doctor`, `changelog`, `update`, `operation`, `help`, `version`) are reserved, and a path is a group or a command, never both (conformance R02).
 
 ## 4. Route every write through App.Write
@@ -80,7 +80,7 @@ app.Schema("merge_request", aicli.SchemaDef{Shape: "object",
 | `if done, err := prepareWrite(cmd, action, detail); done \|\| err != nil { return err }` then the API call | `return app.Write(cmd, aicli.WriteSpec{Target, Preview, Apply})` |
 | `dryRunOutput`, `buildPreview`, `confirmRequiredWithPreview` | the gate emits `data.preview` on dry-run and the same preview in the refusal (CLI-051, CLI-052) |
 | `requireConfirm`, `validateConfirmToken`, `newConfirmToken` | the gate (CLI-053 to CLI-055) |
-| hand-built `detail` / `confirmPayload` maps, `bindInvocation` | nothing: the gate binds the parsed invocation (CLI-054) |
+| hand-built `detail` / `confirmPayload` maps | nothing: the gate binds the parsed invocation (CLI-054) |
 | `updatedAt` or `sha` copied into the payload | `Preview.BaseVersion` and `BaseSource`, re-read at confirm (`state_drift`, CLI-057) |
 | `isDangerousCommand`, `dangerousFlagRequired` | `Meta.Dangerous` (CLI-056) |
 | `prepareBatchWrite`, `parsePluralFlag`, `batchItem` | `app.WriteBatch(cmd, aicli.BatchSpec{Items: ...})` with `Meta.BatchFlag` (CLI-063) |
@@ -125,6 +125,7 @@ RunE: func(cmd *cobra.Command, args []string) error {
 },
 ```
 
+- **Target keys** are canonical (SEC-012), and a scope's subtree selectors break only at `/`, `!`, `#`, `:` and `@`. Give a kind without such a sigil a path-style key that mirrors its web path, `acme/web/-/labels/bug` or `acme/web/-/milestones/3`, so a grant for `acme/web` covers it; keep accepting GitLab's `~bug` and `%3` forms as input.
 - **Preview** only reads. Resolve names to IDs there, so the preview shows what will be sent. `Changes` lists each field the request changes with `Before`/`After` (or `Add`/`Remove` for sets). When the write cannot apply (merged MR, protected branch), return `CanApply: false` with `BlockedBy`; the gate then returns the preview without a token. Never put secret values in `Changes`.
 - **Apply** sends the write once, then reports what it observed: the changed fields from the write response or a re-read go in `Observed`. In the eval, write results that carried the changed fields cut verification calls after the last write from 1.00 to 0.37. You never set `ok`: the gate derives it and the error code from the receipt (CLI-059).
 - **Classify Apply errors** by what reached the upstream (CLI-015). When unsure, return the error unwrapped: an unknown outcome is safe, a wrong "not applied" invites a duplicate write.
@@ -143,11 +144,11 @@ func classifyWriteError(err error) error {
 }
 ```
 
-- **Stop retrying writes in the HTTP client.** gitlab-cli's `doWithRetry` retries 5xx and network errors for every method, so a timed-out POST can apply twice; retry reads only. 1.6's `handleAPIError` also reported any non-HTTP failure as retryable `E_NETWORK`, even after a write was sent.
+- **Stop retrying writes in the HTTP client.** gitlab-cli's `doWithRetry` retries 5xx and network errors for every method, so a timed-out POST can apply twice; retry reads only. 1.6's `handleAPIError` also reported any non-HTTP failure as retryable `E_NETWORK`, even after a write was sent. Do not send an `Idempotency-Key` header to an API that ignores it, as GitLab's REST API does: Go's `net/http` treats such a request as safe to repeat and re-sends it after a failure on a reused connection (CLI-062). Build the client inside `Preview` and `Apply`, or after `App.Write` starts, rather than before it: a client built first reads settings before the gate has checked the profile.
 
 ## 5. Delete the old gate and generated contract
 
-Delete the tool's own confirm code and what supported it; the conformance suite now tests the gate. In gitlab-cli: `cmd/confirm.go`, `cmd/confirm_secret.go`, `cmd/confirm_consumed.go` and their tests; `bindInvocation` and `controlFlags` in `cmd/agent_ux.go`; the `GITLAB_CLI_LEGACY_CONFIRM_BINDING` switch; `cmd/release_readiness.go`; `cmd/fcc_guard_test.go`; `internal/contract/contract_gen.go` (Python: `<pkg>/contract_gen.py`) and the CI steps that regenerated it; the hand-written `cmd/reference.go` and `cmd/reference_schema.go`. Rewrite the 75 legacy tests that minted tokens from hand-built payloads as dry-run then confirm through the App, or drop those the suite covers.
+Delete the tool's own confirm code and what supported it; the conformance suite now tests the gate. In gitlab-cli: `cmd/confirm.go`, `cmd/confirm_secret.go`, `cmd/confirm_consumed.go` and their tests; `prepareWrite`, `dryRunOutput` and the confirm helpers in `cmd/root.go`; `prepareBatchWrite` and `batchItem` in `cmd/batch.go`; `cmd/release_readiness.go`; `cmd/fcc_guard_test.go`; `internal/contract/contract_gen.go` (Python: `<pkg>/contract_gen.py`) and the CI steps that regenerated it; the hand-written `cmd/reference.go` and `cmd/reference_schema.go`. Rewrite the legacy tests that minted tokens from hand-built payloads as dry-run then confirm through the App, or drop those the suite covers.
 
 The old state files `~/.gitlab-cli/confirm.secret` and `confirm-consumed.json` are no longer read; the 2.0 key is `<state_dir>/confirm.key` (SEC-030). Tokens minted by 1.6 are refused as `token_mismatch`; agents re-run the dry-run.
 
@@ -171,12 +172,12 @@ func TestConformance(t *testing.T) {
 		// commands and destinations for deliver commands (SEC-012).
 		Scope: map[string]any{"scope_id": "scp_conformance", "tool": "gitlab-cli", "granted_by": "conformance",
 			"granted_at": "2026-10-12T00:00:00Z", "expires_at": nil,
-			"effects": []string{"change", "configure", "artifact"}, "dangerous": true, "outputs": []string{artifacts}},
+			"effects": []string{"change", "configure", "artifact"}, "dangerous": true, "outputs": []string{artifacts}, "roots": []string{artifacts}}, // roots: the checks repeat the sample, which overwrites its file
 	})
 }
 ```
 
-A write command without a sample fails the suite (G00), so the suite also tells you when step 4 is complete. Keep per-command tests for previews, receipts and outputs (VER-004). The FCC guard's replacement is R06 (VER-003): in `TestMain`, point `GITLAB_CLI_COVERAGE_FILE` at a temporary file before `m.Run()`, so the library records every command your tests execute; after a full run (no `-run` or `-skip` filter), call `aicli.CheckCoverage` with the harness and `CoverageFile` set to that file. It fails for every registry command no test ran. `template/INSTANTIATE.md` step 8 and `template/go/example/notes_test.go` show the code. Python: `run_conformance` in a pytest test, and `check_coverage` once every test has run.
+A write command without a sample fails the suite (G00), so the suite also tells you when step 4 is complete. Keep per-command tests for previews, receipts and outputs (VER-004). The FCC guard's replacement is R06 (VER-003): in `TestMain`, point `GITLAB_CLI_COVERAGE_FILE` at a temporary file before `m.Run()` (with `os.Setenv`, or in the environment the tests inject through `App.Env`), so the library records every command your tests execute; after a full run (no `-run` or `-skip` filter), call `aicli.CheckCoverage` with the harness and `CoverageFile` set to that file. It fails for every registry command no test ran. `template/INSTANTIATE.md` step 8 and `template/go/example/notes_test.go` show the code. Python: `run_conformance` in a pytest test, and `check_coverage` once every test has run.
 
 ## 7. Tell users about scope files
 
@@ -215,11 +216,11 @@ app.Update = &aicli.UpdateConfig{
 
 aicli's `update` then checks every version, the release's `tag_name` included, with `CheckUpdateTarget` before it reaches a command line: on Windows `npm` is `npm.cmd`, which runs under cmd.exe, and the 2026-10 audit reproduced command execution through a crafted `--target-version` (`1.0.12&calc`) in cnstock-cli; wechat-mp-cli had the same flaw. It runs package managers from `PackageManagerArgs` without a shell, verifies the Sigstore bundle on the binary path against the exact identity `https://github.com/fatecannotbealtered/gitlab-cli/.github/workflows/release.yml@refs/tags/v<version>` and then the checksum, and copies the Skills from the installed package into the Skill directories where they are installed. `skill_sync_command` is now `gitlab-cli update`. `update --check` and `doctor` keep the notice cache, so drop the tool's own `RecordUpdateCheck` calls (CLI-071).
 
-Keep the release layout aicli expects: archives named `gitlab-cli-<version>-<os>-<arch>.tar.gz` (`.zip` on Windows) with the binary and `skills/` at their root, and `checksums.txt` and `checksums.txt.sigstore.json` beside them, as the template's `.goreleaser.yml` builds them (REPO-043). Remove `npx skills add <repo> -y -g` wherever it remains; the README's install block uses the pinned installer on the installed package, `npx skills@<version> add "$(npm root -g)/@fateforge/gitlab-cli" -y -g`.
+Adopt the release layout aicli expects (gitlab-cli 1.2.17 shipped the binary only): archives named `gitlab-cli-<version>-<os>-<arch>.tar.gz` (`.zip` on Windows) with the binary and `skills/` at their root, and `checksums.txt` and `checksums.txt.sigstore.json` beside them, as the template's `.goreleaser.yml` builds them (REPO-043). A Go module whose path has no `/v2` suffix cannot be installed with `go install …@v2.x.y`: add the suffix in the MAJOR release, or leave `GoPackage` empty and point `go install` users at the binary or npm. Remove `npx skills add <repo> -y -g` wherever it remains; the README's install block uses the pinned installer on the installed package, `npx skills@<version> add "$(npm root -g)/@fateforge/gitlab-cli" -y -g`.
 
 ## 10. Settings, profiles, flag names and deprecation
 
-- **Settings** (CLI-100): declare the settings in `App.Settings` and read them with `app.Setting(cmd, name)`, which takes the flag, then `GITLAB_CLI_<SETTING>`, then the active profile, then the default; delete the tool's own config loader. aicli reads them from `~/.gitlab-cli/settings.json` (or `GITLAB_CLI_SETTINGS_FILE`) in the strict shape of CLI-100, refuses a file with unknown keys or a secret in it (`E_CONFIG` on every command that reads a setting), and never reads the 1.x `~/.gitlab-cli/config.json`. Move the 1.x values into profiles in `settings.json`, and any secret into the keyring (SEC-040): offer a gated `configure` command that does it, or give the steps in the release notes.
+- **Settings** (CLI-100): declare the settings in `App.Settings` and read them with `app.Setting(cmd, name)`, which takes the flag, then `GITLAB_CLI_<SETTING>`, then the active profile, then the default; delete the tool's own config loader. aicli reads them from `~/.gitlab-cli/settings.json` (or `GITLAB_CLI_SETTINGS_FILE`) in the strict shape of CLI-100, refuses a file with unknown keys or a secret in it (`E_CONFIG` on every command that reads a setting), and never reads the 1.x `~/.gitlab-cli/config.json`. Move the 1.x values into profiles in `settings.json`, and any secret into the keyring (SEC-040): offer a gated `configure` command that does it, or give the steps in the release notes. gitlab-cli 1.x kept the token encrypted, so users sign in again with `auth login` or set `GITLAB_CLI_TOKEN`; `auth login` declares `Meta.NewProfile`, writes the host with `app.SetProfileSettings`, and, as a dangerous `configure` write, needs a scope granting `configure` and `dangerous` the first time, which the release notes must say.
 
 ```go
 app.Settings = []aicli.Setting{
@@ -228,10 +229,10 @@ app.Settings = []aicli.Setting{
 }
 ```
 
-- **Profiles** (CLI-101): a user with a company GitLab and gitlab.com gets one profile for each instead of two shells. aicli adds `--profile` and `GITLAB_CLI_PROFILE`, binds `--profile` into tokens and reports the active profile in `context`, so remove any account-switching flag of the tool's own. The sign-in commands are `auth login` (`configure`; the token goes to the keyring, the host to the profile), `auth status` (a read that checks the token with GitLab) and `auth logout` (`configure`).
+- **Profiles** (CLI-101): a user with a company GitLab and gitlab.com gets one profile for each instead of two shells. aicli adds `--profile` and `GITLAB_CLI_PROFILE`, binds the active profile and every setting into tokens, refuses an unknown profile before any command runs and reports the active profile in `context`, so remove any account-switching flag of the tool's own. Key keyring entries by `app.Profile()`, and write the profile's host into `app.SettingsPath()`. The sign-in commands are `auth login` (`configure`; the token goes to the keyring, the host to the profile), `auth status` (a read that checks the token with GitLab) and `auth logout` (`configure`).
 - **Flag names** (CLI-028, CLI-029): rename flags to the shared vocabulary (`--per-page` to `--limit`, `--search` to `--query`, a page token to `--cursor`) and keep each old name working as a deprecated flag (`Meta.DeprecatedFlags`) until the next MAJOR release; aicli already suggests the standard name for common synonyms. Check the standard verbs too: a `list` with no match returns an empty page, `update` changes only the fields given, and a `delete` of a missing target is `E_NOT_FOUND` at the dry-run.
 - **Deprecation** (CLI-081): a command that is going away gets `Meta.Deprecated` with its replacement. aicli marks it in help and `reference`, adds a `deprecated` notice to every use and leaves it out of the Skill's command map. List it under `Deprecated` in `CHANGELOG.md`, keep it for at least one MINOR release and 90 days, and remove it only in a MAJOR release.
-- **Diagnostics and network** (CLI-102, CLI-110): replace any `--verbose` or `--debug` flag with `GITLAB_CLI_DEBUG` and `app.Debugf`. Give every HTTP client a timeout of at most 30 s, retry reads only (step 4), honour `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`, and point users with a private CA at `GITLAB_CLI_CA_FILE` instead of any switch that turns TLS verification off.
+- **Diagnostics and network** (CLI-102, CLI-110): replace any `--verbose` or `--debug` flag with `GITLAB_CLI_DEBUG` and `app.Debugf`. Remove those flags in this release: unlike renamed flags, they are not kept as deprecated, because CLI-102 forbids them. Register the token read from the keyring with `app.AddSecret`, so aicli redacts it in errors and debug lines. Give every HTTP client a timeout of at most 30 s; retry only idempotent reads, at most twice, after a connection failure or HTTP 429, 502, 503 or 504, honouring `Retry-After` up to 10 s (step 4); send `User-Agent: gitlab-cli/<version> aicli/<spec version>`; honour `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`; and point users with a private CA at `GITLAB_CLI_CA_FILE` instead of any switch that turns TLS verification off. `app.HTTPTransport()` and `app.UserAgent()` provide all of this but the retries.
 - **Outbound contact** (SEC-022): the tool talks only to the configured GitLab host and, in `update` and `doctor`, to its release source. Remove any telemetry, and list any other destination in `SECURITY.md`.
 - **README** (REPO-010, REPO-011): a Configuration section with the settings, the settings file and its profiles, and an Uninstall section that removes the package, `~/.gitlab-cli`, the keyring entry (`gitlab-cli auth logout`) and the Skill directories.
 
@@ -252,7 +253,7 @@ app.Settings = []aicli.Setting{
 - `schema_version` is `"2.0"`; JSON is compact by default, `--pretty` indents, `--compact` is still accepted (CLI-002, CLI-003).
 - Keys are snake_case (CLI-007): `webUrl` → `web_url`, `hasMore` → `has_more`, `pipelineStatus` → `pipeline_status`, `updatedAt` → `updated_at`. IDs are strings; times are UTC with `Z`.
 - `meta.untrusted` lists external-content paths once per response, from the schema's `Untrusted` fields or `app.OK(cmd, data, "data.description")`; remove `_untrusted` from objects (CLI-046). `meta` holds nothing but `duration_ms`, `notices` and `untrusted`.
-- Lists (CLI-041) carry `items`, `count`, `has_more` with `next_cursor`, `next_offset` or `continuation_reason`, `truncated_reason` when capped, `scope` and `sort`, and no other keys (the page schema forbids them): drop `limit`, `page`, `total` and `all`, and echo the applied limit and filters in `scope`. A list that covers less than its name says so: `project members` lists direct members only, which led an eval agent to tell the user something false.
+- Lists (CLI-041) carry `items`, `count`, `has_more` with `next_cursor`, `next_offset` or `continuation_reason`, `total` when the upstream reports it, `truncated: true` with `truncated_reason` when capped, `scope` and `sort`, and no other keys but `offset` (the page schema forbids them): drop `limit`, `page` and `all`, and echo the applied limit and filters in `scope`. A list that covers less than its name says so: `project members` lists direct members only, which led an eval agent to tell the user something false.
 - Every resource carries one `ref` (`acme/web!5`), accepted back as input (CLI-048).
 - Every error has `dispatch_state` and `next_action`. On an upstream 403, add `details.required` when you know the role (CLI-014); in the eval, agents spent 2 to 4 calls probing after a bare 403.
 - A confirmed write returns `operation_id`, `receipt` and `result`; a partial batch is `ok: false` with `E_PARTIAL` (CLI-059, CLI-063).

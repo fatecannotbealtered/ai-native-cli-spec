@@ -323,6 +323,7 @@ app.Register(mrUpdate, aicli.Meta{
 命令树必须同时满足以下各项：
 
 - 路径唯一；一个路径要么是命令组，要么是命令，不能两者都是。
+- 别名在同级命令之间唯一：`label create` 和 `milestone create` 都可以接受 `add`，但别名不能与同级命令的名称或别名重复，根级别名也不能遮盖根级命令或内置命令。
 - 内置名称 `reference`、`context`、`doctor`、`changelog`、`update`、`operation`、`help` 和 `version` 在根级保留。aicli 的命令树检查会拒绝使用这些名称的工具命令，`update` 也不例外：它是 aicli 的内置命令（CLI-070）。
 - 任何参数都不遮蔽全局控制标志（`--format`、`--json`、`--pretty`、`--compact`、`--fields`、`--quiet`、`--dry-run`、`--confirm`、`--dangerous`）；保留标志 `--idempotency-key`（CLI-062）、`--allow-downgrade`（CLI-070）和 `--profile`（CLI-101）只表示那几条规则所规定的含义。
 - 命令采用 `<noun> <verb>` 形式，先用 `list`、`get`、`search`、`create`、`update` 和 `delete`（含义见 CLI-029），其次才是 `merge`、`approve` 这类领域动词。
@@ -410,7 +411,7 @@ aicli 通过 `App.Shortcuts`（根级名词）、`App.ShortFlags`（`-p`）、`A
 - `--limit <n>`：每页大小。命令的帮助写明它的默认值和最大值；超过最大值返回 `E_USAGE` `invalid_value`，绝不悄悄调低。
 - `--cursor <cursor>` 或 `--offset <n>`：下一页从哪里开始，原样复制上一页的 `next_cursor` 或 `next_offset`（CLI-041）。
 - `--query <text>`：`search` 命令要查找的内容（CLI-029）。
-- `--since <time>` 和 `--until <time>`：时间范围，用 ISO 8601 UTC 或相对时间（`7d`），在 `scope` 中以绝对 UTC 时间回显（CLI-048）。
+- `--since <time>` 和 `--until <time>`：时间范围，用 ISO 8601 UTC 或相对时间（`7d`），在 `scope` 中以绝对 UTC 时间回显（CLI-048）。唯一的例外是 `changelog --since <version>`（CLI-037），它的列表按版本排序。
 - `--sort <field>` 和 `--order asc|desc`：列表的顺序，在该页的 `sort` 中回显。
 - `--state <state>`：按状态过滤；`all` 去掉这个过滤。
 - `--refs a,b,c`：一次读取多个资源（CLI-049）。
@@ -433,7 +434,7 @@ aicli 通过 `App.Shortcuts`（根级名词）、`App.ShortFlags`（`-p`）、`A
 - `list` 返回一页匹配项（CLI-041）。没有匹配时返回空页，`ok: true`，绝不返回 `E_NOT_FOUND`。
 - `get` 按 ref、URL 或名称返回一个资源（CLI-048）。资源不存在时返回 `E_NOT_FOUND`；一个名称匹配到多个资源时返回 `E_AMBIGUOUS`。
 - `search` 返回按与 `--query` 的相关度排序的一页结果，该页的 `sort` 要写明这一点。
-- `create` 在回执的 `result` 中返回新资源的 `ref`（CLI-059），并接受 `--idempotency-key`（CLI-062）。
+- `create` 在与回执并列的 `result` 中返回新资源的 `ref`（CLI-059），并且应当接受 `--idempotency-key`（CLI-062）。
 - `update` 只修改给出的字段。字段只有在明确要求时才清空，即给出空值或 `--clear-<field>`，绝不因为漏掉了某个标志而被清空。没有指明任何要修改字段的调用，在进入写入门控之前就返回 `E_USAGE`（`missing_parameter`），所以不会为它签发令牌。
 - `delete` 的目标不存在时，在预演阶段报告 `E_NOT_FOUND`，绝不报告成功。
 - 领域动词（`merge`、`approve`、`share`）声明自己确切的效果（CLI-025），其简介写明会改变什么。
@@ -533,7 +534,7 @@ aicli 依据 `App.Identity`、状态目录、授权范围文件和设置文件�
 
 ### CLI-036 doctor
 
-`doctor` 必须返回 `data.checks`，每项为 `{check, status, message, fix}`，`status` 取 `pass`、`warn` 或 `fail`，检查通过时 `fix` 为 `null`。它必须包含 `credentials`、`connectivity`、`state_store`、`authorization` 和 `version` 这几项检查；工具声明了设置时（CLI-100），还要有 `settings`：没有设置文件或文件有效时为 `pass`，并写明当前生效的配置档及其来源；文件无效时为 `fail`，其 `fix` 点出该文件。`version` 把工具与已安装 Skill 的 `metadata.min_version` 和 `metadata.version` 比较，这两项从 `App.SkillDirs` 中每个目录的 `<dir>/<tool>/SKILL.md` 读取（默认目录为 `~/.agents/skills` 和 `~/.claude/skills`）：没有 Skill → `warn`；`min_version` 比工具新 → `fail`（更新工具）；Skill 的 `version` 比工具旧 → `warn`（运行 `update` 同步 Skill）。网络故障只让 `connectivity` 失败。无论各项检查结果如何，`doctor` 都返回 `ok: true`，不做任何改动；设置了 `App.Update` 时，它会在 `version` 检查之前以 3 s 的超时刷新更新通知缓存，失败则忽略（CLI-071）。aicli 运行 `credentials`（依据 `App.Identity`）、`state_store`、`authorization`、`version` 和 `settings`；在工具提供 `connectivity` 检查之前，一律把它报告为 `warn`。来自 `App.DoctorChecks` 的检查会替换库里同名的检查，其他检查则追加进去。
+`doctor` 必须返回 `data.checks`，每项为 `{check, status, message, fix}`，`status` 取 `pass`、`warn` 或 `fail`，检查通过时 `fix` 为 `null`。它必须包含 `credentials`、`connectivity`、`state_store`、`authorization` 和 `version` 这几项检查；工具声明了设置时（CLI-100），还要有 `settings`：没有设置文件或文件有效时为 `pass`，并写明当前生效的配置档及其来源；文件无效，或者所要求的配置档不存在（即使没有文件）时为 `fail`，其 `fix` 点出该文件。`version` 把工具与已安装 Skill 的 `metadata.min_version` 和 `metadata.version` 比较，这两项从 `App.SkillDirs` 中每个目录的 `<dir>/<tool>/SKILL.md` 读取（默认目录为 `~/.agents/skills` 和 `~/.claude/skills`）：没有 Skill → `warn`，其 `fix` 指向 README 中的安装命令（`update` 不安装缺失的 Skill）；`min_version` 比工具新 → `fail`（更新工具）；Skill 的 `version` 比工具旧 → `warn`（运行 `update` 同步 Skill）。网络故障只让 `connectivity` 失败。无论各项检查结果如何，`doctor` 都返回 `ok: true`，不做任何改动；设置了 `App.Update` 时，它会在 `version` 检查之前以 3 s 的超时刷新更新通知缓存，失败则忽略（CLI-071）。aicli 运行 `credentials`（依据 `App.Identity`）、`state_store`、`authorization`、`version` 和 `settings`；在工具提供 `connectivity` 检查之前，一律把它报告为 `warn`。来自 `App.DoctorChecks` 的检查会替换库里同名的检查，其他检查则追加进去。
 
 ```json
 {"ok":true,"schema_version":"2.0","data":{"checks":[
@@ -551,7 +552,7 @@ aicli 依据 `App.Identity`、状态目录、授权范围文件和设置文件�
 
 ### CLI-037 changelog
 
-`changelog [--since <version>]` 必须依据构建时内嵌的 `CHANGELOG.md`（Keep a Changelog 格式）报告变更：`{current_version, entries}`，过滤时再加上 `since` 和 `count`。每个条目为 `{version, date, changes}`，`changes` 以 `added`、`changed`、`fixed`、`deprecated`、`removed` 和 `security` 为键。`--since` 只返回比给定版本更新的版本。aicli 负责解析 `App.Changelog`。
+`changelog [--since <version>]` 必须依据构建时内嵌的 `CHANGELOG.md`（Keep a Changelog 格式）报告变更：`{current_version, entries}`，过滤时再加上 `since` 和 `count`。每个条目为 `{version, date, changes}`，`changes` 以 `added`、`changed`、`fixed`、`deprecated`、`removed` 和 `security` 为键。`--since` 只返回比给定版本更新的版本。不带 `--since` 时，它列出放得进成功响应大小预算（CLI-042）的最新条目；省略了较旧的条目时，加上 `truncated: true`、`truncated_reason` 和 `omitted`。aicli 负责解析 `App.Changelog`。
 
 ```json
 {"ok":true,"schema_version":"2.0","data":{"current_version":"2.1.0","since":"2.0.0","count":1,"entries":[{"version":"2.1.0","date":"2026-11-02","changes":{"added":["mr list --reviewer filter"],"fixed":["branch delete accepts branch names that contain slashes"]}}]},"meta":{"duration_ms":1}}
@@ -573,7 +574,7 @@ aicli 依据 `App.Identity`、状态目录、授权范围文件和设置文件�
 
 ### CLI-040 默认字段
 
-每个列表命令都必须声明默认字段，依据用户会问的问题来选，而不是照搬 API schema：Agent 选择和核对条目所需的字段（`ref`、标题或名称、状态、`updated_at`、`url`）；常见任务会问到的字段（对合并请求而言：指派人、评审人、标签、流水线状态）。`--fields a,b` 替换默认字段，`--fields +a` 在默认字段上追加，`--fields all` 返回全部字段。未知字段返回 `E_USAGE`（`invalid_value`，`parameter: "--fields"`，`expected` 列出可用字段）。投影作用于每个条目，或 `get` 返回的对象；完整性键（CLI-041）始终保留。投影由 aicli 完成；默认字段由工具选定（`Meta.DefaultFields` 或 schema 的 `default_fields`）。
+每个列表命令都必须声明默认字段，依据用户会问的问题来选，而不是照搬 API schema：Agent 选择和核对条目所需的字段（`ref`、标题或名称、状态、`updated_at`、`url`）；常见任务会问到的字段（对合并请求而言：指派人、评审人、标签、流水线状态）。`--fields a,b` 替换默认字段，`--fields +a` 在默认字段上追加，`--fields all` 返回全部字段。未知字段返回 `E_USAGE`（`invalid_value`，`parameter: "--fields"`，`expected` 列出可用字段）。投影作用于每个条目、`get` 返回的对象，或已确认写操作的 `data.result`（绝不作用于回执）；完整性键（CLI-041）始终保留。投影由 aicli 完成；默认字段由工具选定（`Meta.DefaultFields` 或 schema 的 `default_fields`）。
 
 原因：在 Skill 保持不变的条件下，给 MR 条目加上指派人、标签和流水线状态，并在工具内计算流水线过滤之后，「哪些 MR 的流水线失败了」（T02）从 13.6 次调用降到 6.1 次；「指派 MR 并打标签」（T07）从 13.0 次降到 9.5 次。
 
@@ -717,8 +718,9 @@ return app.Write(cmd, aicli.WriteSpec{
 
 - 预览包含 `operation_id`、`command`、`action`、`effects`、`dangerous`、`inputs`、`can_apply` 和 `blocked_by`，另外要么是 `target` 和 `changes`（单个目标），要么是 `targets`、`total` 和 `items`（批量，CLI-063）。可选：`base`（制订计划时所依据的版本），以及缩短的批量预览中的 `omitted`（CLI-063）。按效果必需：`destinations`（`deliver` 命令发往何处）和 `outputs`（`artifact` 或 `persist` 命令写入的本地路径），分别来自 `Preview.Destinations` 和 `Preview.Outputs`；缺了它们的 `Preview` 会被写入门控拒绝，因为授权范围要检查它们（SEC-012）。
 - `target` 为 `{key, kind, label}`；每项变更（`aicli.FieldChange`）为 `{field}` 加上 `before`、`after`、`add`、`remove` 或 `note`。
-- `inputs` 回显已绑定的输入（CLI-054），机密显示为 `"***"`，文件输入显示为 `{"sha256": …, "bytes": …}`。
+- `inputs` 回显已绑定的输入（CLI-054），机密显示为 `"***"`，文件输入显示为 `{"sha256": …, "bytes": …}`，名为 `id`、`iid` 或以 `_id` 结尾的输入显示为字符串（CLI-007）；工具声明了设置时，当前配置档显示为 `profile`，设置显示为 `setting`，这是一个以设置名称为键的对象（CLI-054）。
 - `can_apply` 为 false 时，`blocked_by` 列出若干 `{kind, message}` 条目，`confirm_token` 和 `expires_at` 为 `null`。响应仍然是 `ok: true`，这样 Agent 能看到原因。
+- 带 `--idempotency-key` 的预演，如果它的键与较早已执行的请求匹配，就以那个请求的重放作答，而不返回预览（CLI-062）：什么都不计划，也不发送。
 
 ```json
 {"ok":true,"schema_version":"2.0","data":{
@@ -769,6 +771,7 @@ return app.Write(cmd, aicli.WriteSpec{
 - 每个实际给出的参数（标志或位置参数），取归一化之后的值，控制标志 `format`、`json`、`pretty`、`compact`、`fields`、`quiet`、`dry-run`、`confirm`、`dangerous` 和 `help` 除外；
 - 每个文件或 stdin 输入内容的 SHA-256；
 - 解析后的账号和主机（来自 `App.Identity`）以及目标（`Target.Key`）；
+- 工具声明了设置时（CLI-100），当前配置档的名称，无论由什么选定（`--profile`、`<PREFIX>_PROFILE`、`default_profile` 或唯一的配置档），作为输入 `profile`；以及每个已声明设置解析后的值，作为输入 `setting.<name>`；
 - 授权范围摘要（授权范围文件字节的 SHA-256）、工具版本、目标的基准版本（预览中有时，`Preview.BaseVersion`）、幂等键，以及过期时间。
 
 aicli 在绑定前做归一化：
@@ -820,20 +823,23 @@ aicli 在绑定前做归一化：
 2. 加载密钥；不可用 → `E_IO`。
 3. 加载操作记录；不存在 → `token_mismatch`。
 4. 对存储的声明校验 HMAC；不对 → `token_mismatch`。
-5. 已过 `expires_at` → `token_expired`。
-6. 已存在已消费标记 → `token_used`。
+5. 已存在已消费标记，或记录已不是 `planned` → `token_used`，无论令牌多旧。
+6. 已过 `expires_at` → `token_expired`，并附上同一命令的新计划。
 7. 重新计算输入摘要；不同 → `token_mismatch`，点出第一个不同的参数。
 8. 危险命令缺少 `--dangerous` → `E_CONFIRMATION_REQUIRED`（`dangerous_flag_required`）。
-9. 授权范围：缺失或不足 → 带 `details.scope` 的 `E_FORBIDDEN`；摘要变化 → `scope_changed`；操作预算已用完 → `E_FORBIDDEN`（`scope.status: budget_spent`）。
-10. 同一目标上有未解决的操作 → `unresolved_operation`。重新运行 `Preview`：基准版本或计划变化，或者 `can_apply: false` → `state_drift`。重新计算账号、主机和目标：不同 → `token_mismatch`（`parameter` 为 `account`、`host` 或 `target`）。
-11. 创建已消费标记；已存在 → `token_used`；其他任何错误 → `E_IO`。
-12. 把记录写为 `dispatching`，带 `lease_until`；失败 → `E_IO`。
-13. 运行 `Apply`。
-14. 分类：`NotDispatched` → `dispatch_state: not_started`，变更维度为 `not_applied`；`Rejected` → `dispatched`、`not_applied`，带上该错误的错误码；其他任何错误 → `E_OUTCOME_UNKNOWN`；成功 → 依据 `Result` 生成回执。
-15. 写入最终记录；写入失败时仍然返回结果，并附一条警告通知。
-16. 按回执规则输出（CLI-059）。
+9. 取得目标的锁（状态目录中的 `locks/<hash>.lock`；批量操作按排序后的顺序取得每个条目的锁），最多等待 10 s → `lock_held`。第 10 至 15 步都在锁内运行，所以同一目标上的两次确认绝不交错。再检查一次已消费标记 → `token_used`。
+10. 授权范围：缺失或不足 → 带 `details.scope` 的 `E_FORBIDDEN`；摘要变化 → `scope_changed`；操作预算已用完 → `E_FORBIDDEN`（`scope.status: budget_spent`）。
+11. 同一目标上有未解决的操作 → `unresolved_operation`。重新运行 `Preview`：基准版本或计划变化，或者 `can_apply: false` → `state_drift`。重新计算账号、主机和目标：不同 → `token_mismatch`（`parameter` 为 `account`、`host` 或 `target`）。
+12. 存在使用同一幂等键的较早操作（CLI-062）→ 返回原始回执并带 `replayed: true`，或者返回 `idempotency_mismatch`、`idempotency_resolved` 或 `unresolved_operation`。
+13. 创建已消费标记，并把这次操作计入授权范围的预算；标记已存在 → `token_used`；预算已用完 → `E_FORBIDDEN`（`budget_spent`）；其他任何错误 → `E_IO`。
+14. 把记录写为 `dispatching`，带 `lease_until`；失败 → `E_IO`。
+15. 释放锁。
+16. 运行 `Apply`。
+17. 分类：`NotDispatched` → `dispatch_state: not_started`，变更维度为 `not_applied`；`Rejected` → `dispatched`、`not_applied`，带上该错误的错误码；其他任何错误 → `E_OUTCOME_UNKNOWN`；成功 → 依据 `Result` 生成回执。
+18. 写入最终记录；写入失败时仍然返回结果，并附一条 `journal_write_failed` 通知。
+19. 按回执规则输出（CLI-059）。工具构造的 `result` 如果无法编码，就以 `{}` 代替，并附一条 `result_unencodable` 通知；回执照常有效。
 
-第 1 至 12 步中的任何失败都是 `dispatch_state: not_started`：什么都还没有发出。
+第 1 至 14 步中的任何失败都是 `dispatch_state: not_started`：什么都还没有发出。第 14 步写下 `dispatching` 之后，就不再报告 `not_started`：库无法归类的错误一律是带操作 ID 的 `E_OUTCOME_UNKNOWN`。
 
 预演和裸调用：
 
@@ -846,7 +852,7 @@ aicli 在绑定前做归一化：
 7. 签发令牌，除非 `can_apply` 为 false。
 8. 输出：`--dry-run` 返回带 `data` 的 `ok: true`；裸调用返回 `E_CONFIRMATION_REQUIRED`，`details` 中是同样的内容。
 
-原因：绑定基准版本，能阻止依据旧状态计划的写操作在新状态上运行；固定的顺序让每个工具以同样的方式拒绝，而且总是在发出任何东西之前。
+原因：绑定基准版本，能阻止依据旧状态计划的写操作在新状态上运行；固定的顺序让每个工具以同样的方式拒绝，而且总是在发出任何东西之前。顺序很重要。在 2.0 的发布评审中，先检查过期的已用令牌在 10 分钟后返回了 `token_expired` 和一个新令牌，照着做就把写操作发了两次。没有锁时，两次按同一版本计划的确认都通过了漂移检查，后一次覆盖了前一次。
 
 检查：`G10`（授权范围文件在预演和确认之间发生变化 → `scope_changed`，什么都不发出）；其他步骤由 aicli 的写入门控测试覆盖。
 
@@ -857,9 +863,9 @@ aicli 在绑定前做归一化：
 aicli 把操作记录保存在状态目录中：优先 `App.StateDir`，其次 `<PREFIX>_STATE_DIR`，再次 `~/.<tool>`，以权限模式 0700 创建；路径是符号链接或不是目录时返回 `E_IO`（SEC-030）。
 
 - `operations/<id>.json` 保存记录，以原子方式替换（临时文件、fsync、重命名）；`operations/<id>.consumed` 是单次使用标记。
-- 记录的状态依次为 `planned` → `dispatching` → `applied`、`not_applied`、`partial`、`failed` 或 `unknown`，经 `operation resolve` 后变为 `resolved`。超过 `expires_at` 的 `planned` 记录读作 `expired`；超过 `lease_until` 的 `dispatching` 记录读作 `unknown`（租约时长为 `WriteSpec.Timeout`，默认 120 s）。
-- 未解决指 `unknown` 或 `dispatching`。损坏的记录读作 `unknown`，并阻塞其目标。
-- 超过 30 天的记录会被清理（未解决的除外），操作记录最多保留 2,000 条，先丢弃最旧的已解决记录。
+- 记录的状态依次为 `planned` → `dispatching` → `applied`、`not_applied`、`partial`、`failed` 或 `unknown`，经 `operation resolve` 后变为 `resolved`。超过 `expires_at` 的 `planned` 记录读作 `expired`；超过 `lease_until` 的 `dispatching` 记录读作 `unknown`（租约时长为 `WriteSpec.Timeout`，默认 120 s，再加 5 s，因此比 `Apply` 的截止时间更长）。`Apply` 必须遵守它的截止时间（Go 中是 context，Python 中是 `op.timeout`）；`Apply` 仍在运行时被解决的记录保留其解决结果，这次确认报告 `E_OUTCOME_UNKNOWN`。
+- 未解决指 `unknown` 或 `dispatching`。无法读取的记录，或缺少 `operation_id`、`status`、`command`、`created_at` 或 `effects` 的记录，都是不可读记录：读作 `unknown`，阻塞其目标，`operation show` 把它报告为不可读。
+- 超过 30 天的记录会被清理（未解决的除外），操作记录最多保留 2,000 条，先丢弃最旧的已解决记录。批量操作的条目随批量记录一起清理。授权范围的预算记在 `scope-usage.json` 中，清理绝不触及它（SEC-011）。
 
 原因：不留记录的写操作，在回应丢失后就无从查询；失败即放行的存储会让一个令牌驱动重复写入，在 1.6.3 §9 下，10 个有门控的工具中有 8 个允许这种情况。
 
@@ -923,7 +929,7 @@ aicli 把操作记录保存在状态目录中：优先 `App.StateDir`，其次 `
 aicli 添加了三个内置命令，它们只读取或写入操作记录：
 
 - `operation show --id <id>` 返回记录：`operation_id`、`command`、`status`、`target`、`effects`、`scope_id`、`created_at`、`expires_at`、`dispatched_at`、`finished_at`、`preview`、`receipt`、`resolution`、`batch_id`、`items`。它遵守成功响应的大小预算（CLI-042）：批量操作大到一个响应放不下时，预览按 CLI-063 缩短，`items` 先列出需要处理的条目（状态不是 `applied` 或 `resolved`），再列其余条目，由 `items_omitted` 计数被省略的条目；一条通知给出分页命令。
-- `operation list [--status <status>] [--limit <n>]` 返回一页记录（CLI-041），最新的在前，带 `total`；会超出成功响应大小预算（CLI-042）的页面提前结束，带 `truncated` 和 `next_offset`。`operation list --batch <batch id>` 按输入顺序分页列出一个批量操作的全部条目。
+- `operation list [--state <status>] [--limit <n>]` 返回一页记录（CLI-041），最新的在前，带 `total`；会超出成功响应大小预算（CLI-042）的页面提前结束，带 `truncated` 和 `next_offset`。`operation list --batch <batch id>` 按输入顺序分页列出一个批量操作的全部条目。
 - `operation resolve --id <id> --outcome applied|not_applied|partial --evidence <text>` 在未解决的操作上记录 `resolution`（`{outcome, evidence, resolved_at}`），原始回执保持原样。它需要一个覆盖该操作效果的授权范围；在该操作的租约有效期间，它会被拒绝，返回 `E_CONFLICT` `lock_held`。
 
 原因：回应丢失后，Agent 凭手上已有的操作 ID 就能查明发生了什么，不需要再发送任何东西。
@@ -932,9 +938,16 @@ aicli 添加了三个内置命令，它们只读取或写入操作记录：
 
 ### CLI-062 幂等键
 
-创建类命令应当接受 `--idempotency-key <key>`。aicli 把这个键绑定进令牌，并作为 `Op.IdempotencyKey` 传给 `Apply`；在 API 支持的地方，工具把它转发给上游（例如通过 `Idempotency-Key` 请求头）。重放需要相同的命令路径、键、输入摘要和目标键：它返回原始回执，带 `replayed: true`，什么都不发送；同一个键但有任何差异，返回 `E_CONFLICT` `idempotency_mismatch`。在批量操作中（CLI-063），每个条目的 `Op.IdempotencyKey` 是 `<key>/<item operation id>`，这样遵守该键的上游绝不会把两个条目合并成一个；用户给的键仍然绑定在整批的令牌里。
+创建类命令应当接受 `--idempotency-key <key>`。aicli 把这个键绑定进令牌，并作为 `Op.IdempotencyKey` 传给 `Apply`；工具只在 API 遵守它的地方把它转发给上游（例如通过 `Idempotency-Key` 请求头）：Go 的 `net/http` 认为带这个请求头的请求可以安全重复，在复用的连接失败后会重新发送它；上游忽略这个请求头时，这就是一次隐蔽的重复写入（CLI-110）。aicli 在确认的第 12 步（CLI-057）跨所有命令在操作记录中查找这个键，在预演或裸调用时也会在 `Preview` 之前查找，所以即使工具的 `Preview` 会阻止重复的创建，重复请求也能被识别出来。它考虑所有使用这个键的较早操作，而不只是最新的一个，按下面的顺序以第一条适用的规则作答：
 
-原因：一个可能发生也可能没发生的创建操作，只有在重复请求能被识别出来时，才能安全地重复。
+- 同一个键，但命令路径、输入摘要、目标、账号或主机有任何差异（包括命令不同）→ `E_CONFLICT` `idempotency_mismatch`；
+- 有较早的操作尚未解决 → `unresolved_operation`；
+- 有较早的操作被人工解决为 `applied` 或 `partial`，或者以 `partial` 结束 → `E_CONFLICT` `idempotency_resolved`，带 `operation_id`，什么都不发送；解决为 `not_applied` 的操作不妨碍再次发送；
+- 有较早的操作为 `applied` → 返回原始回执和结果，带 `replayed: true`（重放的重放也返回最初的那一个），什么都不发送。
+
+批量操作（CLI-063）也用它的键按同样的方式查找。每个条目的 `Op.IdempotencyKey` 是 `<key>/<hash16>`，其中 `<hash16>` 是条目目标键的 SHA-256 的前 16 个十六进制字符：在多次预演之间保持不变，所以上游能识别重复的批量请求；又因目标而异，所以遵守该键的上游绝不会把两个条目合并成一个。用户给的键仍然绑定在整批的令牌里。
+
+原因：一个可能发生也可能没发生的创建操作，只有在重复请求能被识别出来时，才能安全地重复。许多上游会忽略 `Idempotency-Key`，所以在操作记录中查找往往是唯一的保护；在 2.0 的发布评审中，这里的每个漏洞都让一个创建操作发出了两次：回应丢失后被解决为 applied 的键，以及用同一个键重复的批量操作。
 
 检查：aicli 的写入门控测试。
 
@@ -998,24 +1011,24 @@ aicli 添加了三个内置命令，它们只读取或写入操作记录：
 `update` 改变的是工具本身，而不是某个目标，所以不经过确认门控：直接运行 `update`，一次调用就完成整个更新，没有子命令，也没有令牌。和操作记录一样，工具自身的安装不是目标，所以它在注册表中的条目只声明 `observe`（CLI-025）。它的标志是 `--check`、`--target-version <version>` 和 `--allow-downgrade`。`--dry-run` 是 `--check` 的同义写法；`--confirm` 返回 `E_USAGE`（`invalid_value`），因为没有什么需要确认。aicli 的 `update` 必须：
 
 1. 在做任何其他事之前，把用到的每个版本都按严格的 semver 校验，允许前面带一个可选的 `v`（`ParseVersion`），无论它来自 `--target-version` 还是发布的 `tag_name`。`--target-version` 不符合，或者没有对应的发布时，返回 `E_USAGE` `invalid_value`；`tag_name` 不符合的发布会被跳过，绝不使用。`CheckUpdateTarget(current, target, allowDowngrade)` 一次调用完成这一项和第 3 项。
-2. 运行包管理器时，只使用 `PackageManagerArgs(manager, pkg, version)` 给出的参数向量（npm、pnpm、yarn、go、pip、brew），它由校验过的部分拼成，绝不经过 shell。在 Windows 上，`npm` 解析为 `npm.cmd`，后者在 cmd.exe 下运行，所以校验是唯一的防线。
-3. 拒绝降级，除非给出 `--allow-downgrade`（`E_USAGE`、`invalid_value`、`parameter: "--target-version"`）。
+2. 运行包管理器时，只使用 `PackageManagerArgs(manager, pkg, version)` 给出的参数向量（npm、pnpm、yarn、go、pip、brew），它由校验过的部分拼成，绝不经过 shell，并且只在 `PATH` 的绝对路径条目中查找，绝不在当前目录中查找（克隆下来的仓库里的 `npm.bat` 绝不能运行）。pip 用的是当前解释器的 `python -m pip`。在 Windows 上，`npm` 解析为 `npm.cmd`，后者在 cmd.exe 下运行，所以校验是唯一的防线。
+3. 拒绝降级，除非同时给出 `--target-version` 和 `--allow-downgrade`（`E_USAGE`、`invalid_value`、`parameter: "--target-version"`）。
 4. 在二进制安装路径上，先在进程内校验 `checksums.txt` 的 Sigstore 签名包，再校验归档文件的 SHA-256。签名绑定发布工作流在该发布 tag 上的确切身份 `https://github.com/<Repo>/.github/workflows/<Workflow>@refs/tags/v<version>`，签发者为 `https://token.actions.githubusercontent.com`。任何失败都返回 `E_INTEGRITY`；校验绝不跳过（SEC-050）。
 5. 在包管理器安装路径上，驱动包管理器去执行（绝不修改它管理的文件，也绝不只打印它的命令），用 `<tool> --version` 确认装上的版本，并如实报告 `signature_status`：只有 aicli 自己校验过签名时才报 `verified`，否则报 `not_checked` 或 `unavailable`。
-6. 同步 Skill 时，从已安装的包把它们复制到已经安装了它们的 Skill 目录中，绝不从任何地方拉取；同步没能完成时，`skill_sync_command` 为 `<tool> update`。
+6. 同步 Skill 时，从已安装的包把它们复制到已经安装了它们的 Skill 目录中，绝不从任何地方拉取；只有同步没能完成时（`failed`，或在 `skill_sync` 阶段的 `E_PARTIAL`），`skill_sync_command` 才为 `<tool> update`。Skill 没有安装绝不构成给出它的理由：`update` 不安装 Skill。
 7. 保持幂等：已经是目标版本时，返回 `status: up_to_date`，不运行包管理器，并补完之前某次运行没做完的 Skill 同步。
 
-**安装方式。** aicli 判断正在运行的这份副本是怎样安装的；第一个匹配的规则生效。既不是冻结的二进制、也不在 `site-packages` 或 `dist-packages` 之下的 Python 副本，是从源码运行的，无法自我更新（`E_UNSUPPORTED`）。路径中有 `node_modules` 段时，是 `pnpm`（有 `.pnpm` 段）、`yarn`（有 `.yarn` 段，或位于 `/yarn/global/` 之下）或 `npm`。有 `Cellar` 段，或位于 `/opt/homebrew/`、`/home/linuxbrew/` 之下，是 `brew`。位于 `go install` 目录（`GOBIN`，未设置时为 `GOPATH/bin`，再没有时为 `~/go/bin`）的 Go 构建是 `go`，位于 `site-packages` 或 `dist-packages` 之下的 Python 包是 `pip`，其他一律是 `binary`。某个包管理器的包名在 `UpdateConfig` 中留空时，在运行任何东西之前就返回 `E_CONFIG`。
+**安装方式。** aicli 判断正在运行的这份副本是怎样安装的；第一个匹配的规则生效。既不是冻结的二进制、也不在 `site-packages` 或 `dist-packages` 之下的 Python 副本，是从源码运行的，无法自我更新（`E_UNSUPPORTED`）。路径中有 `store/v<n>/links` 段时（pnpm 11 的全局存储），是 `pnpm`。路径中有 `node_modules` 段时，是 `pnpm`（有 `.pnpm` 段）、`yarn`（有 `.yarn` 段，或位于 `/yarn/global/` 之下）或 `npm`。有 `Cellar` 段，或位于 `/opt/homebrew/`、`/home/linuxbrew/` 之下，是 `brew`。位于 `go install` 目录（`GOBIN`，未设置时为 `GOPATH/bin`，再没有时为 `~/go/bin`）的 Go 构建是 `go`，位于 `site-packages` 或 `dist-packages` 之下的 Python 包是 `pip`，其他一律是 `binary`。某个包管理器的包名在 `UpdateConfig` 中留空时，在运行任何东西之前就返回 `E_CONFIG`。
 
-**发现。** 给出 `--target-version` 时，aicli 读取带这个 tag 的发布。不给时，它在最近的 50 个发布中取最高的版本，跳过草稿、预发布版本和不是 semver 的 tag；只有在没有任何发布带 semver tag 时，结果才是 `E_UNSUPPORTED`。预发布版本只能通过 `--target-version` 获得。目标版本不比正在运行的版本新、又没有 `--allow-downgrade` 时，就算已是最新：不下载任何东西，也不运行包管理器。`update --check` 到这里为止：它把结果记入通知缓存，返回 `status` 为 `available` 或 `up_to_date`，并附上 `command`，即包管理器安装时会运行的参数向量。
+**发现。** 给出 `--target-version` 时，aicli 读取带这个 tag 的发布。不给时，它在最近的 50 个发布中取最高的版本，跳过草稿、带 semver 预发布部分的 tag（无论发布的预发布标记怎么写）和不是 semver 的 tag；只有在没有任何发布带 semver tag 时，结果才是 `E_UNSUPPORTED`。预发布版本只能通过 `--target-version` 获得，也绝不出现在更新通知中（CLI-071）。目标版本不比正在运行的版本新、又没有 `--allow-downgrade` 时，就算已是最新：不下载任何东西，也不运行包管理器。`update --check` 到这里为止：它把结果记入通知缓存，返回 `status` 为 `available` 或 `up_to_date`，并附上 `command`，即包管理器安装时会运行的参数向量。
 
-**包管理器安装路径。** 在 `replace` 阶段，aicli 运行 `PackageManagerArgs` 给出的参数向量，最长 10 分钟，然后从已安装的 `<tool> --version` 中读取 `data.version`。由这个版本说了算：它等于目标版本，安装就算成功，即使包管理器报告了错误；否则结果是 `E_IO`，并给出需要手工运行的命令。
+**包管理器安装路径。** 在 `replace` 阶段，aicli 运行 `PackageManagerArgs` 给出的参数向量，最长 10 分钟，然后从 `<tool> --version` 中读取 `data.version`，其中的 `<tool>` 重新在 `PATH` 的绝对路径条目中查找（pnpm 升级后会留下旧的存储路径）。由这个版本说了算：它等于目标版本，安装就算成功，即使包管理器报告了错误；否则结果是 `E_IO`，并给出需要手工运行的命令。
 
-**二进制安装路径。** `download` 把 `<tool>-<version>-<os>-<arch>.tar.gz`（Windows 上为 `.zip`，其中 arm64 使用 amd64 构建）、`checksums.txt` 和 `checksums.txt.sigstore.json` 下载到可执行文件旁边的一个临时目录中。`verify_signature` 和 `verify_checksum` 校验它们（第 4 项）。在 `replace` 阶段，aicli 只解出二进制和 `skills/`，遇到不安全的条目（绝对路径、`..`、链接或设备文件）以 `E_INTEGRITY` 拒绝，并运行新二进制的 `--version`，它必须报告目标版本。然后它把二进制换上，并用这次发布的 `skills/` 替换 `<exe dir>/skills`（REPO-043）。
+**二进制安装路径。** `download` 把 `<tool>-<version>-<os>-<arch>.tar.gz`（Windows 上为 `.zip`，其中 arm64 使用 amd64 构建）、`checksums.txt` 和 `checksums.txt.sigstore.json` 下载到可执行文件旁边的一个临时目录中。`verify_signature` 和 `verify_checksum` 校验它们（第 4 项）。在 `replace` 阶段，aicli 只解出二进制和 `skills/`，遇到不安全的条目（绝对路径、`..`、名称中有 `:`、链接、设备文件、重复的名称，或总计超过 10,000 个条目或 1 GiB）以 `E_INTEGRITY` 拒绝，并运行新二进制的 `--version`，它必须报告目标版本。然后它把二进制换上，并在 `<exe dir>/skills` 中只替换这次发布附带的 Skill，每次一个 `skills/<name>`：多个工具可能共用一个目录，所以其他名称保持不动；发布中没有 `skills/` 时，该目录原样保留（REPO-043）。
 
-**Skill 同步。** `binary` 的来源是 `<exe dir>/skills`，`npm`、`pnpm` 和 `yarn` 的来源是 npm 包根目录下的 `skills/`；其他安装方式没有来源。对来源中的每个 Skill 和 `App.SkillDirs`（默认为 `~/.agents/skills` 和 `~/.claude/skills`）中的每个目录：已安装的副本是真实目录的，用一份新副本替换；是符号链接或目录联接（junction）的，保持不动。没有安装在那里的 Skill 不会被创建：安装是 README 的事（REPO-010）。复制了任何东西时，`skill_sync_status` 为 `synced`；每份已安装的副本都已经是工具的版本时，为 `not_needed`；没有来源或没有已安装的 Skill 时，为 `skipped`。
+**Skill 同步。** `binary` 的来源是 `<exe dir>/skills` 中这次发布附带的 Skill，`npm`、`pnpm` 和 `yarn` 的来源是 npm 包根目录下的 `skills/`；其他安装方式没有来源。复制时绝不跟随链接。对来源中的每个 Skill 和 `App.SkillDirs`（默认为 `~/.agents/skills` 和 `~/.claude/skills`）中的每个目录：已安装的副本是真实目录的，用一份新副本替换；是符号链接或目录联接（junction）的，保持不动。没有安装在那里的 Skill 不会被创建：安装是 README 的事（REPO-010）。复制了任何东西时，`skill_sync_status` 为 `synced`；每份已安装的副本都已经是工具的版本时，为 `not_needed`；没有来源或没有已安装的 Skill 时，为 `skipped`。
 
-**网络。** 每个请求都有 30 s 的超时，并遵循 CLI-110：代理取自 `HTTPS_PROXY`、`HTTP_PROXY` 和 `NO_PROXY`，TLS 始终校验，`<PREFIX>_CA_FILE` 中的证书加入系统根证书，并使用 aicli 的 User-Agent。刷新 Sigstore 信任根时，也使用同样的超时、代理、CA 文件和 User-Agent。`GITHUB_TOKEN`（没有时用 `GH_TOKEN`）只发给 API 主机。响应大小有上限：发布元数据 4 MiB，`checksums.txt` 和签名包各 1 MiB，归档文件及其中的任何文件 512 MiB。
+**网络。** 每个请求都有 30 s 的空闲超时，下载另有 10 分钟的总时限，每个请求都遵循 CLI-110：代理取自 `HTTPS_PROXY`、`HTTP_PROXY` 和 `NO_PROXY`，TLS 始终校验，`<PREFIX>_CA_FILE` 中的证书加入系统根证书，并使用 aicli 的 User-Agent。在 Go 中，刷新 Sigstore 信任根时也使用同样的超时、代理、CA 文件和 User-Agent；在 Python 中，sigstore-python 自己的下载器遵守代理变量和超时，但不使用 `<PREFIX>_CA_FILE` 和 User-Agent，所以在做 TLS 检查的代理后面，`update` 会在 `verify_signature` 阶段以 `E_NETWORK` 安全地失败。`GITHUB_TOKEN`（没有时用 `GH_TOKEN`）只发给 API 主机。下载的资源和重定向都必须是 `https`。响应大小有上限：发布元数据 4 MiB，`checksums.txt` 和签名包各 1 MiB，归档文件及其中的任何文件 512 MiB。
 
 结果的 `data` 包含 `status`（`up_to_date`、`updated` 或 `available`；`partial` 只出现在部分更新的 details 中，见下文）、`current_version`、`target_version`、`update_available`、`install_method`（`binary`、`npm`、`pnpm`、`yarn`、`go`、`pip` 或 `brew`）、`signature_status`（`verified`、`not_checked`、`unavailable`）和 `skill_sync_status`（`synced`、`not_needed`、`failed`、`skipped`），适用时再加上 `previous_version`、`command`、`binary_replaced`、`signature_verified`、`checksum_verified`、`skill_sync_command` 和 `stage`。这些值描述命令执行之后的状态：安装完成后，`current_version` 等于 `target_version`，`update_available` 为 false。之后 Agent 读取 `changelog --since <previous_version>`（CLI-037）。
 
@@ -1023,18 +1036,22 @@ aicli 添加了三个内置命令，它们只读取或写入操作记录：
 {"ok":true,"schema_version":"2.0","data":{"status":"updated","current_version":"2.1.0","target_version":"2.1.0","previous_version":"2.0.0","update_available":false,"install_method":"binary","signature_status":"verified","signature_verified":true,"checksum_verified":true,"skill_sync_status":"synced","binary_replaced":true},"meta":{"duration_ms":8412}}
 ```
 
-更新分阶段进行：`discover`、`download`、`verify_signature`、`verify_checksum`、`replace`、`skill_sync`，只有一个原子提交点：`replace` 中的替换。每个失败都在 `error.details` 中带 `stage`、`current_version`、`binary_replaced` 和 `skill_sync_status`（同步运行之前为 `skipped`），一旦知道，还带 `target_version` 和 `install_method`。在包管理器运行或替换发生之前，`dispatch_state` 为 `not_started`，此后为 `dispatched`。
+更新分阶段进行：`discover`、`download`、`verify_signature`、`verify_checksum`、`replace`、`skill_sync`，只有一个原子提交点：`replace` 中的替换。每个失败都在 `error.details` 中带 `stage`、`current_version`、`binary_replaced` 和 `skill_sync_status`（同步运行之前为 `skipped`），一旦知道，还带 `target_version` 和 `install_method`。在包管理器运行或替换发生之前，`dispatch_state` 为 `not_started`，此后为 `dispatched`；替换失败且无法撤销时为 `unknown`。
 
 | 阶段 | 失败情形 | 错误码（退出码） | 可重试 | 之后的状态 | `next_action` 的内容 |
 |---|---|---|---|---|---|
-| `discover`、`download` | 网络、超时、限流 | `E_NETWORK`、`E_RATE_LIMITED`（7）、`E_TIMEOUT`（8） | true | 旧版本，未改变 | 暂时性问题：重新运行 `update`，它是幂等的 |
+| `discover`、`download` | 网络、超时、限流、重定向到明文 `http` | `E_NETWORK`、`E_RATE_LIMITED`（7）、`E_TIMEOUT`（8） | true | 旧版本，未改变 | 暂时性问题：重新运行 `update`，它是幂等的 |
 | `discover` | `--target-version` 不是 semver 或没有对应的发布，或者没带标志就降级 | `E_USAGE`（2） | false | 未改变 | 修正版本号，或加上 `--allow-downgrade` |
-| `discover` | 从源码运行的副本，或者没有任何发布带 semver tag | `E_UNSUPPORTED`（2） | false | 未改变 | 用 git 更新源码检出，或把发布的 tag 报告给工具的维护者 |
-| `download` | 没有适用于本操作系统和架构的构建 | `E_UNSUPPORTED`（2） | false | 未改变 | 用 README 中的包管理器命令安装 |
+| `discover` | 从源码运行的副本、开发构建（CLI-080），或者没有任何发布带 semver tag | `E_UNSUPPORTED`（2） | false | 未改变 | 用 git 更新源码检出，或把发布的 tag 报告给工具的维护者 |
+| `discover` | `<PREFIX>_CA_FILE` 无法读取或不含证书 | `E_CONFIG`（4） | false | 未改变 | 修正或取消 `<PREFIX>_CA_FILE` |
+| `download` | 没有适用于本操作系统和架构的构建，或者资源不是通过 `https` 提供的 | `E_UNSUPPORTED`（2） | false | 未改变 | 用 README 中的包管理器命令安装 |
+| `download` | 找不到正在运行的可执行文件 | `E_IO`（1） | false | 未改变 | 用 README 中的安装命令重新安装 |
 | `verify_signature` | 无法加载 Sigstore 信任根 | `E_NETWORK`（7） | true | 旧版本，未改变 | 检查网络，然后重新运行 `update` |
 | `verify_signature`、`verify_checksum` | 签名缺失或无效、身份不匹配、校验和缺失或不符 | `E_INTEGRITY`（1） | false | 旧版本；拒绝安装 | 完整性失败：不要重试；报告它 |
 | `replace` | 归档中有不安全的条目（绝对路径、`..`、链接、设备文件），或者新二进制报告的是另一个版本 | `E_INTEGRITY`（1） | false | 旧版本；拒绝安装 | 完整性失败：不要重试；报告它 |
 | `replace` | 没有配置包名，或者 PATH 上没有该包管理器 | `E_CONFIG`（4） | false | 未改变 | 安装该包管理器，或用 README 中的安装命令重新安装 |
+| `replace` | 包管理器无法安装目标版本（pip 与预发布版本；没有 pip 的环境） | `E_UNSUPPORTED`（2） | false | 未改变 | 适用安装器的命令（`pipx upgrade`、`uv tool upgrade`） |
+| `replace` | 替换失败，且旧二进制无法放回 | `E_IO`（1），`dispatch_state: unknown` | false | 工具可能已缺失 | 把点名的 `<exe>.old` 文件改回可执行文件的名称，然后运行 `<tool> --version` |
 | `replace` | 权限不足、磁盘已满、文件被锁、新二进制无法运行、包管理器运行失败 | `E_IO`（1） | false | 旧版本；什么都没提交 | 具体修法，或要手工运行的包管理器命令；然后重新运行 |
 | `skill_sync` | 替换之后 Skill 同步失败或被中断 | `E_PARTIAL`（1），details 带 `status: partial`、`target_version`、`skill_sync_command` | false | 新二进制，旧 Skill | 二进制已是新版本；再运行一次 `update` 完成同步，然后运行 `changelog --since <previous>` |
 | 替换之前 | SIGINT 或 SIGTERM | `E_INTERRUPTED`（130） | true | 旧版本，未改变 | 已取消；什么都没改变 |
@@ -1042,8 +1059,8 @@ aicli 添加了三个内置命令，它们只读取或写入操作记录：
 以下规则保证每条消息都如实：
 
 - 替换之前的一切都在可执行文件旁边、同一文件系统上的临时目录中进行。在这一阶段失败或被中断，已安装的工具保持原样（`binary_replaced: false`），临时目录被删除；之后的运行绝不信任下载了一半的文件。
-- 替换是原子的。在 POSIX 上，校验过的二进制在同一目录内被重命名到原位置。在 Windows 上，正在运行的 `<exe>` 被重命名为 `<exe>.old`（删不掉旧的残留文件时改用 `<exe>.old-<n>`），新文件被重命名为 `<exe>`；第二次重命名失败时，撤销第一次。下一次 `update` 会删除残留的 `<exe>.old*` 文件。替换中途崩溃，留下的要么是旧二进制，要么是新二进制，绝不会是两者的混合。
-- aicli 捕获 SIGINT 和 SIGTERM，仍在 stdout 上输出一个终态信封。替换之后的中断按实际情况报告：已完成的更新，或在 `skill_sync` 阶段的 `E_PARTIAL`，绝不报告为 `E_INTERRUPTED`。
+- 替换是原子的。在 POSIX 上，校验过的二进制在同一目录内被重命名到原位置。在 Windows 上，正在运行的 `<exe>` 被重命名为 `<exe>.old`（删不掉旧的残留文件时改用 `<exe>.old-<n>`），新文件被重命名为 `<exe>`；第二次重命名失败时，撤销第一次；撤销也失败时，错误会说明这一点，并点出需要改回名称的文件。下一次 `update` 会删除残留的 `<exe>.old*` 文件。替换中途崩溃，留下的要么是旧二进制，要么是新二进制，绝不会是两者的混合。
+- aicli 捕获 SIGINT 和 SIGTERM，仍在 stdout 上输出一个终态信封。正在运行的包管理器绝不会被杀掉：aicli 在其 10 分钟的上限内等它结束。替换之后的中断按实际情况报告：已完成的更新，或在 `skill_sync` 阶段的 `E_PARTIAL`，绝不报告为 `E_INTERRUPTED`。
 - 每个终态信封都写明当前安装的版本。完整性失败绝不可重试。二进制已替换而 Skill 过时，绝不是 `ok: true`。
 
 原因：更新路径审计发现，在 cnstock-cli 和 wechat-mp-cli 中，精心构造的 `--target-version`（`1.0.12&calc`）未经校验就到达了 `npm.cmd`；在 Windows 上，这等于一次不经门控的调用就能执行命令。另有五个 Go 工具以同样的方式传递发布的 `tag_name`，只有 cliproxyapi-cli 校验了 semver；还有四个工具把明确指定的旧版本当作「更新」接受。这些工具各自写了自己的更新；一个只需测试一次的内置命令取代了它们。1.6.3 本身就规定 npm 路径上报 `signature_status: not_checked`，并在每次更新时运行未钉住版本的 `npx skills add <repo> -y -g`。
@@ -1068,7 +1085,7 @@ aicli 只在两处访问发布源：`update`（包括 `--check`），以及设�
 
 ### CLI-080 版本
 
-`schema_version`（`"2.0"`）是信封契约的版本，不是工具的版本；只有破坏性的信封变更才会改变它的主版本号，新增内容不改变它。`reference` 必须报告 `spec_version`（工具所遵循的本规范的版本，`2.0.0`）和 `schema_version`；`--version`、`context` 和 `reference` 报告工具自己的版本。已弃用的命令、标志和字段遵循 CLI-081。Skill 声明 `metadata.min_version`（SKL-001）；已安装的 Skill 需要更新版本的工具时，`doctor` 的 `version` 检查失败；Skill 缺失或比工具旧时，该检查给出警告（CLI-036）。
+`schema_version`（`"2.0"`）是信封契约的版本，不是工具的版本；只有破坏性的信封变更才会改变它的主版本号，新增内容不改变它。`reference` 必须报告 `spec_version`（工具所遵循的本规范的版本，`2.0.0`）和 `schema_version`；`--version`、`context` 和 `reference` 报告工具自己的版本。没有语义化版本的构建（`dev`，不带 `-ldflags` 的构建就是这样）按其 CHANGELOG 中最新发布之后的下一个补丁版本、加预发布标记 `dev` 运行（`1.2.18-dev`）；`update`（包括 `--check`）以 `E_UNSUPPORTED` 拒绝它，`doctor` 的 `version` 检查会警告它的版本无法比较。已弃用的命令、标志和字段遵循 CLI-081。Skill 声明 `metadata.min_version`（SKL-001）；已安装的 Skill 需要更新版本的工具时，`doctor` 的 `version` 检查失败；Skill 缺失或比工具旧时，该检查给出警告（CLI-036）。
 
 原因：为更新版本的工具编写的 Skill 会悄无声息地调用不存在的命令；版本检查把这种情况变成一个明确的 `doctor` 失败。
 
@@ -1106,7 +1123,7 @@ aicli 只在两处访问发布源：`update`（包括 `--check`），以及设�
 
 设置（主机、区域、默认项目）必须按以下来源解析，先有值的来源生效：当前所运行命令上的标志、环境变量、设置文件中当前生效的配置档（CLI-101）、默认值。设置 `<name>` 对应的环境变量默认是 `<PREFIX>_<NAME>`，其中 `<PREFIX>` 是工具名的大写蛇形写法（`tool` 的 `host` 设置对应 `TOOL_HOST`）。
 
-设置文件是 `<PREFIX>_SETTINGS_FILE` 指定的文件，没有设置该变量时为 `<state_dir>/settings.json`；aicli 不从其他任何文件读取设置。它的解析与授权范围文件一样严格（SEC-011）：不带 BOM 的 UTF-8、只有一个 JSON 值、没有重复键、不超过 64 KiB，结构如下：
+设置文件是 `<PREFIX>_SETTINGS_FILE` 指定的文件（绝对路径），没有设置该变量时为 `<state_dir>/settings.json`；aicli 不从其他任何文件读取设置。它的解析与授权范围文件一样严格（SEC-011）：必须是普通文件，不能是链接；在 POSIX 上归当前用户所有，且其他人不可写；不带 BOM 的 UTF-8、只有一个 JSON 值、没有重复键、每个键的拼写完全一致、不超过 64 KiB，结构如下：
 
 ```json
 {"default_profile": "work",
@@ -1118,7 +1135,7 @@ aicli 只在两处访问发布源：`update`（包括 `--check`），以及设�
 
 设置文件不存机密：机密放在操作系统钥匙串中，或来自环境变量（SEC-040）。设置文件由人来写，或者由一个经过写入门控的 `configure` 命令来写（CLI-025、CLI-101）；除此之外什么都不写它。
 
-使用 aicli 时，工具声明 `App.Settings`，每项为一个 `Setting{Name, Env, Flag, Default, Secret, Description}`。`Name` 用 snake_case；`Env` 默认为大写的 `Name`，按 `<PREFIX>_<Env>` 读取；`Flag` 指定一个命令标志，在当前运行的命令上给出这个标志时，由它覆盖该设置；`Secret` 让这个值不进入设置文件，也不出现在诊断输出中（CLI-102）。`App.Setting(cmd, name)`（Python 为 `app.setting(name)`）返回值及其来源：`flag`、`env`、`profile` 或 `default`。`context` 报告配置档（CLI-035），`doctor` 的 `settings` 检查校验设置文件（CLI-036）。
+使用 aicli 时，工具声明 `App.Settings`，每项为一个 `Setting{Name, Env, Flag, Default, Secret, Description}`。`Name` 用 snake_case；`Env` 默认为大写的 `Name`，按 `<PREFIX>_<Env>` 读取；`Flag` 指定一个命令标志，在当前运行的命令上给出这个标志时，由它覆盖该设置；`Secret` 让这个值不进入设置文件，也不出现在诊断输出和错误中（CLI-102、SEC-021），并且让 `Flag` 在所有地方都成为机密标志，如同它列在 `Meta.Secrets` 中。`App.Setting(cmd, name)`（Python 为 `app.setting(name)`）返回值及其来源：`flag`、`env`、`profile` 或 `default`。`App.Profile()`（Python 为 `app.profile()`）返回当前配置档的名称和来源，`App.SettingsPath()`（Python 为 `app.settings_path()`）返回设置文件，这样工具就能按配置档区分钥匙串条目，并写入配置档的设置。`context` 报告配置档（CLI-035），`doctor` 的 `settings` 检查校验设置文件（CLI-036）。
 
 原因：只有每个工具都以同样的方式解析设置，Agent 和人才能预知某个命令会用哪个主机或账户；也只有由同一个解析器产生值，`context` 才能说明它从哪里来。2026-10 的工具群审计发现，有的写入路径里会从环境变量或配置文件读取账户、区域和时区（SEC-020）；把设置声明出来，这些读取就一目了然。设置文件拒收机密，是因为把它拷出本机，不该得到任何可用的东西（SEC-040）。它用了一个单独的名字，是因为工具群中的工具在同一个目录里保留着 1.x 的 `config.json`，而 aicli 不读取那个文件。
 
@@ -1126,11 +1143,11 @@ aicli 只在两处访问发布源：`update`（包括 `--check`），以及设�
 
 ### CLI-101 账户与配置档
 
-能以多个账户、或针对多个主机操作的工具，必须在设置文件中提供命名的配置档（CLI-100）。当前生效的配置档按以下顺序取第一个：`--profile <name>`，即工具声明了设置时 aicli 注册的根级标志；`<PREFIX>_PROFILE`；文件中的 `default_profile`；恰好只有一个配置档时的那一个；否则没有。`context.profile` 报告它及其来源：`flag`、`env`、`config`、`single` 或 `none`（CLI-035）。未知的名称返回 `E_CONFIG`，`did_you_mean` 列出最接近的配置档名称，并且什么都不运行。`--profile` 和其他标志一样绑定进确认令牌（CLI-054），所以在一个配置档下做的预览，不能在另一个配置档下确认；任何命令都不定义自己的 `--profile`（CLI-021）。
+能以多个账户、或针对多个主机操作的工具，必须在设置文件中提供命名的配置档（CLI-100）。当前生效的配置档按以下顺序取第一个：`--profile <name>`，即工具声明了设置时 aicli 注册的根级标志；`<PREFIX>_PROFILE`；文件中的 `default_profile`；恰好只有一个配置档时的那一个；否则没有。`context.profile` 报告它及其来源：`flag`、`env`、`config`、`single` 或 `none`（CLI-035）。`--profile ""` 视同没有给出。未知的名称在任何工具命令运行之前就返回 `E_CONFIG`，名称放在 `details.profile` 中（绝不放进 `message`，CLI-017），`did_you_mean` 列出最接近的配置档名称；内置命令（`context`、`doctor`、`reference`、`changelog`、`operation`、`update`、`help`、`version`）照常运行，`context` 会报告这个问题。当前配置档的名称（无论由什么选定）和每个已声明设置解析后的值都绑定进确认令牌（CLI-054），所以在一个配置档下、或以某个设置值做的预览，不能在另一个配置档或另一个设置值下确认（`token_mismatch`，`parameter` 为 `profile` 或 `setting.<name>`）；任何命令都不定义自己的 `--profile`（CLI-021）。
 
 有登录类命令的工具，必须这样命名它们：
 
-- `auth login` 保存凭证：机密放进操作系统钥匙串，配置档的其他设置放进设置文件（SEC-040）。它声明 `configure`（CLI-025）。需要人来操作时（浏览器登录、一次性验证码），它返回带 `action: sign_in` 的 `E_HUMAN_REQUIRED`（CLI-065）。
+- `auth login` 保存凭证：机密放进操作系统钥匙串，配置档的其他设置放进设置文件（SEC-040）。它声明 `configure`（CLI-025）和 `Meta.NewProfile`，所以能在文件中还没有的配置档下运行；它用 `App.SetProfileSettings`（Python 为 `app.set_profile_settings`）写入设置，这个函数像读取时一样校验设置，以原子方式写入，出错时什么都不写，所以 `Apply` 把这个错误作为 `NotDispatched` 返回。对这样的命令，`App.Profile()` 返回所要求的配置档及其来源。需要人来操作时（浏览器登录、一次性验证码），它返回带 `action: sign_in` 的 `E_HUMAN_REQUIRED`（CLI-065）。
 - `auth status` 是读命令：它向上游核验凭证，报告账户、主机和凭证的过期时间，绝不包含机密。
 - `auth logout` 从钥匙串中删除凭证。它声明 `configure`。
 
@@ -1140,7 +1157,7 @@ aicli 只在两处访问发布源：`update`（包括 `--check`），以及设�
 
 ### CLI-102 诊断
 
-只有把 `<PREFIX>_DEBUG` 设为非空且不为 `0` 的值，诊断输出才会打开。它以 `debug:` 开头的行写到 stderr，绝不写到 stdout，也绝不改变信封或退出码。机密参数（`Meta.Secrets`，SEC-021）和机密设置（CLI-100）的值显示为 `***`。工具不得添加 `--verbose` 或 `--debug` 标志。aicli 通过 `App.Debugf(format, args...)`（Python 为 `app.debug(message)`）写出这些行；它自己只记录状态目录、授权范围文件路径、设置文件和当前生效的配置档，以及 `update` 每个阶段的开始。除非用户要求，Skill 绝不设置 `<PREFIX>_DEBUG`（SKL-009）。
+只有把 `<PREFIX>_DEBUG` 设为非空且不为 `0` 的值，诊断输出才会打开。它以 `debug:` 开头的行写到 stderr，绝不写到 stdout，也绝不改变信封或退出码。机密参数（`Meta.Secrets`，SEC-021）、机密设置（CLI-100），以及工具用 `App.AddSecret(value)`（Python 为 `app.add_secret(value)`，用于从钥匙串读出的令牌）登记的机密，其值及其 URL 转义形式都显示为 `***`；消息中的换行会被转义，所以每一行都以 `debug:` 开头。工具不得添加 `--verbose` 或 `--debug` 标志。aicli 通过 `App.Debugf(format, args...)`（Python 为 `app.debug(message)`）写出这些行；它自己只记录状态目录、授权范围文件路径、设置文件和当前生效的配置档，以及 `update` 每个阶段的开始和它跳过的发布标签。除非用户要求，Skill 绝不设置 `<PREFIX>_DEBUG`（SKL-009）。
 
 原因：人在排查故障时需要信封以外的信息，但 stderr 上的每一行在每次调用时都要消耗 Agent 的 token（CLI-047）。由人来设置的环境变量，默认把诊断输出挡在 Agent 会话之外；换成标志，它就会出现在 Skill 和对话记录里。脱敏让调试日志可以放心地贴进 issue。
 
@@ -1152,7 +1169,7 @@ aicli 只在两处访问发布源：`update`（包括 `--check`），以及设�
 
 每个上游请求都必须有超时：默认最长 30 s，并且绝不超过 CLI-049 对命令运行时间的限制所允许的长度。工具可以在连接失败或 HTTP 429、502、503、504 之后重试幂等的读取，最多两次，并遵守 `Retry-After`，但最多等 10 s；上游要求等得更久时，工具直接返回该错误，`E_RATE_LIMITED` 带上 `retry_after_ms`（CLI-016）。它不得重发可能已经派发出去的写入（CLI-015、CLI-060）。
 
-工具必须遵守 `HTTPS_PROXY`、`HTTP_PROXY` 和 `NO_PROXY`。TLS 证书始终校验：私有 CA 来自 `<PREFIX>_CA_FILE`，这是一个加入系统根证书的 PEM 文件；没有任何标志、变量或设置能关掉校验。请求带上 `User-Agent: <tool>/<version> aicli/<spec version>`。`doctor` 的 `connectivity` 检查因证书而失败时，其消息要说明这一点，其 `fix` 要点出 `<PREFIX>_CA_FILE`（CLI-036）。aicli 自己的请求（`update`、`doctor` 的刷新）也遵守本规则。
+工具必须遵守 `HTTPS_PROXY`、`HTTP_PROXY` 和 `NO_PROXY`。TLS 证书始终校验：私有 CA 来自 `<PREFIX>_CA_FILE`，这是一个加入系统根证书的 PEM 文件；没有任何标志、变量或设置能关掉校验。请求带上 `User-Agent: <tool>/<version> aicli/<spec version>`。`doctor` 的 `connectivity` 检查因证书而失败时，其消息要说明这一点，其 `fix` 要点出 `<PREFIX>_CA_FILE`（CLI-036）。aicli 自己的请求（`update`、`doctor` 的刷新）也遵守本规则；工具可以从 `App.HTTPTransport()` 得到同样的代理、CA 文件和 TLS 设置，从 `App.UserAgent()` 得到请求头（Python 为 `app.ssl_context()`、`app.user_agent()`）。
 
 原因：运行框架会在 2 分钟后杀掉调用，被杀掉的调用什么也报告不了（CLI-049），所以一个没有超时的请求可能让整个回答落空。重发写入，正是同一个改动被执行两次的原因：gitlab-cli 1.x 的 HTTP 客户端对所有方法的 5xx 和网络错误都会重试，所以一个超时的 POST 可能被执行两次。Agent 运行在带代理和私有 CA 的企业网络中；一个 CA 文件就能让这样的网络正常工作，而不必关掉防止拦截的那道检查。
 

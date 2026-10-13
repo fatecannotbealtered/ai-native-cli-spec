@@ -8,5 +8,6 @@
   "python": "python",
   "claude_bin": "claude",
   "git_bash": "",
-  "expected_cwd": ""
+  "expected_cwd": "",
+  "aicli_dir": ""
 }

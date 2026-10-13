@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from ._tree import Node
     from .app import App
     from .envelope import RunState
+    from .registry import Meta
 
 
 def stream_line(kind: str, data: Any, meta: Ordered) -> bytes:
@@ -85,7 +86,7 @@ class Stream:
         self.items += 1
         out = a._stdout()
         if st.format == "text":
-            self._write(out, write_text(gen).encode("utf-8"))
+            self._write(out, write_text(gen).encode("utf-8", "replace"))
             return
         if st.format == "raw" and isinstance(data, (bytes, bytearray, str)):
             self._write(out, bytes(data) if not isinstance(data, str) else data.encode("utf-8"))
@@ -222,7 +223,7 @@ class StreamMixin:
                 data, untrusted = res.data, list(res.untrusted)
             if err is None:
                 if st.format == "text":
-                    self._write(stdout, write_text(data).encode("utf-8"))
+                    self._write(stdout, write_text(data).encode("utf-8", "replace"))
                     self._text_notices(st, stderr)
                     return 0
                 try:
@@ -238,7 +239,7 @@ class StreamMixin:
         meta = self._meta(st, clean_paths(err_untrusted))
         obj = fit_error_budget(obj, meta, self.tool_name())
         if st.format == "text":
-            self._write(stderr, write_text_error(obj).encode("utf-8"))
+            self._write(stderr, write_text_error(obj).encode("utf-8", "replace"))
             self._text_notices(st, stderr)
             return code
         try:
@@ -324,8 +325,13 @@ class StreamMixin:
                 )
             )
 
+        # the file's state the last preview saw: at confirm, the re-check that runs
+        # just before apply
+        planned = [""]
+
         def preview() -> Preview:
             exists, version = state()
+            planned[0] = version
             blocks = []
             if version == "directory":
                 blocks.append(Block("is_directory", "The output path is a directory; name a file."))
@@ -365,18 +371,33 @@ class StreamMixin:
                 outputs=[path],
             )
 
+        def overwrite_refused() -> BaseException | None:
+            """The file exists now: refuse unless the scope's roots cover it (SEC-012).
+            A file that appeared under an outputs-only grant is never overwritten."""
+            e = self._overwrite_refusal(m, path)
+            return not_dispatched(e) if e is not None else None
+
         def apply(op: Op) -> Result:
             try:
                 content = produce()
             except BaseException as exc:  # noqa: BLE001 - nothing was written
                 raise not_dispatched(exc) from None
             data = content.encode("utf-8") if isinstance(content, str) else bytes(content)
-            exists, _ = state()
-            if exists and not overwrites:
+            # Checked again at write time (C1): a file that appeared since the
+            # confirm's checks is an overwrite, which the scope's roots must allow.
+            exists, version = state()
+            if exists:
+                refused = overwrite_refused()
+                if refused is not None:
+                    raise refused
+            if version != planned[0] or (exists and not overwrites):
                 raise appeared()
             try:
                 write_output_file(path, data, exists)
             except FileExistsError:
+                refused = overwrite_refused()
+                if refused is not None:
+                    raise refused from None
                 raise appeared() from None
             except OSError as exc:
                 raise not_dispatched(
@@ -410,3 +431,32 @@ class StreamMixin:
                 timeout=spec.timeout,
             ),
         )
+
+    def _overwrite_refusal(self: App, m: Meta, path: str) -> Error | None:
+        """write_output's check at write time (C1): an existing file may be
+        overwritten only under the scope's roots, after links are resolved. None
+        when it may; otherwise E_FORBIDDEN with details.scope, nothing written."""
+        from .scope import ScopeNeed, output_state, resolved_within
+
+        try:
+            sc = self.load_scope(self.ensure_state_dir())
+        except Error as e:
+            return e
+        roots = sc.file.roots if sc.status == "granted" and sc.file is not None else []
+        try:
+            target, _ = output_state(path)
+            if resolved_within(target, roots):
+                return None
+        except (OSError, ValueError):
+            pass
+        need = ScopeNeed(effects=m.effect_strings(), dangerous=m.is_dangerous(), outputs=[path])
+        status = "insufficient" if sc.status == "granted" else sc.status
+        e = self.scope_refusal(sc, status, need, {"roots": (path,)})
+        e.message = (
+            "The output file already exists and the scope does not allow overwriting it; nothing "
+            "was written."
+        )
+        e.details["next_action"] = (
+            "Ask the user to add the directory to the scope's roots, or choose a new file name."
+        )
+        return e

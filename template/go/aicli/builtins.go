@@ -33,9 +33,14 @@ func (a *App) InstallBuiltins() {
 	tool := a.toolName()
 	a.Schema("aicli_reference", SchemaDef{Shape: "object", Fields: []string{"tool", "version", "spec_version", "schema_version",
 		"risk_tier", "global_flags", "commands", "schemas", "error_codes", "exit_codes", "groups", "command"}})
-	a.Schema("aicli_context", SchemaDef{Shape: "object", Fields: append([]string{}, contextRequiredKeys...)})
+	contextFields := append([]string{}, contextRequiredKeys...)
+	if a.Settings != nil {
+		contextFields = append(contextFields, "profile")
+	}
+	a.Schema("aicli_context", SchemaDef{Shape: "object", Fields: contextFields})
 	a.Schema("aicli_doctor", SchemaDef{Shape: "object", Fields: []string{"checks"}})
-	a.Schema("aicli_changelog", SchemaDef{Shape: "object", Fields: []string{"current_version", "since", "count", "entries"}})
+	a.Schema("aicli_changelog", SchemaDef{Shape: "object", Fields: []string{"current_version", "since", "count", "entries",
+		"truncated", "truncated_reason", "omitted"}}) // a changelog cut to the budget (P3)
 	a.Schema("aicli_operation", SchemaDef{Shape: "object", Fields: append(append([]string{}, operationRecordKeys...), operationOptionalKeys...),
 		Untrusted: []string{"preview.changes", "preview.target.label", "receipt.observed", "resolution.evidence"}})
 	a.Schema("aicli_operations", SchemaDef{Shape: "page", Fields: append(append([]string{}, operationRowKeys...), "item_count")})
@@ -97,15 +102,15 @@ func (a *App) InstallBuiltins() {
 			ErrorCodes: []string{"E_NOT_FOUND", "E_IO"}, Examples: []string{tool + " operation show --id <operation_id>"}})
 
 		list := &cobra.Command{Use: "list", Short: "List dispatched operations, newest first (a batch is one row)", RunE: a.runOperationList}
-		list.Flags().String("status", "", "Only operations with this status (all: every record, planned and expired too)")
+		list.Flags().String("state", "", "Only operations in this state (all: every record, planned and expired too)")
 		list.Flags().Int("limit", 10, "Maximum operations to return (1-200)")
 		list.Flags().Int("offset", 0, "Skip this many operations (from next_offset)")
 		list.Flags().Bool("items", false, "Also list the items of batches")
 		list.Flags().String("batch", "", "Only the items of this batch (opb_...), in input order")
 		add(list, op, Meta{Summary: list.Short, Effects: []Effect{Observe}, Output: "aicli_operations",
 			ErrorCodes: []string{"E_NOT_FOUND", "E_IO"},
-			Params:     map[string]ParamDoc{"status": {Enum: append(append([]string{}, operationStatusValues...), "all")}},
-			Examples:   []string{tool + " operation list --status unknown"}})
+			Params:     map[string]ParamDoc{"state": {Enum: append(append([]string{}, operationStatusValues...), "all")}},
+			Examples:   []string{tool + " operation list --state unknown"}})
 
 		res := &cobra.Command{Use: "resolve [id]", Short: "Record what happened to an operation whose outcome is unknown",
 			RunE: a.runOperationResolve}
@@ -156,6 +161,24 @@ func (a *App) runContext(cmd *cobra.Command, _ []string) error {
 	return a.OK(cmd, a.contextData(cmd.Context()))
 }
 
+// contextFields is every top-level key context returns, which --fields accepts
+// (P13): the required keys, profile when settings are declared, and the keys of
+// App.ContextExtra.
+func (a *App) contextFields() []string {
+	fields := append([]string{}, contextRequiredKeys...)
+	if a.Settings != nil {
+		fields = append(fields, "profile")
+	}
+	if a.ContextExtra != nil {
+		for _, k := range sortedKeys(a.ContextExtra(a.ctx())) {
+			if !contains(fields, k) {
+				fields = append(fields, k)
+			}
+		}
+	}
+	return fields
+}
+
 // contextData is the context built-in's data (CLI-035): local reads only.
 func (a *App) contextData(ctx context.Context) map[string]any {
 	if ctx == nil {
@@ -200,7 +223,7 @@ func (a *App) contextData(ctx context.Context) map[string]any {
 		state["reason"] = problem
 	}
 	data := map[string]any{
-		"tool": a.toolName(), "version": a.Version, "spec_version": SpecVersion, "account": account, "host": host,
+		"tool": a.toolName(), "version": a.version(), "spec_version": SpecVersion, "account": account, "host": host,
 		"credentials": creds, "state": state, "authorization": auth,
 	}
 	if a.Settings != nil {
@@ -216,30 +239,28 @@ func (a *App) contextData(ctx context.Context) map[string]any {
 	return data
 }
 
-// budgetSpent reports whether a granted scope has used up limits.max_operations
-// (read-only: it never creates the journal).
+// budgetSpent reports whether a granted scope has used up limits.max_operations,
+// by the durable count in scope-usage.json (read-only).
 func (a *App) budgetSpent(sc scopeState, stateDir string) bool {
-	if sc.status != "granted" || sc.file == nil || sc.file.Limits == nil || sc.file.Limits.MaxOperations == nil {
+	if sc.status != "granted" || sc.limit() == 0 {
 		return false
 	}
-	j, e := a.openJournal(stateDir, false)
-	if e != nil {
-		return false
-	}
-	used, e := j.countDispatched(sc.file.ScopeID)
-	return e == nil && used >= *sc.file.Limits.MaxOperations
+	usage, e := readScopeUsage(stateDir)
+	return e == nil && usage.Scopes[sc.file.ScopeID] >= sc.limit()
 }
 
-// redactHost drops user info, query and fragment from a host URL.
+// redactHost drops user info, query and fragment from a host URL, with or without
+// a scheme (D11): "user:token@host" shows as "host".
 func redactHost(h string) string {
 	h = strings.TrimSpace(h)
+	prefix, rest := "", h
 	if i := strings.Index(h, "://"); i >= 0 {
-		rest := h[i+3:]
-		if at := strings.LastIndex(strings.SplitN(rest, "/", 2)[0], "@"); at >= 0 {
-			rest = rest[at+1:]
-		}
-		h = h[:i+3] + rest
+		prefix, rest = h[:i+3], h[i+3:]
 	}
+	if at := strings.LastIndex(strings.SplitN(rest, "/", 2)[0], "@"); at >= 0 {
+		rest = rest[at+1:]
+	}
+	h = prefix + rest
 	if i := strings.IndexAny(h, "?#"); i >= 0 {
 		h = h[:i]
 	}
@@ -398,7 +419,10 @@ func (a *App) versionCheck() Check {
 	if dirs == nil {
 		dirs = defaultSkillDirs()
 	}
-	cur, curErr := ParseVersion(a.Version)
+	cur, curErr := ParseVersion(a.version())
+	// A development build (P14) reports its derived version but is not compared:
+	// update, the usual fix, refuses such a build.
+	curOK := curErr == nil && !a.devBuild()
 	worst := Check{}
 	rank := map[string]int{"pass": 0, "warn": 1, "fail": 2}
 	for _, d := range dirs {
@@ -408,7 +432,7 @@ func (a *App) versionCheck() Check {
 			continue
 		}
 		v, mv := skillVersions(string(b))
-		c := a.skillCheck(tool, cur, curErr == nil, path, v, mv)
+		c := a.skillCheck(tool, cur, curOK, path, v, mv)
 		if worst.Check == "" || rank[c.Status] > rank[worst.Status] {
 			worst = c
 		}
@@ -416,21 +440,22 @@ func (a *App) versionCheck() Check {
 	if worst.Check != "" {
 		return worst
 	}
-	if a.MinSkillVersion != "" && curErr == nil {
+	if a.MinSkillVersion != "" && curOK {
 		if need, err := ParseVersion(a.MinSkillVersion); err == nil && CompareVersions(cur, need) < 0 {
 			return Check{"version", "fail",
-				fmt.Sprintf("The Skill needs %s %s or newer; %s is installed.", tool, a.MinSkillVersion, a.Version),
+				fmt.Sprintf("The Skill needs %s %s or newer; %s is installed.", tool, a.MinSkillVersion, a.version()),
 				fmt.Sprintf("Run `%s update`.", tool)}
 		}
 	}
+	// update syncs installed Skills only, so it is not the fix for a missing one (F10).
 	return Check{"version", "warn", fmt.Sprintf("The %s Skill is not installed, so agents work without it.", tool),
-		fmt.Sprintf("Install the Skill shipped with %s (`%s update` syncs it from the installed package).", tool, tool)}
+		"Install the Skill with the install command in the tool's README; update does not install a missing Skill."}
 }
 
 func (a *App) skillCheck(tool string, cur Version, curOK bool, path, v, mv string) Check {
 	sync := fmt.Sprintf("Run `%s update` to sync the Skill from the installed package.", tool)
 	if !curOK {
-		return Check{"version", "warn", fmt.Sprintf("%s %s is a development build; the Skill at %s cannot be compared.", tool, a.Version, path), ""}
+		return Check{"version", "warn", fmt.Sprintf("%s %s is a development build; the Skill at %s cannot be compared.", tool, a.version(), path), ""}
 	}
 	var minV, skillV *Version
 	if mv != "" {
@@ -449,16 +474,16 @@ func (a *App) skillCheck(tool string, cur Version, curOK bool, path, v, mv strin
 	}
 	switch {
 	case minV != nil && CompareVersions(cur, *minV) < 0:
-		return Check{"version", "fail", fmt.Sprintf("The Skill at %s needs %s %s or newer; %s is installed.", path, tool, mv, a.Version),
+		return Check{"version", "fail", fmt.Sprintf("The Skill at %s needs %s %s or newer; %s is installed.", path, tool, mv, a.version()),
 			fmt.Sprintf("Run `%s update`.", tool)}
 	case skillV == nil || CompareVersions(*skillV, cur) < 0:
-		return Check{"version", "warn", fmt.Sprintf("The Skill at %s is older than %s %s.", path, tool, a.Version), sync}
+		return Check{"version", "warn", fmt.Sprintf("The Skill at %s is older than %s %s.", path, tool, a.version()), sync}
 	}
 	minText := mv
 	if minText == "" {
 		minText = "unset"
 	}
-	return Check{"version", "pass", fmt.Sprintf("%s %s matches the Skill at %s (min_version %s).", tool, a.Version, path, minText), ""}
+	return Check{"version", "pass", fmt.Sprintf("%s %s matches the Skill at %s (min_version %s).", tool, a.version(), path, minText), ""}
 }
 
 // readSmallFile reads a regular file of at most limit bytes.
@@ -512,11 +537,44 @@ func (a *App) runChangelog(cmd *cobra.Command, _ []string) error {
 		}
 		entries = append(entries, map[string]any{"version": e.version, "date": date, "changes": changes})
 	}
-	data := map[string]any{"current_version": a.Version, "entries": entries, "count": len(entries)}
+	data := map[string]any{"current_version": a.version(), "entries": entries, "count": len(entries)}
 	if sinceV != nil {
 		data["since"] = since
+	} else {
+		data = fitChangelog(data, entries)
 	}
 	return a.OK(cmd, data)
+}
+
+// changelogTruncated is the truncated_reason of a changelog cut to the budget (P3).
+const changelogTruncated = "Only the newest entries fit the size budget; run changelog --since <version> for the changes after a version."
+
+// fitChangelog keeps changelog data without --since within the success budget
+// (CLI-042, P3): the newest entries that fit (at least one), with truncated,
+// truncated_reason and omitted (the number left out) when some are left out. The
+// envelope is measured compact with empty meta, keeping 500 characters for meta.
+func fitChangelog(data map[string]any, entries []map[string]any) map[string]any {
+	cut := func(n int) map[string]any {
+		out := cloneMap(data)
+		out["entries"], out["count"] = entries[:n], n
+		if n < len(entries) {
+			out["truncated"], out["truncated_reason"], out["omitted"] = true, changelogTruncated, len(entries)-n
+		}
+		return out
+	}
+	fits := func(n int) bool { return successSize(cut(n), metaObject{}) <= successBudgetChars-500 }
+	if len(entries) <= 1 || fits(len(entries)) {
+		return data
+	}
+	keep, over := 1, len(entries)
+	for keep+1 < over {
+		if mid := (keep + over) / 2; fits(mid) {
+			keep = mid
+		} else {
+			over = mid
+		}
+	}
+	return cut(keep)
 }
 
 type changelogEntry struct {
@@ -864,11 +922,11 @@ var operationRowKeys = []string{"operation_id", "command", "status", "target", "
 
 // runOperationList lists recorded operations, newest first (CLI-061). By default it
 // shows what an agent looks for after a write: dispatched operations, a batch as one
-// row with its item count. --status <status> (or all) also shows planned and expired
+// row with its item count. --state <status> (or all) also shows planned and expired
 // records and the items of batches; --items lists batch items without a filter;
 // --batch lists the items of one batch (listBatchItems).
 func (a *App) runOperationList(cmd *cobra.Command, _ []string) error {
-	status, _ := cmd.Flags().GetString("status")
+	status, _ := cmd.Flags().GetString("state")
 	limit, _ := cmd.Flags().GetInt("limit")
 	offset, _ := cmd.Flags().GetInt("offset")
 	withItems, _ := cmd.Flags().GetBool("items")
@@ -951,10 +1009,10 @@ func (a *App) runOperationList(cmd *cobra.Command, _ []string) error {
 		views = append(views, r.view)
 	}
 	scope := map[string]any{"journal": filepath.Join(dir, "operations"),
-		"status":      "dispatched operations (planned and expired are left out; --status all shows them)",
+		"state":       "dispatched operations (planned and expired are left out; --state all shows them)",
 		"batch_items": "counted in their batch's row (--items lists them)"}
 	if status != "" {
-		scope["status"] = status
+		scope["state"] = status
 	}
 	if withItems {
 		scope["batch_items"] = "listed"
@@ -1007,7 +1065,7 @@ func (a *App) operationPage(cmd *cobra.Command, rows []map[string]any, offset, l
 // listBatchItems is operation list --batch (operation.shortening): one row per item of
 // the batch record, in input order, with the keys of a list row. An item whose record
 // is missing or cannot be read is a row with status unknown and a null target, as in
-// operation show's items; its other keys are the batch's. --status filters the rows;
+// operation show's items; its other keys are the batch's. --state filters the rows;
 // without it (or with all) every item is listed, planned and expired too. A batch
 // record that could not be read, or the record operation resolve put in its place,
 // names no items: that is E_IO, not an empty list.
@@ -1050,9 +1108,9 @@ func (a *App) listBatchItems(cmd *cobra.Command, raw, status string, limit, offs
 		}
 		rows = append(rows, row)
 	}
-	scope := map[string]any{"journal": filepath.Join(dir, "operations"), "batch": id, "status": "every item of the batch"}
+	scope := map[string]any{"journal": filepath.Join(dir, "operations"), "batch": id, "state": "every item of the batch"}
 	if status != "" {
-		scope["status"] = status
+		scope["state"] = status
 	}
 	return a.operationPage(cmd, rows, offset, limit, scope, "input_order")
 }
@@ -1081,7 +1139,7 @@ func (a *App) runOperationResolve(cmd *cobra.Command, _ []string) error {
 	}
 	id, r, exists, err := readOperation(j, ids)
 	if !exists {
-		return NotFound("No operation with that id is recorded by this tool.", fmt.Sprintf("Run `%s operation list --status unknown`.", a.toolName()))
+		return NotFound("No operation with that id is recorded by this tool.", fmt.Sprintf("Run `%s operation list --state unknown`.", a.toolName()))
 	}
 	corrupt := errors.Is(err, errCorruptRecord)
 	mod := j.modTime(id)
@@ -1092,7 +1150,7 @@ func (a *App) runOperationResolve(cmd *cobra.Command, _ []string) error {
 	if !corrupt {
 		if r.Kind == "batch" {
 			e := Validation("--id", "op_...", "A batch is resolved through its items; resolve each item whose outcome is unknown.")
-			e.Details["next_action"] = fmt.Sprintf("Run `%s operation list --batch %s --status unknown` to see the items to resolve.", a.toolName(), id)
+			e.Details["next_action"] = fmt.Sprintf("Run `%s operation list --batch %s --state unknown` to see the items to resolve.", a.toolName(), id)
 			return e
 		}
 		st := effectiveStatus(r, now)
@@ -1117,7 +1175,7 @@ func (a *App) runOperationResolve(cmd *cobra.Command, _ []string) error {
 			need.targets = []string{r.Target.Key}
 		}
 	}
-	if e := a.checkScope(a.loadScope(state), need, nil); e != nil {
+	if e := a.checkScope(a.loadScope(state), need, ""); e != nil {
 		return e
 	}
 	unlock, e := j.lock(id)

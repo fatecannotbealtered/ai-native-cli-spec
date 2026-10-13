@@ -180,8 +180,9 @@ jobs:
 
   # The reference tools for VER-006 (tools/agent-eval) and VER-007
   # (tools/gate-audit) are not vendored, but they are how each release's
-  # evidence is produced: every Python file must compile, and the agent-eval
-  # recorder (Go) must vet and pass its tests.
+  # evidence is produced: every Python file must compile, the agent-eval
+  # harness must pass its tests (scope files, ready checks, envelope
+  # validation, fault proxy), and the recorder (Go) must vet and pass its tests.
   tools:
     name: Reference tools (tools/)
     runs-on: ubuntu-latest
@@ -194,6 +195,12 @@ jobs:
 
       - name: Compile every Python file
         run: find tools -name '*.py' -print0 | xargs -0 python -m py_compile
+
+      # The harness is standard library only; pytest is the one test dependency.
+      - name: Test the agent-eval harness
+        run: |
+          python -m pip install pytest
+          python -m pytest -q tools/agent-eval/tests
 
       - uses: actions/setup-go@v7
         with:

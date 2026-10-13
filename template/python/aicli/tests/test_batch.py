@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 from typing import Any
 
@@ -150,8 +151,9 @@ def test_large_batch_error_stays_within_budget(h: THarness) -> None:
 
 
 def test_batch_items_get_their_own_idempotency_keys(h: THarness) -> None:
-    """Decision 31: each item sends `<user key>/<item operation id>` upstream; the
-    user's key stays bound into the batch token."""
+    """CLI-062 (decision 46, A5): each item sends `<user key>/<first 16 hex of
+    sha256(target key)>` upstream, the same for every dry-run and distinct per
+    target; the user's key stays bound into the batch token."""
     sent: list[tuple[str, str]] = []
 
     def build(u: Upstream) -> aicli.App:
@@ -205,7 +207,11 @@ def test_batch_items_get_their_own_idempotency_keys(h: THarness) -> None:
     r = h.run(*args, "--confirm", tok)
     assert r.exit == 0, r
     item_ids = [it["operation_id"] for it in r.data()["items"]]
-    assert sent == [(i, "user-key/" + i) for i in item_ids], sent
+
+    def key(target: str) -> str:
+        return "user-key/" + hashlib.sha256(target.encode("utf-8")).hexdigest()[:16]
+
+    assert sent == [(item_ids[0], key("notes/1")), (item_ids[1], key("notes/2"))], sent
     # without a user key the items send none
     sent.clear()
     plain = ["note", "bulk-tag", "--ids", "3", "--tag", "k"]
@@ -301,7 +307,7 @@ def test_large_batch_operation_show_lists_attention_first(h: THarness) -> None:
         got, scope = page.data()["items"], page.data()["scope"]
         assert page.exit == 0 and got and len(page.stdout.strip()) <= SUCCESS_BUDGET_CHARS, offset
         assert page.data()["sort"] == "input_order" and scope["journal"], page.data()
-        assert scope["batch"] == batch and scope["status"] == "every item of the batch", scope
+        assert scope["batch"] == batch and scope["state"] == "every item of the batch", scope
         assert page.data()["total"] == 300, page.data()["total"]
         rows += got
         if not page.data()["has_more"]:
@@ -314,21 +320,21 @@ def test_large_batch_operation_show_lists_attention_first(h: THarness) -> None:
     assert all(row["batch_id"] == batch and row["command"] == "note bulk-tag" for row in rows)
     assert len({row["operation_id"] for row in rows}) == 300
     assert rows[20]["operation_id"] == lost and rows[20]["status"] == "unknown", rows[20]
-    # --status filters the rows, and total counts the filtered list.
-    unknown = h.run("operation", "list", "--batch", batch, "--status", "unknown")
+    # --state filters the rows, and total counts the filtered list.
+    unknown = h.run("operation", "list", "--batch", batch, "--state", "unknown")
     assert [row["operation_id"] for row in unknown.data()["items"]] == [
         rows[7]["operation_id"],
         lost,
         rows[299]["operation_id"],
     ], unknown
-    assert unknown.data()["total"] == 3 and unknown.data()["scope"]["status"] == "unknown", unknown
+    assert unknown.data()["total"] == 3 and unknown.data()["scope"]["state"] == "unknown", unknown
     # A batch is resolved through its items: resolve points at the unknown ones.
     res = h.run(
         "operation", "resolve", "--id", batch, "--outcome", "applied", "--evidence", "checked"
     )
     assert res.code() == "E_VALIDATION", res
     assert res.details()["next_action"] == (
-        f"Run `notes operation list --batch {batch} --status unknown` to see the items to resolve."
+        f"Run `notes operation list --batch {batch} --state unknown` to see the items to resolve."
     ), res
 
 
@@ -353,7 +359,7 @@ def test_operation_list_batch_refusals_and_unreadable_items(h: THarness) -> None
     """operation list --batch takes a batch id only: an item id, a confirm token or a
     malformed id is E_USAGE, an unknown batch E_NOT_FOUND and an unreadable batch
     record E_IO. An item record that cannot be read is a row with status unknown and
-    a null target; without --status a planned batch lists its planned items."""
+    a null target; without --state a planned batch lists its planned items."""
     dry = h.run("note", "bulk-tag", "--ids", "1,2,3", "--tag", "x", "--dry-run")
     batch = dry.data()["operation_id"]
     item = dry.data()["preview"]["items"][1]["operation_id"]
@@ -379,7 +385,7 @@ def test_operation_list_batch_refusals_and_unreadable_items(h: THarness) -> None
     row = rows[1]
     assert row["operation_id"] == item and row["status"] == "unknown" and row["target"] is None, row
     assert row["batch_id"] == batch and row["command"] == "note bulk-tag", row
-    r = h.run("operation", "list", "--batch", batch, "--status", "planned")
+    r = h.run("operation", "list", "--batch", batch, "--state", "planned")
     assert len(r.data()["items"]) == 2 and r.data()["total"] == 2, r
     with open(os.path.join(h.state, "operations", batch + ".json"), "wb") as fh:
         fh.write(b"{not json")

@@ -233,11 +233,11 @@ class SelfUpdateMixin:
             raise usage(
                 "invalid_value", "latest", "The latest version is not a semantic version."
             ) from None
-        severity = notice_severity(severity, self.version, lv)
+        severity = notice_severity(severity, self._version(), lv)
         d = self.ensure_state_dir()
         c = {
             "checked_at": time_string(self._now()),
-            "current_version": self.version,
+            "current_version": self._version(),
             "latest_version": latest,
             "severity": severity,
             "command": self.tool_name() + " update",
@@ -279,7 +279,7 @@ class SelfUpdateMixin:
             return
         c = {k: v for k, v in c.items() if isinstance(v, str)}
         try:
-            cur = parse_version(self.version)
+            cur = parse_version(self._version())
             latest = parse_version(c.get("latest_version", ""))
         except ValueError:
             return
@@ -289,7 +289,7 @@ class SelfUpdateMixin:
         t = parse_time(c.get("notified_at", ""))
         if t is not None and now - t < _dt.timedelta(hours=24) and now > t:
             return
-        severity = notice_severity(c.get("severity", ""), self.version, latest)
+        severity = notice_severity(c.get("severity", ""), self._version(), latest)
         command = self.tool_name() + " update"
         self.notice(
             Notice(

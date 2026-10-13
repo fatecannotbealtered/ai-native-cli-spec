@@ -21,9 +21,11 @@ from typing import TYPE_CHECKING, Any
 
 from ._util import RawNumber, go_bool_string, truncate_runes
 from .errors import Error, internal_error, new_error
+from .keystore import is_link_or_reparse
 from .scope import _depth, _ScopeError, _strict_pairs
 
 if TYPE_CHECKING:
+    from ._tree import Node
     from .app import App
     from .builtins import Check
 
@@ -73,6 +75,7 @@ class ProfileState:
     name: str | None = None  # the active profile
     source: str = "none"  # flag, env, config, single or none
     unknown: str = ""  # a requested profile that the file does not define
+    unknown_source: str = ""  # where the unknown name came from: flag or env
 
 
 def _near(word: str, known: list[str]) -> str:
@@ -122,7 +125,11 @@ def parse_settings_file(
         return None, "it is nested too deeply"
     if not isinstance(obj, dict):
         return None, "it is not a JSON object"
-    for k in obj:
+    # Go's order: the trailing value first, then the keys in sorted order; keys are
+    # shown cut to 40 characters and profile names to 64.
+    if stripped[end:].strip(" \t\r\n"):
+        return None, "it holds more than one JSON value"
+    for k in sorted(obj):
         if k not in SETTINGS_FILE_KEYS:
             return None, f"unknown key `{truncate_runes(k, 40)}`" + _near(
                 k, list(SETTINGS_FILE_KEYS)
@@ -135,28 +142,30 @@ def parse_settings_file(
         profiles = {}
     if not isinstance(profiles, dict):
         return None, "profiles must be an object"
-    if stripped[end:].strip(" \t\r\n"):
-        return None, "it holds more than one JSON value"
     declared = {s.name: s for s in settings}
     out = SettingsFile(default_profile=dp)
     for name in sorted(profiles):
+        shown = truncate_runes(name, 64)
         if not PROFILE_NAME.fullmatch(name):
             return None, (
-                f"the profile name `{name}` is not allowed (use a-z, 0-9, _ and -, up to 64 "
+                f"the profile name `{shown}` is not allowed (use a-z, 0-9, _ and -, up to 64 "
                 "characters)"
             )
         values = profiles[name]
         if not isinstance(values, dict):
-            return None, f"profile `{name}` must be an object"
+            return None, f"profile `{shown}` must be an object"
         got: dict[str, str] = {}
         for key in sorted(values):
+            key_shown = truncate_runes(key, 40)
             s = declared.get(key)
             if s is None:
-                return None, f"profile `{name}` sets `{key}`, which is not a setting of {tool}"
+                return None, (
+                    f"profile `{shown}` sets `{key_shown}`, which is not a setting of {tool}"
+                )
             if s.secret:
                 return None, (
-                    f"`{key}` is a secret; secrets go in the OS keyring, not the settings file "
-                    "(SEC-040)"
+                    f"`{key_shown}` is a secret; secrets go in the OS keyring, not the settings "
+                    "file (SEC-040)"
                 )
             v = values[key]
             if isinstance(v, bool):
@@ -164,10 +173,12 @@ def parse_settings_file(
             elif isinstance(v, str):
                 got[key] = str.__str__(v)  # a number keeps its text
             else:
-                return None, f"`{key}` in profile `{name}` must be a string, number or true/false"
+                return None, (
+                    f"`{key_shown}` in profile `{shown}` must be a string, number or true/false"
+                )
         out.profiles[name] = got
     if dp is not None and dp not in out.profiles:
-        return None, f"default_profile `{dp}` is not one of its profiles"
+        return None, f"default_profile `{truncate_runes(dp, 64)}` is not one of its profiles"
     return out, ""
 
 
@@ -175,14 +186,12 @@ class SettingsMixin:
     """App methods for settings, the settings file and profiles."""
 
     def settings_path(self: App) -> str:
-        """The settings file: <PREFIX>_SETTINGS_FILE, else <state>/settings.json; ""
-        when no state directory can be resolved."""
+        """The settings file: <PREFIX>_SETTINGS_FILE (an absolute path; a relative
+        one makes the file invalid), else <state>/settings.json; "" when no state
+        directory can be resolved."""
         p = (self._env(self._prefix() + "_SETTINGS_FILE") or "").strip()
         if p:
-            try:
-                return os.path.abspath(p)
-            except (OSError, ValueError):
-                return p
+            return p
         try:
             d = self.state_dir_path()
         except Error:
@@ -191,15 +200,26 @@ class SettingsMixin:
 
     def _read_settings_file(self: App, path: str) -> tuple[bool, SettingsFile | None, str]:
         """Whether the settings file exists, the parsed file and the reason it is
-        invalid. A missing file is fine: there are no profiles."""
+        invalid. A missing file is fine: there are no profiles. The file is a
+        regular file, not a link, and on POSIX writable only by its owner, the
+        current user (CLI-100)."""
+        from .scope import _is_abs, file_owner_problem
+
+        if not _is_abs(path):
+            return True, None, f"{self._prefix()}_SETTINGS_FILE must be an absolute path"
         try:
-            st = os.stat(path)
+            st = os.lstat(path)
         except FileNotFoundError:
             return False, None, ""
         except OSError:
             return True, None, "it cannot be read"
+        if is_link_or_reparse(st):
+            return True, None, "it must be a regular file, not a link"
         if not stat.S_ISREG(st.st_mode):
             return True, None, "it is not a regular file"
+        problem = file_owner_problem(path, st)
+        if problem:
+            return True, None, problem
         if st.st_size > MAX_SETTINGS_BYTES:
             return True, None, "it is larger than 64 KiB"
         try:
@@ -240,7 +260,7 @@ class SettingsMixin:
                 if requested in ps.profiles:
                     ps.name, ps.source = requested, source
                 else:
-                    ps.unknown = requested
+                    ps.unknown, ps.unknown_source = requested, source
             elif len(ps.profiles) == 1:
                 ps.name, ps.source = next(iter(ps.profiles)), "single"
         if ps.path:
@@ -270,28 +290,162 @@ class SettingsMixin:
         )
 
     def _profile_unknown(self: App, ps: ProfileState) -> Error:
+        """E_CONFIG for a requested profile the settings file does not define (D5).
+        The requested name is external text: it goes only in details.profile, marked
+        untrusted, never in message or next_action (CLI-017). did_you_mean lists the
+        closest profile names, else the file's first names."""
         from .ux import closest_words
 
+        path = ps.path or "the settings file"
+        if ps.exists:
+            message = "The requested profile is not in the settings file."
+            nxt = f"Use one of the profiles in details.did_you_mean, or add the profile to {path}."
+        else:
+            message = "The requested profile does not exist: there is no settings file."
+            nxt = f"Create {path} with this profile, or run without --profile."
         e = new_error(
             "E_CONFIG",
-            f"No profile named `{ps.unknown}` in {ps.path or 'the settings file'}.",
+            message,
             {
                 "dispatch_state": "not_started",
-                "next_action": f"Use one of the profiles `{self.tool_name()} context` lists, or "
-                f"ask the user to add `{ps.unknown}`.",
+                "next_action": nxt,
+                "profile": truncate_runes(ps.unknown, 64),
+                "source": ps.unknown_source or "flag",
             },
         )
-        near = closest_words(ps.unknown, sorted(ps.profiles))
+        e.untrusted = ["profile"]
+        names = sorted(ps.profiles)
+        near = closest_words(ps.unknown, names) or names[:3]
         if near:
-            e.details["did_you_mean"] = near
+            e.details["did_you_mean"] = list(near)
         return e
+
+    def profile(self: App) -> tuple[str, str]:
+        """The active profile's name and where it came from (CLI-101): flag, env,
+        config, single, or ("", "none") when no profile is active (no settings, an
+        invalid settings file, or a requested profile the file does not define).
+        Tools use it to key keyring entries per profile. For a command that creates
+        a profile (Meta.new_profile, P6), a requested profile the settings file does
+        not have yet is the one returned, with its source (flag or env)."""
+        if self.settings is None:
+            return "", "none"
+        ps = self._profile_state()
+        if ps.reason:
+            return "", "none"
+        if ps.name is None:
+            if ps.unknown and self._creates_profile():
+                return ps.unknown, ps.unknown_source or "flag"
+            return "", "none"
+        return ps.name, ps.source
+
+    def _creates_profile(self: App, node: Node | None = None) -> bool:
+        """A command declared with Meta.new_profile (P6); None means the running
+        command."""
+        if node is None:
+            st = self._run
+            node = st.cmd if st is not None else None
+        m = self.meta_for(node) if node is not None else None
+        return m is not None and m.new_profile
+
+    def set_profile_settings(self: App, profile: str, values: dict[str, str]) -> None:
+        """Write values into one profile of the settings file (CLI-101, P5), for a
+        configure command such as auth login to call from its apply. profile must
+        match ^[a-z0-9][a-z0-9_-]{0,63}$ and every key must be a declared setting
+        that is not secret (secrets go in the OS keyring, SEC-040). The current file
+        is read with the same strict parser, and an invalid file is E_CONFIG and
+        never overwritten. The profile is created when missing; every other key,
+        profile and default_profile is kept. The file is written atomically (a
+        temporary file in the same directory, fsync, rename) with mode 0600; the
+        state directory is created 0700 when the file lives there. A failure to
+        write is E_IO. Raises the Error; nothing was written then, so apply raises
+        it wrapped in not_dispatched."""
+        from ._util import decode_generic, go_json, go_quote
+        from .errors import io_error, validation
+        from .journal import write_file_atomic
+
+        if not isinstance(profile, str) or not PROFILE_NAME.fullmatch(profile):
+            e = validation(
+                "--profile",
+                "a profile name: a-z, 0-9, _ and -, up to 64 characters",
+                "The profile name is not allowed; nothing was written.",
+            )
+            e.details["next_action"] = (
+                "Give a profile name of a-z, 0-9, _ and -, up to 64 characters, starting with a "
+                "letter or a digit."
+            )
+            raise e
+        declared = {s.name: s for s in self.settings or []}
+        for k in sorted(values):
+            s = declared.get(k)
+            if s is None:
+                raise internal_error(
+                    f"App.set_profile_settings: {go_quote(k)} is not declared in App.settings."
+                )
+            if s.secret:
+                raise internal_error(
+                    f"App.set_profile_settings: {go_quote(k)} is a secret setting; secrets go in "
+                    "the OS keyring, not the settings file (SEC-040)."
+                )
+        path = self.settings_path()
+        if not path:
+            self.state_dir_path()  # its own E_IO says why it cannot be resolved
+            p = self._prefix()
+            raise io_error(
+                "The settings file cannot be found; nothing was written.",
+                f"Set {p}_STATE_DIR or {p}_SETTINGS_FILE.",
+            )
+        exists, _, reason = self._read_settings_file(path)
+        if reason:
+            raise self._settings_invalid(ProfileState(path=path, exists=exists, reason=reason))
+        top: dict[str, Any] = {}
+        if exists:
+            try:
+                with open(path, "rb") as fh:
+                    got = decode_generic(fh.read(MAX_SETTINGS_BYTES + 1))
+            except (OSError, ValueError) as exc:
+                raise io_error(
+                    "The settings file cannot be read; nothing was written.", f"Check {path}.", exc
+                ) from None
+            if isinstance(got, dict):
+                top = got
+        profiles = top.get("profiles")
+        if not isinstance(profiles, dict):
+            profiles = {}
+        entry = profiles.get(profile)
+        if not isinstance(entry, dict):
+            entry = {}
+        for k, v in values.items():
+            entry[k] = str(v)
+        profiles[profile] = entry
+        top["profiles"] = profiles
+        data = (go_json(top, pretty=True) + "\n").encode("utf-8")
+        d = os.path.dirname(path)
+        try:
+            state = self.state_dir_path()
+        except Error:
+            state = ""
+        if state and os.path.normpath(state).lower() == os.path.normpath(d).lower():
+            self.ensure_state_dir()
+        try:
+            write_file_atomic(d, os.path.basename(path), data)
+        except OSError as exc:
+            raise io_error(
+                "The settings file cannot be written; nothing was changed.",
+                f"Check that {d} is writable.",
+                exc,
+            ) from None
+        st = self._run
+        if st is not None:
+            st.profile = None  # read again on the next setting
 
     def setting(self: App, name: str) -> tuple[str, str]:
         """A declared setting's value and its source (CLI-100): the running
         command's flag the setting names, when it was given on the command line
         (flag); else <PREFIX>_<ENV> (env); else the active profile (profile); else
         the default (default). An invalid settings file or an unknown profile is
-        E_CONFIG whatever the value's source."""
+        E_CONFIG whatever the value's source, except for a command that creates the
+        profile (Meta.new_profile, P6): it reads the flag, the environment and the
+        default."""
         s = next((x for x in self.settings or [] if x.name == name), None)
         if s is None:
             raise internal_error(
@@ -300,7 +454,7 @@ class SettingsMixin:
         ps = self._profile_state()
         if ps.reason:
             raise self._settings_invalid(ps)
-        if ps.unknown:
+        if ps.unknown and not self._creates_profile():
             raise self._profile_unknown(ps)
         st = self._run
         if s.flag and st is not None and st.cmd is not None:

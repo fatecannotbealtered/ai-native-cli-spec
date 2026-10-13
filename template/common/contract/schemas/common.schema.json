@@ -179,12 +179,12 @@
       "description": "E_CONFLICT subtypes (CLI-013). upstream_conflict is the upstream's refusal because of its current state (HTTP 409 or 412, CLI-016); state_drift is the gate's finding that the target changed since the dry run.",
       "enum": [
         "token_mismatch", "token_expired", "token_used", "state_drift", "scope_changed",
-        "unresolved_operation", "lock_held", "upstream_conflict", "idempotency_mismatch"
+        "unresolved_operation", "lock_held", "upstream_conflict", "idempotency_mismatch", "idempotency_resolved"
       ]
     },
     "gate_conflict": {
       "description": "The conflicts the gate finds itself, before anything is sent (CLI-013, CLI-057): their errors are always not_started.",
-      "enum": ["token_mismatch", "token_expired", "token_used", "state_drift", "scope_changed", "unresolved_operation", "lock_held"]
+      "enum": ["token_mismatch", "token_expired", "token_used", "state_drift", "scope_changed", "unresolved_operation", "lock_held", "idempotency_resolved"]
     },
     "human_action": {
       "description": "What a person must do for E_HUMAN_REQUIRED (CLI-065).",

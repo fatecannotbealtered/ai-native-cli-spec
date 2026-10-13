@@ -34,13 +34,27 @@ from .contract_gen import (
     TARGET_MATCH_VALUES,
 )
 from .errors import Error, forbidden
-from .keystore import is_link_or_reparse
+from .keystore import IS_WINDOWS, is_link_or_reparse
 
 if TYPE_CHECKING:
     from .app import App
     from .journal import Journal
 
 MAX_SCOPE_BYTES = 64 << 10
+
+
+def file_owner_problem(path: str, st: os.stat_result) -> str:
+    """Why a human-written file (the scope file, the settings file) cannot be
+    trusted on POSIX, as for confirm.key: another user can write it, or it is not
+    the current user's. "" when it is fine; Windows relies on the profile ACL."""
+    if IS_WINDOWS:
+        return ""
+    if stat.S_IMODE(st.st_mode) & 0o022:
+        return f"{path} is writable by other users; only its owner may write it"
+    geteuid = getattr(os, "geteuid", None)
+    if geteuid is not None and st.st_uid != geteuid():
+        return f"{path} is not owned by the current user"
+    return ""
 
 
 @dataclass
@@ -417,14 +431,48 @@ def _fold(p: str) -> str:
     return p
 
 
+class UnresolvedLink(ValueError):
+    """A path whose links could not all be resolved: a symlink, junction or other
+    name-surrogate reparse point is still in it after resolution (SEC-012)."""
+
+
+_NAME_SURROGATE = 0x20000000  # Windows reparse tags that redirect a name (junctions, links)
+
+
+def _redirects(st: os.stat_result) -> bool:
+    """A symbolic link, or on Windows a junction or other name-surrogate reparse
+    point. Cloud and dedup reparse points (OneDrive files) are not redirections."""
+    if stat.S_ISLNK(st.st_mode):
+        return True
+    return bool(getattr(st, "st_reparse_tag", 0) & _NAME_SURROGATE)
+
+
+def _check_resolved(resolved: str, original: str) -> None:
+    """Raise UnresolvedLink when a component of the resolved path is still a link
+    or junction: realpath could not follow it (C2, decision 46)."""
+    drive, rest = os.path.splitdrive(resolved)
+    cur = drive + (os.sep if rest.startswith(("\\", "/")) else "")
+    for part in [x for x in re.split(r"[\\/]+", rest) if x]:
+        cur = os.path.join(cur, part) if cur else part
+        try:
+            st = os.lstat(cur)
+        except OSError:
+            return
+        if _redirects(st):
+            raise UnresolvedLink(f"a junction or other reparse point is in the path {original}")
+
+
 def resolve_existing(p: str) -> str:
-    """Links in the longest existing prefix of p resolved."""
+    """Links in the longest existing prefix of p resolved (os.path.realpath, which
+    follows symlinks and junctions). Raises UnresolvedLink when one could not be
+    followed."""
     p = os.path.normpath(p)
     rest = ""
     cur = p
     while True:
-        if os.path.exists(cur) or os.path.islink(cur):
+        if os.path.lexists(cur):
             resolved = os.path.realpath(cur)
+            _check_resolved(resolved, p)
             return resolved if not rest else os.path.join(resolved, rest)
         parent = os.path.dirname(cur)
         if parent == cur:
@@ -434,20 +482,16 @@ def resolve_existing(p: str) -> str:
         cur = parent
 
 
-def path_within(p: str, roots: list[str]) -> bool:
-    """Whether a local path lies inside one of roots after resolving symbolic
-    links (SEC-012)."""
-    try:
-        target = resolve_existing(os.path.abspath(p))
-    except (OSError, ValueError):
-        return False
+def resolved_within(target: str, roots: list[str]) -> bool:
+    """Whether an already resolved path lies inside one of roots (each resolved
+    the same way; a root that cannot be resolved matches nothing)."""
     for r in roots:
         if not _is_abs(r):
             continue
-        root = resolve_existing(os.path.normpath(r))
         try:
+            root = resolve_existing(os.path.normpath(r))
             rel = os.path.relpath(_fold(target), _fold(root))
-        except ValueError:
+        except (OSError, ValueError):
             continue
         if rel == "." or (
             rel != ".." and not rel.startswith(".." + os.sep) and not os.path.isabs(rel)
@@ -456,20 +500,73 @@ def path_within(p: str, roots: list[str]) -> bool:
     return False
 
 
+def path_within(p: str, roots: list[str]) -> bool:
+    """Whether a local path lies inside one of roots after resolving symbolic
+    links (SEC-012)."""
+    try:
+        target = resolve_existing(os.path.abspath(p))
+    except (OSError, ValueError):
+        return False
+    return resolved_within(target, roots)
+
+
+def output_state(p: str) -> tuple[str, bool]:
+    """A local output path resolved, and whether it exists after links are
+    followed (an overwrite) or not (a new file). A path whose existence cannot be
+    read counts as existing, the stricter case. Raises UnresolvedLink, OSError or
+    ValueError."""
+    resolved = resolve_existing(os.path.abspath(p))
+    try:
+        os.lstat(resolved)
+    except FileNotFoundError:
+        return resolved, False
+    except OSError:
+        return resolved, True
+    return resolved, True
+
+
+def split_outputs(
+    paths: list[str],
+) -> tuple[list[str], list[str], dict[str, str], dict[str, str]]:
+    """The local paths a write names sorted into new files (which the scope's
+    outputs must cover) and existing ones (an overwrite, which its roots must
+    cover), after resolving links (C1, SEC-011, SEC-012), with each path's
+    resolved form. refused maps a path whose links cannot be resolved (a junction
+    or other reparse point realpath could not follow, C2) to the reason; it counts
+    as existing, the stricter case."""
+    new: list[str] = []
+    existing: list[str] = []
+    resolved: dict[str, str] = {}
+    refused: dict[str, str] = {}
+    for p in paths:
+        try:
+            r, exists = output_state(p)
+        except UnresolvedLink as exc:
+            refused[p] = str(exc)
+        except ValueError:
+            refused[p] = "it is not a valid path: " + truncate_runes(p, 200)
+        except OSError:
+            refused[p] = "the path cannot be resolved: " + p
+        else:
+            resolved[p] = r
+            (existing if exists else new).append(p)
+            continue
+        existing.append(p)
+    return new, existing, resolved, refused
+
+
 def write_only(effects: list[str]) -> list[str]:
     return [e for e in effects if e != "observe"]
 
 
 class ScopeMixin:
     def scope_path(self: App, state_dir: str) -> str:
-        """The scope file: <PREFIX>_SCOPE_FILE, else <state>/scope.json. There is
-        deliberately no flag (SEC-011)."""
+        """The scope file: <PREFIX>_SCOPE_FILE (an absolute path; load_scope refuses
+        a relative one), else <state>/scope.json. There is deliberately no flag
+        (SEC-011)."""
         p = (self._env(self._prefix() + "_SCOPE_FILE") or "").strip()
         if p:
-            try:
-                return os.path.abspath(p)
-            except (OSError, ValueError):
-                return p
+            return p
         return os.path.join(state_dir, "scope.json")
 
     def load_scope(self: App, state_dir: str) -> ScopeState:
@@ -483,6 +580,8 @@ class ScopeMixin:
             sc.reason = reason
             return sc
 
+        if not _is_abs(path):
+            return invalid(f"{self._prefix()}_SCOPE_FILE must be an absolute path")
         try:
             st = os.lstat(path)
         except FileNotFoundError:
@@ -492,6 +591,9 @@ class ScopeMixin:
             return invalid("it cannot be read")
         if is_link_or_reparse(st) or not stat.S_ISREG(st.st_mode):
             return invalid("it must be a regular file, not a link")
+        problem = file_owner_problem(path, st)
+        if problem:
+            return invalid(problem)
         if st.st_size > MAX_SCOPE_BYTES:
             return invalid("it is larger than 64 KiB")
         try:
@@ -510,6 +612,13 @@ class ScopeMixin:
                 f"it names the tool {go_quote(truncate_runes(f.tool, 40))}, not "
                 f'"{self.tool_name()}"'
             )
+        for d in [*f.outputs, *f.roots]:
+            try:
+                resolve_existing(os.path.normpath(d))
+            except UnresolvedLink as exc:
+                return invalid(str(exc))
+            except (OSError, ValueError):
+                pass
         if f.revoked:
             sc.status = "revoked"
             return sc
@@ -523,7 +632,10 @@ class ScopeMixin:
 
     def check_scope(self: App, sc: ScopeState, need: ScopeNeed, j: Journal | None) -> None:
         """Refuse a write the scope does not cover (E_FORBIDDEN with
-        details.scope), counting the operation budget from the journal."""
+        details.scope), counting the operation budget from scope-usage.json. A new
+        output file must lie under outputs and an existing one (an overwrite) under
+        roots, after links are resolved (SEC-012); without roots nothing may be
+        overwritten."""
         missing: dict[str, Any] = {}
         status = sc.status
         used = 0
@@ -543,14 +655,23 @@ class ScopeMixin:
             dests = [d for d in need.destinations if not destination_allowed(d, f.destinations)]
             if dests:
                 missing["destinations"] = tuple(dests)
-            roots = [*f.outputs, *f.roots]
-            outs = [p for p in need.outputs if not path_within(p, roots)]
+            # A new file must be inside outputs and an existing one (an overwrite)
+            # inside roots, after resolving links (C1, SEC-011); absent roots,
+            # nothing may be overwritten.
+            new, existing, resolved, refused = split_outputs(need.outputs)
+            for p in need.outputs:
+                if p in refused:
+                    raise self.reparse_refusal(sc, need, p, refused[p])
+            outs = [p for p in new if not resolved_within(resolved[p], f.outputs)]
+            overs = [p for p in existing if not resolved_within(resolved[p], f.roots)]
             if outs:
                 missing["outputs"] = tuple(outs)
+            if overs:
+                missing["roots"] = tuple(overs)
             if missing:
                 status = "insufficient"
             elif f.max_operations is not None and need.operations > 0 and j is not None:
-                n = j.count_dispatched(f.scope_id)
+                n = self.scope_used(j, f.scope_id)
                 if n + need.operations > f.max_operations:
                     status, used = "budget_spent", n
                 else:
@@ -567,9 +688,46 @@ class ScopeMixin:
                 missing["target"] = need.targets[0]
             if need.destinations:
                 missing["destinations"] = tuple(need.destinations)
-            if need.outputs:
-                missing["outputs"] = tuple(need.outputs)
+            new, existing, _, _ = split_outputs(need.outputs)
+            if new:
+                missing["outputs"] = tuple(new)
+            if existing:
+                missing["roots"] = tuple(existing)
         raise self.scope_refusal(sc, status, need, missing, used)
+
+    def reparse_refusal(
+        self: App, sc: ScopeState, need: ScopeNeed, path: str, reason: str
+    ) -> Error:
+        """A write whose local path passes through a junction or other reparse point
+        that cannot be resolved (C2): what the path leads to cannot be checked
+        against the scope, and no grant can make it checkable."""
+        key = "outputs"
+        try:
+            os.lstat(path)
+            key = "roots"
+        except (OSError, ValueError):
+            pass
+        e = self.scope_refusal(sc, "insufficient", need, {key: (path,)})
+        scope = e.details.get("scope")
+        if isinstance(scope, dict):
+            scope.pop("grant_example", None)  # no grant covers it
+        e.message = (
+            "The output path cannot be checked against the scope (" + reason + "), so nothing "
+            "was sent."
+        )
+        e.details["next_action"] = (
+            "Write to a path without junctions or other reparse points; do not change the scope "
+            "to work around it."
+        )
+        return e
+
+    def scope_used(self: App, j: Journal, scope_id: str) -> int:
+        """The operations already dispatched under scope_id: the durable count in
+        <state>/scope-usage.json (A4), which pruning never touches. An unreadable
+        count is E_IO: the budget cannot be checked."""
+        from .journal import read_scope_usage
+
+        return read_scope_usage(j.state_dir).get(scope_id, 0)
 
     def scope_refusal(
         self: App,
@@ -583,7 +741,9 @@ class ScopeMixin:
         whole file after the change: for a readable scope (insufficient, expired,
         revoked, budget spent) it is the current file with only what is missing
         added, so saving it never takes back what was granted; for a missing or
-        invalid file it is a new grant for this write."""
+        invalid file it is a new grant for this write. missing.outputs lists new
+        files whose directory is not under outputs, missing.roots existing files
+        not under roots; the example adds their directories there."""
         missing.setdefault("dangerous", False)
         missing.setdefault("effects", ())
         if sc.file is not None and sc.status not in ("invalid", "missing"):
@@ -657,9 +817,13 @@ class ScopeMixin:
             example["targets"] = sel
         if need.destinations:
             example["destinations"] = tuple(need.destinations)
-        dirs = output_dirs(need.outputs)
+        new, existing, _, _ = split_outputs(need.outputs)
+        dirs = output_dirs(new)
         if dirs:
             example["outputs"] = tuple(dirs)
+        dirs = output_dirs(existing)
+        if dirs:
+            example["roots"] = tuple(dirs)
         return example
 
     def extended_grant(
@@ -707,16 +871,22 @@ class ScopeMixin:
                 dests.append(d)
         if dests:
             example["destinations"] = tuple(dests)
+        new, existing, resolved, _ = split_outputs(need.outputs)
         outs = list(f.outputs)
-        roots = [*f.outputs, *f.roots]
-        uncovered = [p for p in need.outputs if not path_within(p, roots)]
-        for d in output_dirs(uncovered):
+        for d in output_dirs([p for p in new if not resolved_within(resolved[p], f.outputs)]):
             if d not in outs:
                 outs.append(d)
         if outs:
             example["outputs"] = tuple(outs)
-        if f.roots:
-            example["roots"] = tuple(f.roots)
+        roots = list(f.roots)
+        overwritten = [
+            p for p in existing if p not in resolved or not resolved_within(resolved[p], f.roots)
+        ]
+        for d in output_dirs(overwritten):
+            if d not in roots:
+                roots.append(d)
+        if roots:
+            example["roots"] = tuple(roots)
         if f.limits_set:
             limits: dict[str, Any] = {}
             if f.max_operations is not None:

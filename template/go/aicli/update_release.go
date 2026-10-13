@@ -7,8 +7,6 @@ package aicli
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -102,6 +100,18 @@ func (e *fetchError) retryAfter(now time.Time) (int64, bool) {
 
 var errIdleTimeout = errors.New("no data for 30 s")
 
+// errInsecureRedirect is a redirect to a URL that is not https (E13).
+var errInsecureRedirect = errors.New("the release source redirected to a URL that is not https")
+
+// downloadDeadline bounds one request in total, besides the 30 s idle timeout (E13).
+const downloadDeadline = 10 * time.Minute
+
+// httpsURL reports an https URL with a host (E13: release assets and redirects).
+func httpsURL(raw string) bool {
+	p, err := url.Parse(raw)
+	return err == nil && strings.EqualFold(p.Scheme, "https") && p.Host != ""
+}
+
 // updateTransport adds the User-Agent and, for the API host only, the GitHub token.
 type updateTransport struct {
 	base               http.RoundTripper
@@ -119,24 +129,12 @@ func (t *updateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.base.RoundTrip(r)
 }
 
-// httpClient builds the run's HTTP client (CLI-110). An unusable <PREFIX>_CA_FILE
-// is E_CONFIG.
+// httpClient builds the run's HTTP client on App.HTTPTransport and App.UserAgent
+// (CLI-110, P10). An unusable <PREFIX>_CA_FILE is E_CONFIG at discover.
 func (u *updateRun) httpClient() *Error {
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.Proxy = http.ProxyFromEnvironment
-	tr.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-	prefix := u.a.envPrefix()
-	if path := strings.TrimSpace(u.a.env(prefix + "_CA_FILE")); path != "" {
-		pool, err := x509.SystemCertPool()
-		if err != nil || pool == nil {
-			pool = x509.NewCertPool()
-		}
-		pem, err := readSmallFile(path, 1<<20)
-		if err != nil || !pool.AppendCertsFromPEM(pem) {
-			return u.fail("E_CONFIG", fmt.Sprintf("%s_CA_FILE names %s, which is not a readable PEM certificate file.", prefix, path),
-				fmt.Sprintf("Point %s_CA_FILE at a PEM file of CA certificates, or unset it.", prefix))
-		}
-		tr.TLSClientConfig.RootCAs = pool
+	tr, e := u.a.HTTPTransport()
+	if e != nil {
+		return u.decorate(e)
 	}
 	api, err := url.Parse(u.cfg.APIBase)
 	if err != nil || api.Host == "" {
@@ -147,8 +145,18 @@ func (u *updateRun) httpClient() *Error {
 		token = strings.TrimSpace(u.a.env("GH_TOKEN"))
 	}
 	u.client = &http.Client{Transport: &updateTransport{base: tr,
-		userAgent: fmt.Sprintf("%s/%s aicli/%s", u.tool, u.a.Version, SpecVersion),
-		token:     token, apiScheme: api.Scheme, apiHost: api.Host}}
+		userAgent: u.a.UserAgent(),
+		token:     token, apiScheme: api.Scheme, apiHost: api.Host},
+		// Redirects stay on https (E13); the GitHub token still goes to the API host only.
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			if !strings.EqualFold(req.URL.Scheme, "https") {
+				return errInsecureRedirect
+			}
+			return nil
+		}}
 	return nil
 }
 
@@ -174,7 +182,9 @@ func (u *updateRun) fetch(rawURL string, limit int64, dst io.Writer, download bo
 		return nil, &fetchError{host: rawURL, err: fmt.Errorf("not a URL: %q", truncateRunes(rawURL, 80))}
 	}
 	host := parsed.Host
-	ctx, cancel := context.WithCancelCause(u.ctx)
+	bounded, stop := context.WithTimeout(u.ctx, downloadDeadline)
+	defer stop()
+	ctx, cancel := context.WithCancelCause(bounded)
 	defer cancel(nil)
 	timer := time.AfterFunc(requestTimeout, func() { cancel(errIdleTimeout) })
 	defer timer.Stop()
@@ -227,6 +237,11 @@ func (u *updateRun) netError(err error, download string) *Error {
 	timedOut := isFetch && fe.timeout && u.ctx.Err() == nil
 	if !timedOut && u.interrupted(err) {
 		return u.interruptError()
+	}
+	if errors.Is(err, errInsecureRedirect) {
+		// Usually a network's sign-in page; nothing was fetched over plain http.
+		return u.fail("E_NETWORK", "The release source redirected to a URL that is not https, so nothing was downloaded.",
+			fmt.Sprintf("Check the network or HTTPS_PROXY (a network's sign-in page redirects like this), then run `%s update` again.", u.tool))
 	}
 	next := fmt.Sprintf("Check the network or HTTPS_PROXY, then run `%s update` again; it is safe to repeat.", u.tool)
 	host := u.cfg.APIBase
@@ -304,12 +319,18 @@ func (u *updateRun) discover(want *Version) (*ghRelease, Version, string, *Error
 	var bestV Version
 	for i := range list {
 		r := &list[i]
-		if r.Draft || r.Prerelease {
+		if r.Draft {
 			continue
 		}
 		v, err := ParseVersion(r.TagName)
 		if err != nil {
 			u.a.Debugf("update: skipped release tag %s (not a semantic version)", printable(r.TagName, 40))
+			continue
+		}
+		// A prerelease is installed only through --target-version (CLI-070, E2): by
+		// its semver tag, whatever GitHub's prerelease flag says, and by the flag.
+		if v.Pre != "" || r.Prerelease {
+			u.a.Debugf("update: skipped release tag %s (a prerelease; --target-version installs it)", printable(r.TagName, 40))
 			continue
 		}
 		if best == nil || CompareVersions(v, bestV) > 0 {

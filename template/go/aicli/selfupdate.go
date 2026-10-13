@@ -227,12 +227,12 @@ func (a *App) RecordUpdateCheck(latest, severity string) error {
 	if err != nil {
 		return Usage("invalid_value", "latest", "The latest version is not a semantic version.")
 	}
-	severity = noticeSeverity(severity, a.Version, lv)
+	severity = noticeSeverity(severity, a.version(), lv)
 	dir, e := a.ensureStateDir()
 	if e != nil {
 		return e
 	}
-	c := updateCache{CheckedAt: timeString(a.now()), CurrentVersion: a.Version, LatestVersion: latest, Severity: severity,
+	c := updateCache{CheckedAt: timeString(a.now()), CurrentVersion: a.version(), LatestVersion: latest, Severity: severity,
 		Command: a.toolName() + " update"}
 	b, err := json.Marshal(c)
 	if err != nil {
@@ -272,7 +272,7 @@ func (a *App) attachUpdateNotice(st *runState) {
 	if json.Unmarshal(b, &c) != nil {
 		return
 	}
-	cur, err1 := ParseVersion(a.Version)
+	cur, err1 := ParseVersion(a.version())
 	latest, err2 := ParseVersion(c.LatestVersion)
 	if err1 != nil || err2 != nil || CompareVersions(latest, cur) <= 0 {
 		return
@@ -281,7 +281,7 @@ func (a *App) attachUpdateNotice(st *runState) {
 	if t, ok := parseTime(c.NotifiedAt); ok && now.Sub(t) < 24*time.Hour && now.After(t) {
 		return
 	}
-	severity := noticeSeverity(c.Severity, a.Version, latest)
+	severity := noticeSeverity(c.Severity, a.version(), latest)
 	command := a.toolName() + " update"
 	a.Notice(Notice{Type: "update_available", Severity: severity,
 		Message:        fmt.Sprintf("%s %s is available (installed %s); run `%s`.", a.toolName(), latest.String(), cur.String(), command),

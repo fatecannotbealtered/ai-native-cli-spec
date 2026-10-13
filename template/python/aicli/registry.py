@@ -100,6 +100,12 @@ class Meta:
     # leaves a deprecated command out.
     deprecated: str = ""
     deprecated_flags: dict[str, str] = field(default_factory=dict)
+    # new_profile lets the command run with a requested profile (--profile or
+    # <PREFIX>_PROFILE) that the settings file does not have yet, as `auth login
+    # --profile lab` creates it (CLI-101, P6): the unknown-profile refusal is skipped,
+    # App.setting reads the flag, the environment and the default only, and the
+    # requested name is still bound into the confirm token.
+    new_profile: bool = False
 
     def is_write(self) -> bool:
         """Whether any declared effect is not observe."""
@@ -246,8 +252,31 @@ def tier_rank(t: str) -> int:
 
 def deprecated_text(text: str, original: str) -> str:
     """A summary or flag description of something deprecated (CLI-081):
-    "Deprecated: <text>. <original>" (a trailing "." of text is trimmed)."""
-    return ("Deprecated: " + text.removesuffix(".") + ". " + original).strip()
+    "Deprecated: <text>. <original>" (text trimmed, a trailing "." dropped)."""
+    return ("Deprecated: " + replacement_text(text) + ". " + original).strip()
+
+
+def replacement_text(text: str) -> str:
+    """A deprecation's replacement text as shown: spaces trimmed, then a trailing
+    "." dropped (D10)."""
+    return text.strip().removesuffix(".").strip()
+
+
+def with_twins(secrets: list[str], file_inputs: dict[str, str]) -> list[str]:
+    """Meta.secrets with each secret's twin added (B2): the literal flag a secret
+    file flag stands in for, and the file flag of a secret literal. One notion of a
+    secret flag serves binding, previews, records, reference, suggestions,
+    conformance and redaction."""
+    out = list(secrets)
+    changed = True
+    while changed:
+        changed = False
+        for file in sorted(file_inputs):
+            bound = file_inputs[file]
+            if (file in out) != (bound in out):
+                out.append(bound if file in out else file)
+                changed = True
+    return out
 
 
 class RegistryMixin:
@@ -274,6 +303,7 @@ class RegistryMixin:
             cp.maturity = DRAFT
         if not cp.summary:
             cp.summary = _short_of(cmd)
+        cp.secrets = with_twins(cp.secrets, cp.file_inputs)
         if cmd not in self._reg.meta:
             self._reg.order.append(cmd)
         self._reg.meta[cmd] = cp
@@ -377,7 +407,7 @@ class RegistryMixin:
             p.required = True
         if not p.required and not p.secret and not p.file_input:
             p.default = typed_default(f, p.type)
-        if m is not None and m.deprecated_flags.get(f.name):
+        if m is not None and replacement_text(m.deprecated_flags.get(f.name) or ""):
             p.description = deprecated_text(m.deprecated_flags[f.name], p.description)
         return p
 
@@ -494,7 +524,7 @@ class RegistryMixin:
         click summary without Meta), prefixed for a deprecated command (CLI-081)."""
         m = self.meta_for(c)
         summary = m.summary if m is not None and m.summary else c.short
-        if m is not None and m.deprecated:
+        if m is not None and replacement_text(m.deprecated):
             summary = deprecated_text(m.deprecated, summary)
         return summary
 
@@ -530,7 +560,7 @@ class RegistryMixin:
         codes = sorted(CORE_CODES) + sorted(self.ext_codes or {})
         return {
             "tool": self.tool_name(),
-            "version": self.version,
+            "version": self._version(),
             "spec_version": SPEC_VERSION,
             "schema_version": SCHEMA_VERSION,
             "risk_tier": self.risk_tier,
@@ -562,7 +592,7 @@ class RegistryMixin:
         cmds = [c for c in self.commands() if base is self._root or c is base or c.is_under(base)]
         data: dict[str, Any] = {
             "tool": self.tool_name(),
-            "version": self.version,
+            "version": self._version(),
             "commands": [self.index_for(c) for c in cmds],
         }
         if fits_index_budget(data):
@@ -581,7 +611,7 @@ class RegistryMixin:
             if top.cmd is not None and self._reg.groups.get(top.cmd):
                 summary = self._reg.groups[top.cmd]
             groups.append({"path": top.path, "summary": summary, "command_count": count})
-        return {"tool": self.tool_name(), "version": self.version, "groups": groups}
+        return {"tool": self.tool_name(), "version": self._version(), "groups": groups}
 
     def reference_command(self: App, path: str) -> dict[str, Any]:
         """One command's entry with its output schema and error codes (CLI-032)."""
@@ -599,7 +629,7 @@ class RegistryMixin:
         }
         return {
             "tool": self.tool_name(),
-            "version": self.version,
+            "version": self._version(),
             "command": entry,
             "schemas": schemas,
             "error_codes": codes,
@@ -698,7 +728,7 @@ class RegistryMixin:
             if c.builtin:
                 continue
             m = self.meta_for(c)
-            if m is not None and m.deprecated:
+            if m is not None and replacement_text(m.deprecated):
                 continue
             mark = " (dangerous)" if m is not None and m.is_dangerous() else ""
             words = c.path.split()
@@ -769,7 +799,7 @@ class RegistryMixin:
             if m is not None and m.is_write():
                 tag = " (write, dangerous)" if m.is_dangerous() else " (write)"
             summary = x.short
-            if m is not None and m.deprecated:
+            if m is not None and replacement_text(m.deprecated):
                 summary = deprecated_text(m.deprecated, summary)
             rows.append((use, summary + tag))
             width = max(width, len(use))
@@ -876,8 +906,8 @@ class RegistryMixin:
         tool = self.tool_name()
         if self.risk_tier not in RISK_TIER_VALUES:
             add(f'App.risk_tier "{self.risk_tier}" is not one of {", ".join(RISK_TIER_VALUES)}')
-        if not (self.version or "").strip():
-            add("App.version is empty")
+        # An empty or "dev" App.version is a development build, which reports a
+        # version derived from the changelog (P14); it is not a tree problem.
         problems.extend(self.check_ext_codes())
         reserved = ["reference", "context", "doctor", "changelog", "operation", "help", "version"]
         if self.update is not None:
@@ -1024,6 +1054,33 @@ class RegistryMixin:
                         f'"{path}": Meta.secrets names "{s}", which is neither a flag nor a bound '
                         "file input"
                     )
+            # B4: a bound name is one input; a file stands in only for a plain value flag
+            first_file: dict[str, str] = {}
+            for file in sorted(m.file_inputs):
+                bound = m.file_inputs[file]
+                if bound in first_file:
+                    add(
+                        f'"{path}": Meta.file_inputs maps --{first_file[bound]} and --{file} to '
+                        f'the same name "{bound}"'
+                    )
+                else:
+                    first_file[bound] = file
+                twin = c.flag(bound)
+                if twin is not None and twin is not c.flag(file) and not _plain_value(twin, m):
+                    add(
+                        f'"{path}": Meta.file_inputs maps --{file} onto --{bound}, which is not a '
+                        "plain value flag the file can stand in for"
+                    )
+            # B3: a write's file content is bound only when aicli reads it
+            if m.is_write():
+                for f in c.local_flags().values():
+                    kind = _opened_by_tool(f, m)
+                    if kind:
+                        add(
+                            f'"{path}": --{f.name} is a {kind} the tool opens itself, so the write '
+                            "gate cannot bind its content; declare it in Meta.file_inputs and read "
+                            "it with App.read_file_input"
+                        )
             if m.batch_flag and c.flag(m.batch_flag) is None:
                 add(
                     f'"{path}": Meta.batch_flag names --{m.batch_flag}, which the command does not '
@@ -1080,6 +1137,35 @@ class RegistryMixin:
 _REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 _WORKFLOW = re.compile(r"[A-Za-z0-9_.-]+\.ya?ml")
 _SNAKE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
+
+
+def _plain_value(f: Flag, m: Meta) -> bool:
+    """A flag a file input can stand in for (its literal twin): one string value
+    of the command's own, not a file flag, a global flag, a list or a switch."""
+    return (
+        f.param is not None
+        and f.name not in m.file_inputs
+        and not is_global(f)
+        and not f.multiple
+        and f.kind in ("string", "value")
+    )
+
+
+def _opened_by_tool(f: Flag, m: Meta) -> str:
+    """The kind of a parameter whose file the tool would open itself (B3): a
+    click.File, or a click.Path of an existing file outside Meta.file_inputs; ""
+    otherwise."""
+    t = getattr(f.param, "type", None) if f.param is not None else None
+    if isinstance(t, click.File):
+        return "click.File"
+    if (
+        isinstance(t, click.Path)
+        and getattr(t, "exists", False)
+        and not getattr(t, "dir_okay", True)
+        and f.name not in m.file_inputs
+    ):
+        return "click.Path of an existing file"
+    return ""
 
 
 def _short_of(cmd: click.Command) -> str:

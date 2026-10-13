@@ -66,7 +66,7 @@ func (a *App) groupRunE(c *cobra.Command, args []string) error {
 			if len(args) > 0 {
 				return a.unexpectedArg(c, args, 0)
 			}
-			return a.OK(c, map[string]any{"tool": a.toolName(), "version": a.Version, "spec_version": SpecVersion,
+			return a.OK(c, map[string]any{"tool": a.toolName(), "version": a.version(), "spec_version": SpecVersion,
 				"schema_version": SchemaVersion})
 		}
 	}
@@ -153,26 +153,40 @@ func (a *App) unknownCommand(group *cobra.Command, word string) *Error {
 	next := fmt.Sprintf("Run `%s --help` to list every command under it.", group.CommandPath())
 	if len(suggestions) > 0 {
 		best := suggestions[0]
+		bestWords := strings.Fields(strings.TrimPrefix(strings.TrimPrefix(best, a.Root.Name()), " "))
 		dropped := false
-		positionals := 0
+		var kept []string
 		line, ok := a.commandLine(best, func(_ int, tok string, kind argKind) []string {
-			if kind == argPositional {
-				if !dropped && tok == word {
-					dropped = true
-					return nil
-				}
-				positionals++
+			if kind == argPositional && !dropped && tok == word {
+				dropped = true
+				return nil
 			}
+			kept = append(kept, tok)
 			return []string{tok}
 		})
-		target := a.commandByPath(strings.TrimPrefix(strings.TrimPrefix(best, a.Root.Name()), " "))
+		// The remaining arguments are read as the suggested command reads them (P11):
+		// a value of one of its flags is not a positional argument.
+		_, kinds := a.classify(append(append([]string{}, bestWords...), kept...))
+		positionals := 0
+		for _, k := range kinds[len(bestWords):] {
+			if k == argPositional {
+				positionals++
+			}
+		}
+		target := a.commandByPath(strings.Join(bestWords, " "))
 		isGroup := target != nil && (target == a.Root || hasSubcommands(target))
-		takes := 0
-		if m := a.metaFor(target); target != nil && m != nil && m.Positional != "" {
-			takes = 1
+		takes, variadic := 0, false
+		if target != nil {
+			for _, p := range positionalsOf(target) {
+				takes++
+				variadic = variadic || p.variadic
+			}
+			if m := a.metaFor(target); m != nil && m.Positional != "" && takes == 0 {
+				takes = 1
+			}
 		}
 		switch {
-		case ok && !isGroup && positionals > takes:
+		case ok && !isGroup && !variadic && positionals > takes:
 			// The rewritten line would be refused (unexpected_argument): point to the
 			// command's own help instead of a command that cannot run.
 			next = fmt.Sprintf("Did you mean `%s`? It does not take those positional arguments; run `%s --help` for its flags.", best, best)
@@ -765,35 +779,69 @@ func nearSecret(name string, secret map[string]bool) bool {
 	return false
 }
 
-// renderCommand joins tokens into one shell-ready line, quoting where needed and
-// masking the values of flags declared secret (Meta.Secrets) and of flags whose
-// names are close to a secret flag's.
+// renderCommand joins tokens (the tool name, the command path and its arguments)
+// into one shell-ready line, quoting where needed and masking the values of secret
+// flags and of flags whose names are close to a secret flag's (D6). Which token is
+// a flag's value comes from classify, so the value is masked however it was given:
+// --long v, --long=v, -s v, -s=v, -sv, or a value that starts with "-".
 func (a *App) renderCommand(tokens []string) string {
 	secret := a.secretFlagNames()
-	out := make([]string, 0, len(tokens))
+	start := 0
+	if len(tokens) > 0 && a.Root != nil && tokens[0] == a.Root.Name() {
+		start = 1
+	}
+	target, kinds := a.classify(tokens[start:])
+	out := append(make([]string, 0, len(tokens)), tokens[:start]...)
 	maskNext := false
-	for _, tok := range tokens {
-		if maskNext && !strings.HasPrefix(tok, "-") {
+	for i, tok := range tokens[start:] {
+		kind := kinds[i]
+		if maskNext && (kind == argFlagValue || kind == argPositional) {
 			out = append(out, "***")
 			maskNext = false
 			continue
 		}
 		maskNext = false
-		if strings.HasPrefix(tok, "--") && len(tok) > 2 {
-			name, _, inline := splitFlag(tok)
-			if nearSecret(name, secret) {
-				if inline {
-					out = append(out, "--"+name+"=***")
-				} else {
-					out = append(out, tok)
-					maskNext = true
-				}
+		if kind == argFlag && tok != "--" {
+			if masked, next, ok := a.maskSecretFlag(target, tok, secret); ok {
+				out = append(out, masked)
+				maskNext = next
 				continue
 			}
 		}
 		out = append(out, shellWord(tok))
 	}
 	return strings.Join(out, " ")
+}
+
+// maskSecretFlag renders one flag token of a secret flag (or of a name close to
+// one): the token with its value masked, and whether the next token is its value.
+// ok is false for any other flag.
+func (a *App) maskSecretFlag(c *cobra.Command, tok string, secret map[string]bool) (string, bool, bool) {
+	name, _, inline := splitFlag(tok)
+	if strings.HasPrefix(tok, "--") {
+		if !nearSecret(name, secret) {
+			return "", false, false
+		}
+		if inline {
+			return "--" + name + "=***", false, true
+		}
+		return tok, true, true
+	}
+	// A shorthand: -s, -s=v, or -sv with the value attached.
+	if name == "" {
+		return "", false, false
+	}
+	f := shorthandFlag(c, name[:1])
+	if f == nil || !secret[f.Name] {
+		return "", false, false
+	}
+	switch {
+	case inline:
+		return "-" + name[:1] + "=***", false, true
+	case len(name) > 1 && f.NoOptDefVal == "":
+		return "-" + name[:1] + "***", false, true
+	}
+	return tok, f.NoOptDefVal == "", true
 }
 
 // shellWord quotes a token for a copy-paste command line when it holds spaces or
@@ -820,6 +868,9 @@ func (a *App) prepareRun(c *cobra.Command, args []string) error {
 	m := a.metaFor(c)
 	a.commandDeprecationNotice(c, m)
 	if err := a.applyOutputFlags(c); err != nil {
+		return err
+	}
+	if err := a.checkProfile(c); err != nil {
 		return err
 	}
 	if m != nil && m.Positional != "" && len(args) == 1 {
@@ -942,25 +993,29 @@ func parseFields(raw string) (fieldSelection, *Error) {
 }
 
 // checkFields rejects field names the command's schema does not declare (CLI-040).
+// context accepts every top-level key it returns (P13).
 func (a *App) checkFields(c *cobra.Command, m *Meta) error {
 	st := a.run
 	if !st.fields.set || st.fields.all {
 		return nil
 	}
-	s := a.schemaOf(m)
-	if len(s.Fields) == 0 {
+	fields := a.schemaOf(m).Fields
+	if a.reg.builtin[c] && c.Name() == "context" && c.Parent() == a.Root {
+		fields = a.contextFields()
+	}
+	if len(fields) == 0 {
 		return nil
 	}
 	var unknown []string
 	for _, n := range st.fields.names {
-		if !contains(s.Fields, n) && n != "ref" {
+		if !contains(fields, n) && n != "ref" {
 			unknown = append(unknown, n)
 		}
 	}
 	if len(unknown) > 0 {
 		e := Usage("invalid_value", "--fields", fmt.Sprintf("--fields names %d field(s) this command does not return.", len(unknown)))
-		e.Details["expected"] = strings.Join(s.Fields, ",")
-		e.Details["did_you_mean"] = closestWords(unknown[0], s.Fields)
+		e.Details["expected"] = strings.Join(fields, ",")
+		e.Details["did_you_mean"] = closestWords(unknown[0], fields)
 		e.Details["next_action"] = "Use field names from details.expected, or --fields all."
 		return e
 	}

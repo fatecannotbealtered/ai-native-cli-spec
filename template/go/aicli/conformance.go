@@ -576,17 +576,19 @@ func (s *suite) checkWrite(c *cobra.Command, sample []string) {
 	s.checkMutations(st, c, m, sample, token)
 
 	// G04: the exact confirm dispatches; a repeat is token_used. A command whose only
-	// effects are local files (artifact, persist) writes no upstream request; its
-	// receipt must say the file was saved instead.
+	// effects are configure, persist or artifact may change only local things (the
+	// tool's keyring entry, its settings file, a local file) and send nothing
+	// upstream: a receipt with change applied or persistence saved counts as its one
+	// write (P7).
 	r = s.run(st, "G04", gate("--confirm", token), "")
 	reported := r.data()["receipt"] != nil || r.details()["receipt"] != nil
 	if m.BatchFlag != "" {
 		reported = (r.data()["items"] != nil && r.data()["summary"] != nil) || (r.details()["items"] != nil && r.details()["summary"] != nil)
 	}
-	localOnly := !m.hasEffect(Change, Deliver, Configure)
+	localOnly := !m.hasEffect(Change, Deliver)
 	switch {
-	case localOnly && !savedLocally(r):
-		s.errorf("G04", "%s: the exact confirm saved no local file (receipt persistence is not saved): %s", path, r.describe())
+	case localOnly && r.writes < 1 && !appliedLocally(r):
+		s.errorf("G04", "%s: the exact confirm sent no write, and its receipt shows no applied change or saved file: %s", path, r.describe())
 	case !localOnly && r.writes < 1:
 		s.errorf("G04", "%s: the exact confirm sent no write: %s", path, r.describe())
 	case !reported:
@@ -723,14 +725,27 @@ func isStreamOutput(raw []byte) bool {
 	return len(rest) > 0 && rest[0] == '{' && !bytes.Contains(first, []byte("\n"))
 }
 
-// savedLocally reports a confirmed write whose receipt saved a local file.
-func savedLocally(r runResult) bool {
-	receipt, _ := r.data()["receipt"].(map[string]any)
-	if receipt == nil {
-		receipt, _ = r.details()["receipt"].(map[string]any)
+// appliedLocally reports a confirmed write whose receipt (or a batch item's) shows
+// change applied or persistence saved (P7).
+func appliedLocally(r runResult) bool {
+	var receipts []any
+	for _, part := range []map[string]any{r.data(), r.details()} {
+		receipts = append(receipts, part["receipt"])
+		items, _ := part["items"].([]any)
+		for _, it := range items {
+			if m, ok := it.(map[string]any); ok {
+				receipts = append(receipts, m["receipt"])
+			}
+		}
 	}
-	outcome, _ := receipt["outcome"].(map[string]any)
-	return outcome["persistence"] == "saved"
+	for _, x := range receipts {
+		receipt, _ := x.(map[string]any)
+		outcome, _ := receipt["outcome"].(map[string]any)
+		if outcome["change"] == "applied" || outcome["persistence"] == "saved" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *suite) expectForbidden(path, step string, r runResult) {
@@ -824,7 +839,9 @@ func (s *suite) checkMutations(st *stateDir, c *cobra.Command, m *Meta, sample [
 	}
 	var add *pflag.Flag
 	c.Flags().VisitAll(func(f *pflag.Flag) {
-		if add != nil || present[f.Name] || f.Hidden || isGlobalFlag(f.Name) || flagRequired(f) || f.Name == m.Positional {
+		// --profile is aicli's, like the other global flags: it binds as the active
+		// profile (CLI-101), and an unknown name stops the command first.
+		if add != nil || present[f.Name] || f.Hidden || s.probe.isGlobal(f.Name) || flagRequired(f) || f.Name == m.Positional {
 			return
 		}
 		if bound, ok := m.FileInputs[f.Name]; ok && present[bound] {
@@ -879,9 +896,18 @@ func describeArg(a sampleArg) string {
 	return "--" + a.name
 }
 
-var numberPattern = regexp.MustCompile(`^-?[0-9]+$`)
+var (
+	numberPattern = regexp.MustCompile(`^-?[0-9]+$`)
+	floatPattern  = regexp.MustCompile(`^-?[0-9]+\.[0-9]+$`)
+	datePattern   = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
+	colourPattern = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
+)
 
-// mutateValue returns a different value of the same type.
+// mutateValue returns a different value of the same type, so G03 reaches the gate
+// instead of failing the tool's own validation (P9): an integer or a float plus 1,
+// a boolean flipped, another allowed value of an enum, a duration doubled (a zero
+// duration becomes 1s), an ISO date or date-time one day later, a #rrggbb colour
+// inverted; anything else with -mutated appended. A list gets one more element.
 func mutateValue(f *pflag.Flag, m *Meta, name, value string) string {
 	if f != nil {
 		if doc, ok := m.Params[name]; ok && len(doc.Enum) > 1 {
@@ -891,11 +917,14 @@ func mutateValue(f *pflag.Flag, m *Meta, name, value string) string {
 				}
 			}
 		}
-		if sv, ok := f.Value.(pflag.SliceValue); ok {
-			list := sv.GetSlice()
-			if len(list) > 0 && numberPattern.MatchString(list[len(list)-1]) {
-				n, _ := strconv.Atoi(list[len(list)-1])
-				return value + "," + strconv.Itoa(n+1000)
+		if _, ok := f.Value.(pflag.SliceValue); ok {
+			// The sample's own last element decides: a list of integers gets another
+			// integer.
+			parts := strings.Split(value, ",")
+			if last := strings.TrimSpace(parts[len(parts)-1]); numberPattern.MatchString(last) {
+				if n, err := strconv.Atoi(last); err == nil {
+					return value + "," + strconv.Itoa(n+1000)
+				}
 			}
 			return value + ",aicli-mutated"
 		}
@@ -911,15 +940,33 @@ func mutateValue(f *pflag.Flag, m *Meta, name, value string) string {
 		}
 		if f.Value.Type() == "duration" {
 			if d, err := time.ParseDuration(value); err == nil {
-				return (d + time.Second).String()
+				if d == 0 {
+					return "1s"
+				}
+				return (2 * d).String()
 			}
 		}
 	}
-	if numberPattern.MatchString(value) {
-		n, err := strconv.Atoi(value)
-		if err == nil {
+	switch {
+	case numberPattern.MatchString(value):
+		if n, err := strconv.Atoi(value); err == nil {
 			return strconv.Itoa(n + 1)
 		}
+	case floatPattern.MatchString(value):
+		if n, err := strconv.ParseFloat(value, 64); err == nil {
+			return strconv.FormatFloat(n+1, 'f', -1, 64)
+		}
+	case datePattern.MatchString(value):
+		if d, err := time.Parse(time.DateOnly, value); err == nil {
+			return d.AddDate(0, 0, 1).Format(time.DateOnly)
+		}
+	case colourPattern.MatchString(value):
+		if rgb, err := strconv.ParseUint(value[1:], 16, 32); err == nil {
+			return fmt.Sprintf("#%06x", 0xffffff^rgb)
+		}
+	}
+	if t, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return t.Add(24 * time.Hour).Format(time.RFC3339Nano)
 	}
 	return value + "-mutated"
 }

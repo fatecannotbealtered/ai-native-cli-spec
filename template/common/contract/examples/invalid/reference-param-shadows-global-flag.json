@@ -741,7 +741,7 @@
       "evidence": ["simulated:cmd/zz_conformance_test.go#R05", "live:docs/evidence/2026-10-12-gitlab-18.8.json#operation-list", "eval:evals/2026-10-12-gitlab-cli/report.md"],
       "params": [
         {
-          "name": "status",
+          "name": "state",
           "kind": "flag",
           "type": "enum",
           "required": false,
@@ -768,7 +768,7 @@
       ],
       "output": "operation_list",
       "error_codes": ["E_USAGE", "E_IO"],
-      "examples": ["gitlab-cli operation list --status unknown"]
+      "examples": ["gitlab-cli operation list --state unknown"]
     },
     {
       "path": "operation resolve",

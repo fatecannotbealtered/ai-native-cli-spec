@@ -16,9 +16,10 @@ on:
     tags:
       - "v*.*.*"
 
+# Least privilege (SEC-050): every job reads only; the job that signs and
+# publishes the GitHub release, and the npm publish (provenance), ask for more.
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 jobs:
   build:
@@ -142,6 +143,11 @@ jobs:
     name: Publish release assets
     needs: build
     runs-on: ubuntu-24.04
+    # The only job that writes: it signs checksums.txt keylessly (id-token) and
+    # creates the GitHub release (contents).
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v7
 
@@ -180,11 +186,14 @@ jobs:
             printf '## v%s\n\nSee [CHANGELOG.md](CHANGELOG.md) for details.\n' "$VERSION" > release-notes.md
           fi
 
+      # A tag with a semver prerelease part (v2.1.0-rc.1) is a GitHub prerelease;
+      # update never installs one unless asked with --target-version (CLI-070).
       - name: Upload GitHub Release assets
         uses: softprops/action-gh-release@v2
         with:
           files: release/*
           body_path: release-notes.md
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
   publish-npm:
     name: Publish to npm
@@ -224,9 +233,34 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist
+          mkdir -p dist signed
           gh release download "${GITHUB_REF_NAME}" --dir dist --pattern "*.tar.gz" --pattern "*.zip"
+          gh release download "${GITHUB_REF_NAME}" --dir signed \
+            --pattern "checksums.txt" --pattern "checksums.txt.sigstore.json"
           find dist -type f \( -name "*.tar.gz" -o -name "*.zip" \) -print
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      # The archives are repackaged for npm only after checksums.txt verifies
+      # against its Sigstore bundle with the exact identity update checks
+      # (CLI-070 item 4), and every archive against checksums.txt.
+      - name: Verify the signed checksums and the archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          cosign verify-blob \
+            --bundle signed/checksums.txt.sigstore.json \
+            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${GITHUB_REF}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            signed/checksums.txt
+          tr -d '\r' < signed/checksums.txt > dist/checksums.txt
+          (cd dist && sha256sum --check --strict --ignore-missing checksums.txt)
+          for f in dist/*.tar.gz dist/*.zip; do
+            [ -e "$f" ] || continue
+            grep -q "  $(basename "$f")\$" dist/checksums.txt || { echo "::error::$f is not in checksums.txt"; exit 1; }
+          done
+          rm dist/checksums.txt
 
       - name: Prepare npm platform packages
         run: node scripts/prepare-npm-platform-packages.js dist npm-platform
@@ -237,6 +271,10 @@ jobs:
           set -euo pipefail
           VERSION=$(node -p "require('./package.json').version")
           ROOT_PKG=$(node -p "require('./package.json').name")
+          # A prerelease (a version with "-") goes to the next dist-tag, so
+          # `npm install -g` keeps resolving the latest release.
+          TAG_ARGS=()
+          case "$VERSION" in *-*) TAG_ARGS=(--tag next) ;; esac
 
           for dir in npm-platform/*; do
             [ -d "$dir" ] || continue
@@ -245,7 +283,7 @@ jobs:
               echo "npm package ${PKG}@${VERSION} already published; skipping"
               continue
             fi
-            npm publish "./$dir" --access public --provenance
+            npm publish "./$dir" --access public --provenance "${TAG_ARGS[@]}"
           done
 
           if npm view "${ROOT_PKG}@${VERSION}" version 2>/dev/null | grep -qx "${VERSION}"; then
@@ -256,4 +294,4 @@ jobs:
           # source of truth): rewrite optionalDependencies to the published
           # version so an npm install never resolves a stale platform binary.
           node -e "const fs=require('fs'),p=require('./package.json');for(const k in (p.optionalDependencies||{}))p.optionalDependencies[k]=p.version;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+String.fromCharCode(10))"
-          npm publish --access public --provenance
+          npm publish --access public --provenance "${TAG_ARGS[@]}"

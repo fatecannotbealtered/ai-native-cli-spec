@@ -58,9 +58,14 @@ BUILTINS = {
 def check(schema: str, raw: bytes, parse: bool) -> None:
     """Raise ContractViolation when raw breaks schema."""
     if schema == "scope":
-        reason = V.validate_scope_file(raw)
-        if reason:
-            raise V.ContractViolation([reason])
+        # The structural check, as the Go corpus test does: the corpus holds paths for
+        # any platform, while load_scope checks them against this one.
+        v = V._V()
+        value = V._parse(raw, v)
+        v.raise_if_any()
+        V._generic(v, value)
+        V._scope_object(v, "scope", value)
+        v.raise_if_any()
         return
     if schema == "envelope":
         V.validate_envelope(raw if parse else _compact(raw))

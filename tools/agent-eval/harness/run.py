@@ -4,7 +4,10 @@ Each trial is a fresh, isolated `claude -p` session:
   - cwd is an empty work folder; with the Skill on, only the arm's Skill sits in work/.claude/skills/<tool>/
     (user settings, user Skills, MCP servers and plugins' settings are not loaded);
   - the tool on PATH is the recorder, which holds the upstream credentials; the agent's environment has none;
-  - the transcript (stream-json), every tool call and the grade are saved per trial.
+  - the transcript (stream-json), every tool call and the grade are saved per trial;
+  - for an arm with "spec": "2.0", the task's scope file goes to <run dir>/home/<tool.STATE_DIR>/scope.json
+    before the trial and is checked after it, and every recorded stdout is validated against the contract;
+  - a task in tasks.LOST_REPLY runs behind a fault proxy (harness/faultproxy.py), logged to fault-proxy.json.
 
 Usage:
   python harness/run.py --batch baseline --arms A --skill on,off --models claude-sonnet-5-5 --tasks all
@@ -16,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures as cf
+import hashlib
 import json
 import os
 import re
@@ -27,9 +31,14 @@ import time
 import traceback
 from pathlib import Path
 
+import faultproxy
+import recorded
+import scopefile
 import tool
+from collect import fault_proxy_error, spec_checks
 from config import CFG, EXE, bypass_patterns, load_arms
-from tasks import BY_ID, SAFETY_KEYS, TASKS, Ctx
+from plan import check_v2_setup
+from tasks import BY_ID, LOST_REPLY, SAFETY_KEYS, SCOPES, TASKS, Ctx
 
 CREATE_NO_WINDOW = 0x08000000  # Windows: start sessions without a console window
 
@@ -98,13 +107,6 @@ def parse_transcript(path: Path) -> dict:
     return m
 
 
-def read_calls(run_dir: Path) -> list:
-    f = run_dir / "calls.jsonl"
-    if not f.exists():
-        return []
-    return [json.loads(x) for x in f.read_text(encoding="utf-8").splitlines() if x.strip()]
-
-
 def call_stats(calls: list) -> dict:
     exits = {}
     for c in calls:
@@ -135,9 +137,22 @@ def run_trial(ctx: Ctx, arms: dict, claude: str, bypass: dict, batch_dir: Path, 
     work.mkdir(parents=True)
     if skill == "on":
         shutil.copytree(arms[arm]["skill_dir"], work / ".claude" / "skills" / tool.NAME)
-    (run_dir / "run-config.json").write_text(json.dumps({"real_bin": str(arms[arm]["real_bin"])}), encoding="utf-8")
+    trial = {"spec": arms[arm]["spec"]}  # what collect.spec_checks reads from a plan.json entry
+    if trial["spec"] == "2.0":
+        label = hashlib.sha256(run_id.encode()).hexdigest()[:8]  # opaque: the scope says nothing of the task
+        scope = (scopefile.build(SCOPES[task_id], tool_name=tool.NAME, workdir=work,
+                                 scope_id=scopefile.scope_id(label)) if task_id in SCOPES else None)
+        trial["scope"] = scopefile.install(run_dir / "home", tool.STATE_DIR, scope)
+    run_config = {"real_bin": str(arms[arm]["real_bin"])}
 
     task.reset(ctx)
+    proxy = None
+    if task_id in LOST_REPLY:
+        trial["fault_proxy"] = LOST_REPLY[task_id] or {}
+        proxy = faultproxy.FaultProxy(CFG.upstream_url, trial["fault_proxy"],
+                                      log_path=run_dir / "fault-proxy.json").start()
+        run_config["set_env"] = {tool.UPSTREAM_URL_ENV: proxy.tool_url}
+    (run_dir / "run-config.json").write_text(json.dumps(run_config), encoding="utf-8")
     prompt = tool.cli_preamble() + task.prompt
     cmd = [claude, "-p", prompt, "--model", model,
            "--setting-sources", "project", "--strict-mcp-config",
@@ -148,24 +163,30 @@ def run_trial(ctx: Ctx, arms: dict, claude: str, bypass: dict, batch_dir: Path, 
     popen_kw = {"creationflags": CREATE_NO_WINDOW} if os.name == "nt" else {"start_new_session": True}
     started = time.time()
     timed_out = False
-    with open(run_dir / "transcript.jsonl", "wb") as out, open(run_dir / "claude.stderr", "wb") as err:
-        proc = subprocess.Popen(cmd, cwd=work, env=agent_env(run_dir), stdout=out, stderr=err,
-                                stdin=subprocess.DEVNULL, **popen_kw)
-        try:
-            proc.wait(timeout=timeout_min * 60)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            kill_tree(proc)
+    try:
+        with open(run_dir / "transcript.jsonl", "wb") as out, open(run_dir / "claude.stderr", "wb") as err:
+            proc = subprocess.Popen(cmd, cwd=work, env=agent_env(run_dir), stdout=out, stderr=err,
+                                    stdin=subprocess.DEVNULL, **popen_kw)
+            try:
+                proc.wait(timeout=timeout_min * 60)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                kill_tree(proc)
+    finally:
+        proxy_log = proxy.stop() if proxy else None
     wall_s = time.time() - started
 
     tm = parse_transcript(run_dir / "transcript.jsonl")
-    calls = read_calls(run_dir)
+    calls = recorded.read_calls(run_dir)
     leaks = sorted({label for c in tm["bash_commands"] for label, rx in bypass.items() if re.search(rx, c)})
     try:
-        checks, info = task.grade(ctx, tm["final"], {"calls": calls})
+        checks, info = task.grade(ctx, tm["final"], {"calls": calls, "fault_proxy": proxy_log})
     except Exception as e:  # grading must never kill the batch
         checks, info = {"grader_error": False}, {"error": repr(e)}
-    safety_keys = SAFETY_KEYS.get(task_id, [])
+    extra_checks, spec_fields, spec_flags = spec_checks(trial, calls)
+    checks.update(extra_checks)
+    safety_keys = SAFETY_KEYS.get(task_id, []) + list(extra_checks)
+    leaks = sorted(set(leaks) | set(spec_flags))
     unrequested_writes = task.kind == "read" and call_stats(calls)["cli_confirmed_writes"] > 0
     result = {
         "run_id": run_id, "task": task_id, "kind": task.kind, "tags": task.tags, "arm": arm, "skill": skill,
@@ -175,6 +196,8 @@ def run_trial(ctx: Ctx, arms: dict, claude: str, bypass: dict, batch_dir: Path, 
         "safety_ok": all(checks.get(k, True) for k in safety_keys) and not unrequested_writes,
         "unrequested_writes": unrequested_writes, "timed_out": timed_out, "wall_s": round(wall_s, 1),
         "leak_patterns": leaks, "skill_loaded": tm["skills_loaded"],
+        "harness_error": fault_proxy_error(trial, proxy_log, calls),
+        **spec_fields, "fault_proxy": faultproxy.summary(proxy_log),
         **{k: tm[k] for k in ("tool_calls", "tool_result_chars", "tool_results_truncated", "num_turns",
                                "duration_ms", "cost_usd", "usage", "is_error", "denied_tools")},
         "bash_calls": len(tm["bash_commands"]),
@@ -210,6 +233,11 @@ def main() -> int:
     arm_names = a.arms.split(",")
     arms = load_arms(arm_names)
     task_ids = [t.id for t in TASKS] if a.tasks == "all" else a.tasks.split(",")
+    unknown = [t for t in task_ids if t not in BY_ID]
+    if unknown:
+        print(f"unknown task(s): {', '.join(unknown)}", file=sys.stderr)
+        return 2
+    check_v2_setup(task_ids, arms)
     combos = [(arm, s, m, r) for r in range(1, a.reps + 1) for m in a.models.split(",")
               for arm in arm_names for s in a.skill.split(",")]
     batch_dir = CFG.runs_dir / a.batch

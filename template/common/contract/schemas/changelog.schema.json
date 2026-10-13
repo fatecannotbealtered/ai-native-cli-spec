@@ -11,9 +11,13 @@
     "entries": {
       "type": "array",
       "items": {"$ref": "#/$defs/entry"}
-    }
+    },
+    "truncated": {"description": "Without --since, only the newest entries that fit the success budget (CLI-042) are listed.", "const": true},
+    "truncated_reason": {"$ref": "urn:ai-native-cli-spec:common:2.0#/$defs/text"},
+    "omitted": {"description": "How many older entries were left out.", "type": "integer", "minimum": 1}
   },
   "required": ["current_version", "entries"],
+  "dependentRequired": {"truncated": ["truncated_reason", "omitted"], "truncated_reason": ["truncated"], "omitted": ["truncated"]},
   "additionalProperties": false,
   "$defs": {
     "entry": {

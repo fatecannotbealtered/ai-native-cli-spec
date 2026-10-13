@@ -58,3 +58,7 @@ signs:
 release:
   # Idempotent re-tagging: overwrite artifacts if the release already exists.
   replace_existing_artifacts: true
+  # A semver prerelease tag (v2.1.0-rc.1) is published as a GitHub prerelease, so
+  # it is never the latest release; `update` installs one only with
+  # --target-version (CLI-070).
+  prerelease: auto

@@ -106,7 +106,6 @@ Every setting comes from, in order: a flag on the command, its environment varia
 | `{{ENV_PREFIX}}_CA_FILE` | PEM file with the certificates of a private CA; TLS is always verified (CLI-110) |
 | `{{ENV_PREFIX}}_DEBUG` | `1` writes `debug:` lines to stderr, with secrets redacted; for people debugging, not for agent sessions (CLI-102) |
 | `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | proxy for every request (CLI-110) |
-| `NO_COLOR` | no colour in `--format text` |
 
 `~/.{{TOOL_NAME}}/settings.json` holds named profiles, one per account or host, and no secrets (CLI-101):
 
@@ -125,7 +124,8 @@ Every setting comes from, in order: a flag on the command, its environment varia
 ```bash
 # Sign out first, once per profile, so the credential leaves the OS keyring.
 {{TOOL_NAME}} auth logout
-# Remove the CLI (npm); for a standalone binary, delete the binary instead.
+# Remove the CLI (npm); for a standalone binary, delete the binary, its skills/{{TOOL_NAME}} folder
+# beside it and, on Windows, any {{TOOL_NAME}}.exe.old* files there instead.
 npm uninstall -g {{NPM_PKG}}
 # Remove the state directory: confirm key, operation journal, scope file, settings file, update-check cache.
 rm -rf ~/.{{TOOL_NAME}}

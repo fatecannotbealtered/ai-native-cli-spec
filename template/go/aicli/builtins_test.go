@@ -237,8 +237,12 @@ func TestDoctorChecksTheInstalledSkill(t *testing.T) {
 			if c.status == "fail" && got["fix"] != "Run `notes update`." {
 				t.Fatalf("a too-old tool is fixed by updating it: %v", got)
 			}
-			if c.status == "warn" && !strings.Contains(fmt.Sprint(got["fix"]), "notes update") {
-				t.Fatalf("a missing or old Skill is synced by update: %v", got)
+			// update syncs an installed Skill; it does not install a missing one (F10).
+			switch {
+			case c.name == "not installed" && got["fix"] != "Install the Skill with the install command in the tool's README; update does not install a missing Skill.":
+				t.Fatalf("a missing Skill is installed from the README: %v", got)
+			case c.name != "not installed" && c.status == "warn" && !strings.Contains(fmt.Sprint(got["fix"]), "notes update"):
+				t.Fatalf("an old Skill is synced by update: %v", got)
 			}
 		})
 	}
@@ -379,7 +383,7 @@ func TestOperationBuiltins(t *testing.T) {
 		tok := h.mustToken("note", "update", "1", "--title", fmt.Sprintf("T%d", i))
 		h.run("note", "update", "1", "--title", fmt.Sprintf("T%d", i), "--confirm", tok)
 	}
-	r = h.run("operation", "list", "--status", "applied", "--limit", "2")
+	r = h.run("operation", "list", "--state", "applied", "--limit", "2")
 	if r.exit != 0 || len(r.data()["items"].([]any)) != 2 || r.data()["has_more"] != true || r.data()["next_offset"] == nil ||
 		r.data()["total"] != json.Number("3") {
 		t.Fatalf("paged list: %s", r)
@@ -436,11 +440,11 @@ func TestOperationListShowsTopLevelOperations(t *testing.T) {
 	if r := h.run("operation", "list", "--items"); len(r.data()["items"].([]any)) != 4 || r.data()["total"] != json.Number("4") {
 		t.Fatalf("--items lists the batch and its items: %s", r)
 	}
-	if r := h.run("operation", "list", "--status", "planned"); len(r.data()["items"].([]any)) != 1 || r.data()["total"] != json.Number("1") {
-		t.Fatalf("--status planned: %s", r)
+	if r := h.run("operation", "list", "--state", "planned"); len(r.data()["items"].([]any)) != 1 || r.data()["total"] != json.Number("1") {
+		t.Fatalf("--state planned: %s", r)
 	}
-	if r := h.run("operation", "list", "--status", "all"); len(r.data()["items"].([]any)) != 5 || r.data()["total"] != json.Number("5") {
-		t.Fatalf("--status all: %s", r)
+	if r := h.run("operation", "list", "--state", "all"); len(r.data()["items"].([]any)) != 5 || r.data()["total"] != json.Number("5") {
+		t.Fatalf("--state all: %s", r)
 	}
 	for i := 0; i < 11; i++ {
 		tk := h.mustToken("note", "update", "2", "--title", fmt.Sprintf("N%d", i))

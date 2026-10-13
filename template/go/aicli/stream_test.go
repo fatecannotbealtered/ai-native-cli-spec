@@ -174,12 +174,30 @@ func TestWriteOutputRefusesAFileThatChanged(t *testing.T) {
 	if err := os.WriteFile(path, []byte("someone else's\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The file is now an overwrite, and outputs only allow new files (C1): the
+	// confirm's scope check refuses it, naming the file under missing.roots.
 	r := h.run("note", "export", "--output", path, "--confirm", tok)
+	scope, _ := r.details()["scope"].(map[string]any)
+	missing, _ := scope["missing"].(map[string]any)
+	if r.code() != "E_FORBIDDEN" || !listHasString(missing["roots"], path) {
+		t.Fatalf("an overwrite under an outputs-only grant: %s", r)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "someone else's\n" {
+		t.Fatalf("the changed file was overwritten: %q", b)
+	}
+	// With roots granted too, the same change is state_drift, and the conflict carries
+	// the new plan: overwrite the file that is there now.
+	h.grant(map[string]any{"effects": []string{"artifact", "persist"}, "outputs": []string{h.dir}, "roots": []string{h.dir}})
+	_ = os.Remove(path)
+	tok = h.mustToken("note", "export", "--output", path)
+	if err := os.WriteFile(path, []byte("someone else's\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r = h.run("note", "export", "--output", path, "--confirm", tok)
 	expectConflict(t, r, "state_drift")
 	if b, _ := os.ReadFile(path); string(b) != "someone else's\n" {
 		t.Fatalf("the changed file was overwritten: %q", b)
 	}
-	// The conflict carries the new plan: overwrite the file that is there now.
 	p, _ := r.details()["preview"].(map[string]any)
 	if p == nil || !strings.HasPrefix(p["action"].(string), "Overwrite ") {
 		t.Fatalf("fresh preview: %s", r)

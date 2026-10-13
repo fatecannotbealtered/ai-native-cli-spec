@@ -71,22 +71,21 @@ type settingsFile struct {
 }
 
 // profileState is the active profile and where it came from (context.profile).
-// requested is a profile asked for by --profile or <PREFIX>_PROFILE that the
-// settings file does not define.
+// requested is a profile asked for by --profile or <PREFIX>_PROFILE (requestedFrom:
+// flag or env) that the settings file does not define.
 type profileState struct {
-	file      settingsFile
-	name      string
-	source    string
-	requested string
+	file          settingsFile
+	name          string
+	source        string
+	requested     string
+	requestedFrom string
 }
 
-// settingsPath is <PREFIX>_SETTINGS_FILE (made absolute), else
-// <state_dir>/settings.json; "" when no state directory can be resolved.
+// settingsPath is <PREFIX>_SETTINGS_FILE, else <state_dir>/settings.json; "" when
+// no state directory can be resolved. The variable must hold an absolute path
+// (C4): loadSettings refuses a relative one.
 func (a *App) settingsPath() string {
 	if p := strings.TrimSpace(a.env(a.envPrefix() + "_SETTINGS_FILE")); p != "" {
-		if abs, err := filepath.Abs(p); err == nil {
-			return abs
-		}
 		return p
 	}
 	dir, e := a.stateDirPath()
@@ -96,11 +95,35 @@ func (a *App) settingsPath() string {
 	return filepath.Join(dir, "settings.json")
 }
 
+// SettingsPath returns the settings file aicli reads (CLI-100): <PREFIX>_SETTINGS_FILE,
+// else <state_dir>/settings.json; "" when no state directory can be resolved. A
+// configure command (auth login) writes the profile's settings there, through the
+// gate.
+func (a *App) SettingsPath() string { return a.settingsPath() }
+
+// Profile returns the active profile's name and where it came from: flag, env,
+// config (default_profile) or single (the only profile); "" and none when no profile
+// is active (CLI-101). Tools key their keyring entries by it. For a command that
+// creates a profile (Meta.NewProfile, P6), a requested profile the settings file
+// does not have yet is the one returned, with its source (flag or env).
+func (a *App) Profile() (name, source string) {
+	ps := a.profileState()
+	if ps.name == "" && ps.requested != "" && a.createsProfile(nil) {
+		return ps.requested, ps.requestedFrom
+	}
+	return ps.name, ps.source
+}
+
 // loadSettings reads and strictly validates the settings file at path (CLI-101),
 // the way loadScope reads the scope file. A missing file is no profiles.
 func (a *App) loadSettings(path string) settingsFile {
 	sf := settingsFile{path: path, profiles: map[string]map[string]string{}, names: []string{}}
 	if path == "" {
+		return sf
+	}
+	if !filepath.IsAbs(path) {
+		sf.exists = true
+		sf.reason = a.envPrefix() + "_SETTINGS_FILE must be an absolute path"
 		return sf
 	}
 	info, err := os.Lstat(path)
@@ -113,17 +136,29 @@ func (a *App) loadSettings(path string) settingsFile {
 		return sf
 	}
 	mode := info.Mode()
-	if mode&fs.ModeSymlink != 0 || mode&fs.ModeIrregular != 0 || !mode.IsRegular() {
+	switch {
+	case mode&fs.ModeSymlink != 0 || mode&fs.ModeIrregular != 0:
 		sf.reason = "it must be a regular file, not a link"
+		return sf
+	case !mode.IsRegular():
+		sf.reason = "it is not a regular file"
+		return sf
+	}
+	if reason := fileTrustProblem(path, info); reason != "" {
+		sf.reason = reason
 		return sf
 	}
 	if info.Size() > maxSettingsBytes {
 		sf.reason = "it is larger than 64 KiB"
 		return sf
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := readLimited(path, maxSettingsBytes)
 	if err != nil {
 		sf.reason = "it cannot be read"
+		return sf
+	}
+	if len(raw) > maxSettingsBytes {
+		sf.reason = "it is larger than 64 KiB"
 		return sf
 	}
 	def, profiles, reason := a.parseSettings(raw)
@@ -169,11 +204,12 @@ func (a *App) parseSettings(raw []byte) (string, map[string]map[string]string, s
 			return "", nil, reason
 		}
 	}
-	def := ""
+	// default_profile is a profile name or null; "" names no profile and is invalid.
+	def, hasDefault := "", false
 	switch v := top["default_profile"].(type) {
 	case nil:
 	case string:
-		def = v
+		def, hasDefault = v, true
 	default:
 		return "", nil, "default_profile must be a string or null"
 	}
@@ -202,7 +238,7 @@ func (a *App) parseSettings(raw []byte) (string, map[string]map[string]string, s
 			case !declared:
 				return "", nil, fmt.Sprintf("profile `%s` sets `%s`, which is not a setting of %s", shown, truncateRunes(key, 40), a.toolName())
 			case s.Secret:
-				return "", nil, fmt.Sprintf("`%s` is a secret; secrets go in the OS keyring, not the settings file (SEC-040)", key)
+				return "", nil, fmt.Sprintf("`%s` is a secret; secrets go in the OS keyring, not the settings file (SEC-040)", truncateRunes(key, 40))
 			}
 			switch v := values[key].(type) {
 			case string:
@@ -212,12 +248,12 @@ func (a *App) parseSettings(raw []byte) (string, map[string]map[string]string, s
 			case bool:
 				profile[key] = fmt.Sprint(v)
 			default:
-				return "", nil, fmt.Sprintf("`%s` in profile `%s` must be a string, number or true/false", key, shown)
+				return "", nil, fmt.Sprintf("`%s` in profile `%s` must be a string, number or true/false", truncateRunes(key, 40), shown)
 			}
 		}
 		profiles[name] = profile
 	}
-	if def != "" {
+	if hasDefault {
 		if _, ok := profiles[def]; !ok {
 			return "", nil, fmt.Sprintf("default_profile `%s` is not one of its profiles", truncateRunes(def, 64))
 		}
@@ -251,8 +287,9 @@ func (a *App) profileState() profileState {
 		a.debugOnce("settings file: %s (valid)", ps.file.path)
 	}
 	if ps.file.reason == "" {
+		// --profile "" counts as not given (D10): <PREFIX>_PROFILE applies.
 		requested, source := "", ""
-		if f := a.profileFlag(); f != nil && f.Changed {
+		if f := a.profileFlag(); f != nil && f.Changed && f.Value.String() != "" {
 			requested, source = f.Value.String(), "flag"
 		} else if v := a.env(a.envPrefix() + "_PROFILE"); v != "" {
 			requested, source = v, "env"
@@ -262,7 +299,7 @@ func (a *App) profileState() profileState {
 		case requested != "" && defined:
 			ps.name, ps.source = requested, source
 		case requested != "":
-			ps.requested = requested
+			ps.requested, ps.requestedFrom = requested, source
 		case ps.file.defaultProfile != "":
 			ps.name, ps.source = ps.file.defaultProfile, "config"
 		case len(ps.file.names) == 1:
@@ -297,17 +334,134 @@ func (a *App) settingsError(sf settingsFile) *Error {
 	})
 }
 
-// unknownProfileError reports a requested profile the settings file does not define.
+// unknownProfileError reports a requested profile the settings file does not define
+// (CLI-101, D5). The requested name is the caller's text: it goes to
+// details.profile, declared untrusted, never into message or next_action (CLI-017).
+// did_you_mean lists the closest profile names, else the file's first names.
 func (a *App) unknownProfileError(ps profileState) *Error {
-	name := truncateRunes(ps.requested, 64)
-	e := NewError("E_CONFIG", fmt.Sprintf("No profile named `%s` in %s.", name, ps.file.path), map[string]any{
-		"dispatch_state": "not_started",
-		"next_action":    fmt.Sprintf("Use one of the profiles `%s context` lists, or ask the user to add `%s`.", a.toolName(), name),
-	})
-	if near := closestWords(ps.requested, ps.file.names); len(near) > 0 {
-		e.Details["did_you_mean"] = near
+	path := ps.file.path
+	if path == "" {
+		path = "the settings file"
+	}
+	message := "The requested profile is not in the settings file."
+	next := fmt.Sprintf("Use one of the profiles in details.did_you_mean, or add the profile to %s.", path)
+	if !ps.file.exists {
+		message = "The requested profile does not exist: there is no settings file."
+		next = fmt.Sprintf("Create %s with this profile, or run without --profile.", path)
+	}
+	e := NewError("E_CONFIG", message, map[string]any{"dispatch_state": "not_started", "next_action": next,
+		"profile": truncateRunes(ps.requested, 64), "source": ps.requestedFrom})
+	e.Untrusted = []string{"profile"}
+	near := closestWords(ps.requested, ps.file.names)
+	if len(near) == 0 {
+		near = ps.file.names[:min(len(ps.file.names), 3)]
+	}
+	if len(near) > 0 {
+		e.Details["did_you_mean"] = append([]string{}, near...)
 	}
 	return e
+}
+
+// checkProfile stops a tool command whose requested profile (--profile or
+// <PREFIX>_PROFILE) is not in the settings file (CLI-101, D4): E_CONFIG before the
+// command's own code runs, whether or not it reads a setting. The built-ins keep
+// working, so context and doctor can report the problem, and so does a command that
+// creates the profile (Meta.NewProfile, P6).
+func (a *App) checkProfile(c *cobra.Command) error {
+	if a.Settings == nil || a.reg.builtin[c] || a.createsProfile(c) {
+		return nil
+	}
+	if ps := a.profileState(); ps.file.reason == "" && ps.requested != "" {
+		return a.unknownProfileError(ps)
+	}
+	return nil
+}
+
+// createsProfile reports a command declared with Meta.NewProfile (P6); nil means the
+// running command.
+func (a *App) createsProfile(c *cobra.Command) bool {
+	if c == nil && a.run != nil {
+		c = a.run.cmd
+	}
+	m := a.metaFor(c)
+	return m != nil && m.NewProfile
+}
+
+// SetProfileSettings writes values into one profile of the settings file (CLI-101,
+// P5), for a configure command such as auth login to call from its Apply. profile
+// must match ^[a-z0-9][a-z0-9_-]{0,63}$ and every key must be a declared setting
+// that is not secret (secrets go in the OS keyring, SEC-040). The current file is
+// read with the same strict parser, and an invalid file is E_CONFIG and never
+// overwritten. The profile is created when missing; every other key, profile and
+// default_profile is kept. The file is written atomically (a temporary file in the
+// same directory, fsync, rename) with mode 0600; the state directory is created
+// 0700 when the file lives there. A failure to write is E_IO. On any error nothing
+// was written, so Apply returns it wrapped in NotDispatched.
+func (a *App) SetProfileSettings(profile string, values map[string]string) *Error {
+	if !profileNamePattern.MatchString(profile) {
+		e := Validation("--profile", "a profile name: a-z, 0-9, _ and -, up to 64 characters", "The profile name is not allowed; nothing was written.")
+		e.Details["next_action"] = "Give a profile name of a-z, 0-9, _ and -, up to 64 characters, starting with a letter or a digit."
+		return e
+	}
+	for _, k := range sortedKeys(values) {
+		s, declared := a.settingNamed(k)
+		switch {
+		case !declared:
+			return internalError("App.SetProfileSettings: %q is not declared in App.Settings.", k)
+		case s.Secret:
+			return internalError("App.SetProfileSettings: %q is a secret setting; secrets go in the OS keyring, not the settings file (SEC-040).", k)
+		}
+	}
+	path := a.settingsPath()
+	if path == "" {
+		if _, e := a.stateDirPath(); e != nil {
+			return e
+		}
+		return ioError("The settings file cannot be found; nothing was written.", fmt.Sprintf("Set %s_STATE_DIR or %s_SETTINGS_FILE.", a.envPrefix(), a.envPrefix()), nil)
+	}
+	sf := a.loadSettings(path)
+	if sf.reason != "" {
+		return a.settingsError(sf)
+	}
+	top := map[string]any{}
+	if sf.exists {
+		raw, err := readLimited(path, maxSettingsBytes)
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.UseNumber()
+		if err != nil || dec.Decode(&top) != nil {
+			return ioError("The settings file cannot be read; nothing was written.", fmt.Sprintf("Check %s.", path), err)
+		}
+	}
+	profiles, _ := top["profiles"].(map[string]any)
+	if profiles == nil {
+		profiles = map[string]any{}
+	}
+	entry, _ := profiles[profile].(map[string]any)
+	if entry == nil {
+		entry = map[string]any{}
+	}
+	for k, v := range values {
+		entry[k] = v
+	}
+	profiles[profile] = entry
+	top["profiles"] = profiles
+	data, err := encodeJSON(top, true)
+	if err != nil {
+		return internalError("The settings file cannot be encoded.")
+	}
+	dir := filepath.Dir(path)
+	if state, e := a.stateDirPath(); e == nil && strings.EqualFold(filepath.Clean(state), filepath.Clean(dir)) {
+		if _, e := a.ensureStateDir(); e != nil {
+			return e
+		}
+	}
+	if err := writeFileAtomic(dir, filepath.Base(path), data); err != nil {
+		return ioError("The settings file cannot be written; nothing was changed.", fmt.Sprintf("Check that %s is writable.", dir), err)
+	}
+	if st := a.run; st != nil {
+		st.profile = nil // read again on the next Setting
+	}
+	return nil
 }
 
 // Setting returns the value of a declared setting and where it came from (CLI-100):
@@ -324,11 +478,14 @@ func (a *App) Setting(cmd *cobra.Command, name string) (value, source string, er
 	if ps.file.reason != "" {
 		return "", "", a.settingsError(ps.file)
 	}
-	if ps.requested != "" {
-		return "", "", a.unknownProfileError(ps)
-	}
 	if cmd == nil && a.run != nil {
 		cmd = a.run.cmd
+	}
+	// A requested profile that does not exist yet stops every setting, except for a
+	// command that creates it (Meta.NewProfile, P6): it reads the flag, the
+	// environment and the default.
+	if ps.requested != "" && !a.createsProfile(cmd) {
+		return "", "", a.unknownProfileError(ps)
 	}
 	if s.Flag != "" && cmd != nil {
 		if f := lookupFlag(cmd, s.Flag); f != nil && f.Changed {

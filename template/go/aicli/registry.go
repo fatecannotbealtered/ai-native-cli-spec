@@ -70,6 +70,13 @@ type Meta struct {
 	// DeprecatedFlags marks flags deprecated: flag name -> replacement text. Help
 	// and reference prefix the flag's description; using it adds a notice.
 	DeprecatedFlags map[string]string
+	// NewProfile lets the command run with a requested profile (--profile or
+	// <PREFIX>_PROFILE) that the settings file does not have yet, as `auth login
+	// --profile lab` creates it (CLI-101, P6): the unknown-profile refusal is
+	// skipped, App.Setting reads the flag, the environment and the default only,
+	// App.Profile returns the requested name, and that name is still bound into the
+	// confirm token. Apply creates the profile with App.SetProfileSettings.
+	NewProfile bool
 }
 
 // deprecatedText is the help and reference text of a deprecated command or flag
@@ -98,7 +105,7 @@ func (a *App) commandDeprecationNotice(c *cobra.Command, m *Meta) {
 	}
 	if text := strings.TrimSuffix(strings.TrimSpace(m.Deprecated), "."); text != "" {
 		removal := "the next major version of " + a.toolName()
-		if v, err := ParseVersion(a.Version); err == nil {
+		if v, err := ParseVersion(a.version()); err == nil {
 			removal = fmt.Sprintf("%s %d.0.0", a.toolName(), v.Major+1)
 		}
 		a.Notice(Notice{Type: "deprecated", Severity: "warning",
@@ -253,6 +260,34 @@ func (m *Meta) effectStrings() []string {
 
 func (m *Meta) isSecret(name string) bool {
 	return contains(m.Secrets, name)
+}
+
+// normalizeSecrets completes every registered command's Meta.Secrets so there is
+// one notion of a secret flag (B2, SEC-021): a flag is secret when Meta.Secrets
+// names it, when it is the Flag of a Secret setting, or when it is the literal twin
+// of a secret file flag or the file flag of a secret literal (Meta.FileInputs).
+// Binding, previews, records, reference, suggestions, conformance and debug lines
+// all read the completed list. It runs before any command and in the tree check.
+func (a *App) normalizeSecrets() {
+	for c, m := range a.reg.meta {
+		add := func(name string) {
+			if name != "" && !contains(m.Secrets, name) {
+				m.Secrets = append(m.Secrets, name)
+			}
+		}
+		for _, s := range a.Settings {
+			if s.Secret && s.Flag != "" && lookupFlag(c, s.Flag) != nil {
+				add(s.Flag)
+			}
+		}
+		for _, file := range sortedKeys(m.FileInputs) {
+			bound := m.FileInputs[file]
+			if m.isSecret(file) || m.isSecret(bound) {
+				add(file)
+				add(bound)
+			}
+		}
+	}
 }
 
 // cmdPath is the command path without the tool name ("note create").
@@ -652,7 +687,7 @@ func (a *App) referenceFull() map[string]any {
 		exits[strconv.Itoa(code)] = meaning
 	}
 	return map[string]any{
-		"tool": a.toolName(), "version": a.Version, "spec_version": SpecVersion, "schema_version": SchemaVersion,
+		"tool": a.toolName(), "version": a.version(), "spec_version": SpecVersion, "schema_version": SchemaVersion,
 		"risk_tier": a.RiskTier, "global_flags": a.globalParams(), "commands": cmds, "schemas": a.schemaEntries(),
 		"error_codes": a.codeTable(codes), "exit_codes": exits,
 	}
@@ -681,7 +716,7 @@ func (a *App) referenceIndex(group string) (map[string]any, *Error) {
 	for _, c := range cmds {
 		entries = append(entries, a.indexFor(c))
 	}
-	data := map[string]any{"tool": a.toolName(), "version": a.Version, "commands": entries}
+	data := map[string]any{"tool": a.toolName(), "version": a.version(), "commands": entries}
 	if fitsIndexBudget(data) {
 		return data, nil
 	}
@@ -709,7 +744,7 @@ func (a *App) referenceIndex(group string) (map[string]any, *Error) {
 		}
 		groups = append(groups, groupEntry{Path: cmdPath(top), Summary: summary, CommandCount: count})
 	}
-	return map[string]any{"tool": a.toolName(), "version": a.Version, "groups": groups}, nil
+	return map[string]any{"tool": a.toolName(), "version": a.version(), "groups": groups}, nil
 }
 
 func fitsIndexBudget(data map[string]any) bool {
@@ -753,7 +788,7 @@ func (a *App) referenceCommand(path string) (map[string]any, *Error) {
 	for code, v := range a.codeTable(entry.ErrorCodes) {
 		codes[code] = map[string]any{"exit": v["exit"], "retryable": v["retryable"]}
 	}
-	return map[string]any{"tool": a.toolName(), "version": a.Version, "command": entry, "schemas": schemas, "error_codes": codes}, nil
+	return map[string]any{"tool": a.toolName(), "version": a.version(), "command": entry, "schemas": schemas, "error_codes": codes}, nil
 }
 
 // unknownReferencePath answers reference --command with a path that names no
@@ -1100,15 +1135,15 @@ func (a *App) fieldsLine(m *Meta) string {
 // checkTree reports registry problems (CLI-021, CLI-022, CLI-025, CLI-027, R02).
 // The conformance suite fails on any of them.
 func (a *App) checkTree() []string {
+	a.normalizeSecrets()
 	var problems []string
 	add := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
 	tool := a.toolName()
 	if !contains(riskTierValues, a.RiskTier) {
 		add("App.RiskTier %q is not one of %s", a.RiskTier, strings.Join(riskTierValues, ", "))
 	}
-	if strings.TrimSpace(a.Version) == "" {
-		add("App.Version is empty")
-	}
+	// An empty or "dev" App.Version is a development build, which reports a
+	// version derived from the changelog (P14); it is not a tree problem.
 	problems = append(problems, a.checkExtCodes()...)
 	problems = append(problems, a.checkSettings()...)
 	problems = append(problems, a.checkUpdateConfig()...)
@@ -1227,12 +1262,31 @@ func (a *App) checkTree() []string {
 		if m.Positional != "" && lookupFlag(c, m.Positional) == nil {
 			add("%q: Meta.Positional names --%s, which the command does not define", path, m.Positional)
 		}
-		for file, bound := range m.FileInputs {
+		boundBy := map[string]string{}
+		for _, file := range sortedKeys(m.FileInputs) {
+			bound := m.FileInputs[file]
 			if lookupFlag(c, file) == nil {
 				add("%q: Meta.FileInputs names --%s, which the command does not define", path, file)
 			}
 			if strings.TrimSpace(bound) == "" {
 				add("%q: Meta.FileInputs maps --%s to an empty name", path, file)
+				continue
+			}
+			// One bound name, one value (B4): two file flags for it, or a file flag
+			// mapped onto a flag that cannot be its literal twin, would bind two
+			// different things under one name.
+			if other, dup := boundBy[bound]; dup {
+				add("%q: Meta.FileInputs maps both --%s and --%s to %q; a bound name has one file flag", path, other, file, bound)
+			}
+			boundBy[bound] = file
+			if _, isFile := m.FileInputs[bound]; isFile {
+				add("%q: Meta.FileInputs maps --%s onto --%s, which is itself a file input", path, file, bound)
+			} else if isGlobalFlag(bound) || (bound == "profile" && a.Settings != nil) {
+				add("%q: Meta.FileInputs maps --%s onto --%s, a global flag", path, file, bound)
+			} else if lf := lookupFlag(c, bound); lf != nil {
+				if typ, multiple := flagType(lf); typ != "string" || multiple || lf.NoOptDefVal != "" {
+					add("%q: Meta.FileInputs maps --%s onto --%s, which is not a string flag and so cannot be its literal twin", path, file, bound)
+				}
 			}
 		}
 		for _, s := range m.Secrets {

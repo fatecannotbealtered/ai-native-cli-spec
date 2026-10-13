@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ._util import Ordered, truncate_runes
+from ._util import Ordered, RawNumber, truncate_runes
 from .contract_gen import (
     CONFLICT_VALUES,
     CORE_CODES,
@@ -307,6 +307,48 @@ def conflict_error(conflict: str, message: str, next_action: str) -> Error:
 CODE_PATTERN = re.compile(r"E_[A-Z0-9][A-Z0-9_]*")
 
 
+# Error detail keys whose values the library generates from fixed sets (ids, tokens,
+# times, enum values): they carry no secret, and redacting a coincidental match would
+# break them (D1).
+STRUCTURAL_DETAILS = frozenset(
+    (
+        "dispatch_state",
+        "problem",
+        "conflict",
+        "operation_id",
+        "active_operation",
+        "confirm_token",
+        "expires_at",
+        "stage",
+        "skill_sync_status",
+        "install_method",
+        "signature_status",
+        "status",
+        "action",
+    )
+)
+
+
+def redact_strings(v: Any, redact: Any, keep: frozenset[str] = frozenset()) -> Any:
+    """v with redact applied to every string inside it (numbers kept as their text
+    are left alone); maps keep their keys and type, lists and tuples their type. The
+    values of the keys in keep are left as they are, at any depth."""
+    if isinstance(v, RawNumber):
+        return v
+    if isinstance(v, str):
+        return redact(v)
+    if isinstance(v, dict):
+        out = type(v)() if isinstance(v, Ordered) else {}
+        for k, x in v.items():
+            out[k] = x if k in keep else redact_strings(x, redact, keep)
+        return out
+    if isinstance(v, list):
+        return [redact_strings(x, redact, keep) for x in v]
+    if isinstance(v, tuple):
+        return tuple(redact_strings(x, redact, keep) for x in v)
+    return v
+
+
 class ErrorsMixin:
     """App methods for codes, default next actions and error normalisation."""
 
@@ -376,7 +418,7 @@ class ErrorsMixin:
             ),
             "E_CONFLICT": "Re-read the current state, then run the command again with --dry-run.",
             "E_OUTCOME_UNKNOWN": (
-                f"Run `{tool} operation list --status unknown` and look the operation up before "
+                f"Run `{tool} operation list --state unknown` and look the operation up before "
                 "doing anything else."
             ),
             "E_NETWORK": "Check connectivity to the upstream, then retry.",
@@ -461,6 +503,13 @@ class ErrorsMixin:
                     else self.tool_name()
                 )
         message = (e.message or "").strip() or spec.meaning
+        # No emitted error shows a secret, wherever its text came from: the message, a
+        # cause or upstream message, a crash text or any nested detail (D1, SEC-021);
+        # the values of the library's structural keys are kept.
+        values = self.error_redaction_values()
+        if values:
+            message = self.redact(message, values)
+            details = redact_strings(details, lambda s: self.redact(s, values), STRUCTURAL_DETAILS)
         untrusted = []
         for p in e.untrusted:
             p = p.removeprefix("error.details.")

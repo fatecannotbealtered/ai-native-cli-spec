@@ -1,5 +1,5 @@
 """The built-in update (D38): the golden results G-U1..G-U5 and the failure paths,
-against a fake GitHub (a local HTTP server), a fake verifier and fake commands. No
+against a fake GitHub (a local HTTPS server), a fake verifier and fake commands. No
 network, no package manager and no real signature are involved."""
 
 from __future__ import annotations
@@ -8,8 +8,10 @@ import hashlib
 import io
 import json
 import os
+import ssl
 import sys
 import tarfile
+import tempfile
 import threading
 import zipfile
 from collections.abc import Iterator
@@ -90,15 +92,64 @@ def _no_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
 
 # ---------------------------------------------------------------- the fake GitHub
 
+# Release assets and redirects must be https (E13): the fake GitHub serves TLS with
+# this certificate for 127.0.0.1, issued by a test CA that the tests trust through
+# NOTES_CA_FILE like a private CA (CLI-110). Generated once for these tests only
+# (ECDSA P-256, valid 2026-2125); the key protects nothing.
+FAKE_GITHUB_CA = """-----BEGIN CERTIFICATE-----
+MIIBtjCCAVygAwIBAgIUL2u8/3etJHv1q60g/8MOV3f8LzQwCgYIKoZIzj0EAwIw
+JjEkMCIGA1UEAwwbYWljbGkgdGVzdCBDQSAoZmFrZSBHaXRIdWIpMCAXDTI2MDEw
+MTAwMDAwMFoYDzIxMjUxMjMxMDAwMDAwWjAmMSQwIgYDVQQDDBthaWNsaSB0ZXN0
+IENBIChmYWtlIEdpdEh1YikwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQvGXO1
+AtxIgQcXbVM+gfqgQCkJMF+RU/YrnL/FAltoVe5FcF5fB5rMz8RFIBIRvJ/iR8uJ
+JsCLWZ7qOG1wviapo2YwZDASBgNVHRMBAf8ECDAGAQH/AgEAMA4GA1UdDwEB/wQE
+AwIBBjAdBgNVHQ4EFgQUGjNklabH3W3lvaaM10GCatVrj18wHwYDVR0jBBgwFoAU
+GjNklabH3W3lvaaM10GCatVrj18wCgYIKoZIzj0EAwIDSAAwRQIgRRpegJT81poH
+THbeIXkJM/PlOcwKAUvA3U9kjLZbhYgCIQDPGXpESkPh0SEUmL7Km5KSJ5gU5m3k
+rWGzz5LX7FqbjQ==
+-----END CERTIFICATE-----
+"""
+FAKE_GITHUB_CERT = """-----BEGIN CERTIFICATE-----
+MIIB0TCCAXegAwIBAgIUUCq6l9eAwFuS5dFuN4lT7u17mrcwCgYIKoZIzj0EAwIw
+JjEkMCIGA1UEAwwbYWljbGkgdGVzdCBDQSAoZmFrZSBHaXRIdWIpMCAXDTI2MDEw
+MTAwMDAwMFoYDzIxMjUxMjMxMDAwMDAwWjAUMRIwEAYDVQQDDAlsb2NhbGhvc3Qw
+WTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAS6b/GZi2VIujKKsM5v4xklnw7HcS3d
+9WKi6ZD3PWmCPg90dkl+RzFHsVxjTuDU097Z6m4J4Sc+zJqEGLm4QgKCo4GSMIGP
+MAwGA1UdEwEB/wQCMAAwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoGCCsGAQUF
+BwMBMBoGA1UdEQQTMBGHBH8AAAGCCWxvY2FsaG9zdDAdBgNVHQ4EFgQUmTg1mFDe
+tM6Xs3t3HwL9PkgKWhwwHwYDVR0jBBgwFoAUGjNklabH3W3lvaaM10GCatVrj18w
+CgYIKoZIzj0EAwIDSAAwRQIgT/0klEJWt1nmbPBTUePOH1K2+2JYc/jVIbAINvTr
+GSICIQDu6SofqMdtaQ+MfreJfQKB+bhEnboGncsotGki4TwrTQ==
+-----END CERTIFICATE-----
+"""
+FAKE_GITHUB_KEY = """-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgteYGucRBaX2x7EV1
+CjrPut4sSohJKN5Dj5D8vqNeQOWhRANCAAS6b/GZi2VIujKKsM5v4xklnw7HcS3d
+9WKi6ZD3PWmCPg90dkl+RzFHsVxjTuDU097Z6m4J4Sc+zJqEGLm4QgKC
+-----END PRIVATE KEY-----
+"""
+
 
 class FakeGitHub:
-    """The GitHub API and release downloads on 127.0.0.1. routes maps a request
-    path (with its query) to (status, headers, body), or to "drop" to close the
-    connection without an answer; anything else is 404."""
+    """The GitHub API and release downloads on https://127.0.0.1. routes maps a
+    request path (with its query) to (status, headers, body), or to "drop" to close
+    the connection without an answer; anything else is 404. ca_file is the PEM of
+    the CA its certificate is issued by."""
 
     def __init__(self) -> None:
         self.routes: dict[str, Any] = {}
         self.requests: list[tuple[str, dict[str, str]]] = []
+        self._pem = tempfile.TemporaryDirectory(prefix="fake-github-")
+        pem: dict[str, str] = {}
+        for name, text in (
+            ("ca.pem", FAKE_GITHUB_CA),
+            ("cert.pem", FAKE_GITHUB_CERT),
+            ("key.pem", FAKE_GITHUB_KEY),
+        ):
+            pem[name] = os.path.join(self._pem.name, name)
+            with open(pem[name], "w", encoding="ascii") as fh:
+                fh.write(text)
+        self.ca_file = pem["ca.pem"]
         gh = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -122,12 +173,15 @@ class FakeGitHub:
                 pass
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        tls.load_cert_chain(pem["cert.pem"], pem["key.pem"])
+        self.server.socket = tls.wrap_socket(self.server.socket, server_side=True)
         self.thread = threading.Thread(
             target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
         )
         self.thread.start()
         self.host = f"127.0.0.1:{self.server.server_address[1]}"
-        self.base = "http://" + self.host
+        self.base = "https://" + self.host
 
     def json(self, path: str, obj: Any, status: int = 200, headers: dict[str, str] | None = None):
         self.routes[path] = (
@@ -145,6 +199,7 @@ class FakeGitHub:
     def close(self) -> None:
         self.server.shutdown()
         self.server.server_close()
+        self._pem.cleanup()
 
 
 def skill_md(version: str) -> str:
@@ -254,6 +309,7 @@ class Box:
         write(os.path.join(self.skill_roots[0], "notes", "SKILL.md"), skill_md("1.3.0"))
         os.makedirs(os.path.join(self.root, "h"), exist_ok=True)
         self.h = THarness(os.path.join(self.root, "h"))
+        self.h.env["NOTES_CA_FILE"] = self.gh.ca_file  # trusts the fake GitHub's TLS
         self.h.build = self.build
 
     def fake_run(self, argv: list[str]) -> tuple[int, bytes]:
@@ -597,19 +653,22 @@ def test_package_manager_missing_or_unknown_package(box: Box) -> None:
         raise FileNotFoundError(argv[0])
 
     box.cfg["run"] = missing
+    box.method = "npm"
     r = box.run("update")
-    assert r.code() == "E_CONFIG" and r.env["error"]["message"] == "pip was not found on PATH.", r
+    assert r.code() == "E_CONFIG" and r.env["error"]["message"] == "npm was not found on PATH.", r
     assert r.details()["dispatch_state"] == "not_started"
 
 
 def test_pip_update_has_no_skill_source(box: Box) -> None:
     """updated with skill_sync_status skipped (pip has no Skill source) is valid,
-    with skill_sync_command."""
+    without skill_sync_command (F10); pip is this interpreter's `python -m pip`
+    (E7), checked first."""
     box.method = "pip"
     box.cfg["pypi_package"] = "notes-cli-example"
     box.gh.json(LIST, [release("1.3.1")])
     r = box.run("update")
     assert r.exit == 0, r
+    command = [sys.executable, "-m", "pip", "install", "--upgrade", "notes-cli-example==1.3.1"]
     assert r.data() == {
         "status": "updated",
         "current_version": "1.3.1",
@@ -620,11 +679,11 @@ def test_pip_update_has_no_skill_source(box: Box) -> None:
         "signature_status": "not_checked",
         "signature_verified": False,
         "skill_sync_status": "skipped",
-        "skill_sync_command": "notes update",
         "binary_replaced": True,
-        "command": ["pip", "install", "--upgrade", "notes-cli-example==1.3.1"],
+        "command": command,
     }, r.data()
     V._run(lambda v, d: V._update(v, "data", d), r.data())
+    assert box.runs[:2] == [[sys.executable, "-m", "pip", "--version"], command], box.runs
 
 
 def test_check_of_a_downgrade_and_a_missing_executable(box: Box) -> None:
@@ -633,12 +692,17 @@ def test_check_of_a_downgrade_and_a_missing_executable(box: Box) -> None:
     assert r.exit == 0 and r.data()["status"] == "available", r
     assert r.data()["target_version"] == "1.2.0" and r.data()["update_available"] is True, r
     V._run(lambda v, d: V._update(v, "data", d), r.data())
+    # E11: --check never needs the executable; the binary path fails at download
     box.exe = ""
+    box.gh.json(LIST, [publish(box.gh, "1.3.1")])
     r = box.run("update", "--check")
+    assert r.exit == 0 and r.data()["status"] == "available", r
+    r = box.run("update")
     assert r.exit == 1 and r.code() == "E_IO", r
     assert r.env["error"]["message"] == (
         "notes cannot find its own executable, so it cannot update itself."
     )
+    assert r.details()["stage"] == "download" and r.details()["dispatch_state"] == "not_started"
     assert r.details()["next_action"] == "Reinstall notes with the install command in its README."
 
 
@@ -695,7 +759,8 @@ def test_up_to_date_run_syncs_the_skills(box: Box) -> None:
     os.rmdir(os.path.join(box.skill_roots[0], "notes"))
     r = box.run("update")
     assert r.data()["skill_sync_status"] == "skipped", r
-    assert r.data()["skill_sync_command"] == "notes update", r
+    # F10: no Skill installed is no reason for the command: update never installs one
+    assert "skill_sync_command" not in r.data(), r
 
 
 def test_runs_from_source_is_unsupported(box: Box) -> None:
@@ -885,6 +950,7 @@ def test_conformance_of_a_tool_with_update_and_settings(box: Box) -> None:
             "dangerous": True,
             "destinations": ["bob@example.com"],
             "outputs": [export],
+            "roots": [export],  # the sample's file is overwritten after G04 created it
         },
     )
     aicli.run_conformance(h)
@@ -913,3 +979,333 @@ def test_reference_of_a_tool_with_update_validates(box: Box) -> None:
         "target-version",
         "allow-downgrade",
     }
+
+
+# ---------------------------------------------------------------- decision 46 (section E)
+
+
+def executable(path: Any, body: bytes = b"#!/bin/sh\necho planted\n") -> str:
+    write(str(path), body)
+    if os.name != "nt":
+        os.chmod(str(path), 0o755)
+    return str(path)
+
+
+def test_e1_programs_are_never_found_in_the_current_directory(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cloned repository's npm.bat in the current directory never runs: only
+    absolute PATH entries are searched, never "", "." or a relative entry."""
+    repo = tmp_path / "repo"
+    for name in ("npm", "npm.bat", "npm.cmd", "npm.exe"):
+        executable(repo / name)
+    monkeypatch.chdir(repo)
+    relative = os.pathsep.join(["", ".", "repo", "." + os.sep])
+    assert U.find_program("npm", relative) is None
+    with pytest.raises(FileNotFoundError):
+        U._default_run(["npm", "--version"], 5, relative)
+    real = executable(tmp_path / "bin" / ("npm.cmd" if os.name == "nt" else "npm"))
+    found = U.find_program("npm", os.pathsep.join([".", str(tmp_path / "bin")]))
+    assert found is not None and os.path.normcase(found) == os.path.normcase(real), found
+
+
+def test_e2_prerelease_tags_are_never_installed_implicitly(box: Box) -> None:
+    box.h.env["NOTES_DEBUG"] = "1"
+    box.gh.json(LIST, [release("2.0.0-rc.1"), release("1.3.1")])  # prerelease flag false
+    r = box.run("update", "--check")
+    assert r.exit == 0 and r.data()["target_version"] == "1.3.1", r
+    assert "debug: update: skipped release tag v2.0.0-rc.1 (a prerelease)\n" in r.stderr
+    # the notice refresh skips it too
+    box.gh.json(RELEASES + "/latest", release("2.0.0-rc.1"))
+    notices = box.run("doctor").env["meta"].get("notices") or []
+    assert not any(n.get("latest_version") == "2.0.0-rc.1" for n in notices), notices
+    # only --target-version reaches a prerelease
+    box.gh.json(RELEASES + "/tags/v2.0.0-rc.1", release("2.0.0-rc.1"))
+    r = box.run("update", "--check", "--target-version", "2.0.0-rc.1")
+    assert r.exit == 0 and r.data()["target_version"] == "2.0.0-rc.1", r
+
+
+def skill_md_of(name: str, version: str, note: str = "") -> str:
+    return f'---\nname: {name}\nmetadata:\n  version: "{version}"\n---\n{note}\n'
+
+
+def test_e3_shared_skills_directory_keeps_other_tools(box: Box) -> None:
+    """<exe dir>/skills can hold several tools' Skills: replace and sync touch only
+    the names this tool's release ships."""
+    other = os.path.join(box.bin, "skills", "other-cli", "SKILL.md")
+    write(other, skill_md_of("other-cli", "0.9.0", "OLD COPY"))
+    user_other = os.path.join(box.skill_roots[0], "other-cli", "SKILL.md")
+    write(user_other, skill_md_of("other-cli", "2.0.0", "USER COPY"))
+    box.gh.json(LIST, [publish(box.gh, "1.3.1")])
+    r = box.run("update")
+    assert r.exit == 0 and r.data()["skill_sync_status"] == "synced", r
+    assert b"OLD COPY" in read(other), "another tool's Skill beside the binary stays"
+    assert b"USER COPY" in read(user_other), "another tool's installed Skill is not synced"
+    assert box.skill(0) == "1.3.1"
+
+
+def domain_skill_md(name: str, version: str, requires: str) -> str:
+    return (
+        f'---\nname: {name}\nmetadata:\n  version: "{version}"\n'
+        f'  requires.skills: "{requires}"\n---\n'
+    )
+
+
+def test_e3_up_to_date_run_syncs_only_this_tools_skills(box: Box) -> None:
+    """A run at the current version syncs this tool's Skills only: the entry Skill
+    and the domain Skills whose requires.skills names it, whatever their version."""
+    write(
+        os.path.join(box.bin, "skills", "other-cli", "SKILL.md"), skill_md_of("other-cli", "0.9.0")
+    )
+    user_other = os.path.join(box.skill_roots[0], "other-cli", "SKILL.md")
+    write(user_other, skill_md_of("other-cli", "2.0.0", "USER COPY"))
+    write(os.path.join(box.skill_roots[0], "notes", "SKILL.md"), skill_md("1.2.0"))
+    for name, requires in (("notes-extra", "notes"), ("other-extra", "other-cli")):
+        write(
+            os.path.join(box.bin, "skills", name, "SKILL.md"),
+            domain_skill_md(name, "1.3.0", requires),
+        )
+        write(
+            os.path.join(box.skill_roots[0], name, "SKILL.md"),
+            domain_skill_md(name, "1.2.0", requires),
+        )
+    box.gh.json(LIST, [release("1.3.0")])
+    r = box.run("update")
+    assert r.exit == 0 and r.data()["status"] == "up_to_date", r
+    assert r.data()["skill_sync_status"] == "synced", r
+    assert box.skill(0) == "1.3.0" and b"USER COPY" in read(user_other)
+
+    def installed(name: str) -> str:
+        with open(os.path.join(box.skill_roots[0], name, "SKILL.md"), encoding="utf-8") as fh:
+            return aicli.builtins.skill_versions(fh.read())[0]
+
+    assert installed("notes-extra") == "1.3.0", "a domain Skill of this tool is synced"
+    assert installed("other-extra") == "1.2.0", "another tool's domain Skill is left alone"
+
+
+def test_e3_release_without_skills_leaves_the_directory_alone(box: Box) -> None:
+    osname, arch = U.release_platform()
+    name = U.asset_names("notes", "1.3.1", osname, arch)[0]
+    buf = io.BytesIO()
+    if name.endswith(".zip"):
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr(exe_name(), b"new binary")
+    else:
+        with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+            info = tarfile.TarInfo(exe_name())
+            info.size, info.mode = len(b"new binary"), 0o755
+            tf.addfile(info, io.BytesIO(b"new binary"))
+    data = buf.getvalue()
+    box.gh.file(f"/dl/v1.3.1/{name}", data)
+    box.gh.file(
+        "/dl/v1.3.1/checksums.txt", f"{hashlib.sha256(data).hexdigest()}  {name}\n".encode()
+    )
+    box.gh.file("/dl/v1.3.1/checksums.txt.sigstore.json", b"{}")
+    assets = [name, "checksums.txt", "checksums.txt.sigstore.json"]
+    rel = release(
+        "1.3.1",
+        assets=[
+            {"name": n, "browser_download_url": f"{box.gh.base}/dl/v1.3.1/{n}"} for n in assets
+        ],
+    )
+    box.gh.json(LIST, [rel])
+    r = box.run("update")
+    assert r.exit == 0 and read(box.exe) == b"new binary", r
+    assert os.listdir(os.path.join(box.bin, "skills")) == ["notes"], "skills/ is left alone"
+    assert box.skill(0) == "1.3.0", "nothing shipped, nothing synced"
+
+
+def test_e5_allow_downgrade_needs_target_version(box: Box) -> None:
+    box.new_version = "1.2.0"
+    box.gh.json(LIST, [publish(box.gh, "1.2.0")])
+    r = box.run("update", "--allow-downgrade")
+    assert r.exit == 0 and r.data()["status"] == "up_to_date", r
+    assert read(box.exe) == b"old binary" and box.gh.downloads() == []
+
+
+def test_e6_pnpm11_store_and_the_installed_tool_found_again(box: Box, tmp_path: Any) -> None:
+    f = U.install_method_for
+    assert f(
+        "/home/me/.local/share/pnpm/store/v11/links/@/notes/1.3.1/ab/node_modules/n/x", True
+    ) == ("pnpm")
+    assert (
+        f(r"C:\Users\me\pnpm\store\v11\links\@\notes\1.3.1\ab\node_modules\n\n.exe", True) == "pnpm"
+    )
+    shim = executable(tmp_path / "pnpm-home" / ("notes.cmd" if os.name == "nt" else "notes"))
+    box.h.env["PATH"] = str(tmp_path / "pnpm-home")
+    box.method = "pnpm"
+    box.gh.json(LIST, [release("1.3.1")])
+    r = box.run("update")
+    assert r.exit == 0 and r.data()["status"] == "updated", r
+    assert box.runs[0] == ["pnpm", "add", "-g", "notes-cli-example@1.3.1"], box.runs
+    assert os.path.normcase(box.runs[1][0]) == os.path.normcase(shim), box.runs
+    assert box.runs[1][1:] == ["--version"], box.runs
+
+
+def test_e7_an_environment_without_pip_is_unsupported(box: Box) -> None:
+    box.method = "pip"
+    box.cfg["pypi_package"] = "notes-cli-example"
+
+    def no_pip(argv: list[str]) -> tuple[int, bytes]:
+        box.runs.append(list(argv))
+        return (1, b"No module named pip") if argv[1:] == ["-m", "pip", "--version"] else (0, b"")
+
+    box.cfg["run"] = no_pip
+    box.gh.json(LIST, [release("1.3.1")])
+    r = box.run("update")
+    assert r.exit == 2 and r.code() == "E_UNSUPPORTED", r
+    d = r.details()
+    assert d["stage"] == "replace" and d["dispatch_state"] == "not_started", d
+    assert d["next_action"] == (
+        "This Python environment has no pip; upgrade with `pipx upgrade notes-cli-example` or "
+        "`uv tool upgrade notes-cli-example`."
+    )
+    assert box.runs == [[sys.executable, "-m", "pip", "--version"]], box.runs
+
+
+def test_e8_any_colon_in_an_archive_entry_is_unsafe(tmp_path: Any) -> None:
+    for i, name in enumerate(("skills/a:b/SKILL.md", "x:y", "C:evil", "skills/a\x01b")):
+        p = str(tmp_path / f"a{i}.tar.gz")
+        with tarfile.open(p, "w:gz") as tf:
+            info = tarfile.TarInfo(name)
+            info.size = 1
+            tf.addfile(info, io.BytesIO(b"x"))
+        with pytest.raises(U._UnsafeArchive):
+            U.extract_release(p, str(tmp_path / f"out{i}"), "notes")
+
+
+def test_e10_a_failed_rollback_is_reported_truthfully(
+    box: Box, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(U, "_IS_WINDOWS", True)  # the swap that moves the running binary aside
+    orig = U.rename_retry
+
+    def rename(src: str, dst: str) -> None:
+        if dst == box.exe:
+            raise PermissionError(13, "Access is denied")
+        orig(src, dst)
+
+    monkeypatch.setattr(U, "rename_retry", rename)
+    box.gh.json(LIST, [publish(box.gh, "1.3.1")])
+    r = box.run("update")
+    assert r.exit == 1 and r.code() == "E_IO", r
+    d = r.details()
+    assert d["stage"] == "replace" and d["dispatch_state"] == "unknown", d
+    old = box.exe + ".old"
+    assert r.env["error"]["message"] == (
+        "The update failed and the old version could not be put back; notes may be missing."
+    )
+    assert d["next_action"] == f"Rename {old} back to {box.exe}, then run notes --version.", d
+    assert read(old) == b"old binary" and not os.path.exists(box.exe)
+    kept = [n for n in box.leftovers() if n.startswith(".notes-update-")]
+    assert kept, "the new binary is kept, not cleaned up"
+    assert read(os.path.join(box.bin, kept[0], "extract", exe_name())) == b"new binary"
+
+
+def test_p14_update_refuses_a_development_build(box: Box) -> None:
+    """update on a development build (FIXES-RC1 P14) is E_UNSUPPORTED at discover,
+    with --check too, and contacts nothing; doctor does not compare the Skill with
+    it."""
+    box.gh.json(LIST, [publish(box.gh, "1.3.1")])
+    build = box.h.build
+
+    def dev(u: Upstream) -> App:
+        a = build(u)
+        a.version = "dev"
+        return a
+
+    box.h.build = dev
+    for args in (("update",), ("update", "--check")):
+        r = box.run(*args)
+        assert r.code() == "E_UNSUPPORTED" and r.details()["stage"] == "discover", r
+        assert r.details()["current_version"] == "1.2.4-dev", r
+        assert r.env["error"]["message"] == (
+            "notes 1.2.4-dev is a development build; install a release to update."
+        )
+        assert r.details()["next_action"] == "Install notes with the install command in its README."
+    assert box.gh.requests == [] and read(box.exe) == b"old binary"
+    checks = box.run("doctor").data()["checks"]
+    version = next(c for c in checks if c["check"] == "version")
+    skill = os.path.join(box.skill_roots[0], "notes", "SKILL.md")
+    assert version["status"] == "warn" and version["message"] == (
+        f"notes 1.2.4-dev is a development build; the Skill at {skill} cannot be compared."
+    ), version
+
+
+def test_e11_an_unusable_ca_file_is_config_at_discover(box: Box) -> None:
+    box.h.env["NOTES_CA_FILE"] = os.path.join(box.root, "missing-ca.pem")
+    r = box.run("update", "--check")
+    assert r.exit == 4 and r.code() == "E_CONFIG" and r.details()["stage"] == "discover", r
+    assert box.gh.requests == []
+
+
+def test_e13_archive_caps_and_repeated_names(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def tar(name: str, entries: list[tuple[str, bytes]]) -> str:
+        p = str(tmp_path / name)
+        with tarfile.open(p, "w:gz") as tf:
+            for n, b in entries:
+                info = tarfile.TarInfo(n)
+                info.size = len(b)
+                tf.addfile(info, io.BytesIO(b))
+        return p
+
+    twice = tar(
+        "twice.tar.gz", [("skills/notes/SKILL.md", b"a"), ("skills/./notes/SKILL.md", b"b")]
+    )
+    with pytest.raises(U._UnsafeArchive):
+        U.extract_release(twice, str(tmp_path / "o1"), "notes")
+    zipped = str(tmp_path / "twice.zip")
+    with zipfile.ZipFile(zipped, "w") as zf, pytest.warns(UserWarning):
+        zf.writestr("skills/notes/SKILL.md", b"a")
+        zf.writestr("skills/notes/SKILL.md", b"b")
+    with pytest.raises(U._UnsafeArchive):
+        U.extract_release(zipped, str(tmp_path / "o2"), "notes")
+    monkeypatch.setattr(U, "MAX_ENTRIES", 3)
+    many = tar("many.tar.gz", [(f"f{i}", b"x") for i in range(4)])
+    with pytest.raises(U._UnsafeArchive):
+        U.extract_release(many, str(tmp_path / "o3"), "notes")
+    monkeypatch.setattr(U, "MAX_ENTRIES", 10_000)
+    monkeypatch.setattr(U, "MAX_TOTAL", 10)
+    big = tar("big.tar.gz", [("skills/notes/SKILL.md", b"x" * 20)])
+    with pytest.raises(U._UnsafeArchive):
+        U.extract_release(big, str(tmp_path / "o4"), "notes")
+
+
+def test_e13_downloads_and_redirects_must_be_https(box: Box) -> None:
+    """A release asset that is not https is E_UNSUPPORTED at download, before
+    anything is downloaded; a redirect to a URL that is not https is E_NETWORK."""
+    rel = publish(box.gh, "1.3.1")
+    asset = rel["assets"][0]
+    asset["browser_download_url"] = "http://" + asset["browser_download_url"].removeprefix(
+        "https://"
+    )
+    box.gh.json(LIST, [rel])
+    r = box.run("update")
+    assert r.code() == "E_UNSUPPORTED" and r.details()["stage"] == "download", r
+    assert r.env["error"]["message"] == (
+        "Release v1.3.1 names a download that is not https, so it was not installed."
+    )
+    assert r.details()["next_action"] == (
+        "Install notes with the package-manager command in its README instead, and report the "
+        "release to the tool's maintainers."
+    )
+    assert box.gh.downloads() == [] and read(box.exe) == b"old binary"
+    box.gh.routes[LIST] = (302, {"Location": "http://releases.example.invalid/list"}, b"")
+    r = box.run("update", "--check")
+    assert r.code() == "E_NETWORK" and r.details()["stage"] == "discover", r
+    assert r.env["error"]["message"] == (
+        "The release source redirected to a URL that is not https, so nothing was downloaded."
+    )
+    assert r.details()["next_action"] == (
+        "Check the network or HTTPS_PROXY (a network's sign-in page redirects like this), then "
+        "run `notes update` again."
+    )
+
+
+def test_e13_the_download_deadline(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(U, "DOWNLOAD_DEADLINE", -1.0)  # every read is past it
+    box.gh.json(LIST, [release("1.3.1")])
+    r = box.run("update", "--check")
+    assert r.code() == "E_TIMEOUT" and r.env["error"]["message"] == "The release check timed out."

@@ -22,6 +22,7 @@ from __future__ import annotations
 import dataclasses
 import datetime as _dt
 import os
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -34,6 +35,7 @@ from ._util import (
     go_json,
     json_equal,
     pick,
+    raw_bytes,
     sha256_hex,
     snake,
     time_string,
@@ -53,7 +55,23 @@ from .errors import (
     new_error,
     usage,
 )
-from .journal import Journal, Record, RecordError, TargetRef, effective_status, unresolved
+from .journal import (
+    TARGET_LOCK_WAIT,
+    CorruptRecord,
+    Journal,
+    Record,
+    RecordError,
+    TargetRef,
+    acquire_lock,
+    effective_status,
+    ensure_private_dir,
+    lock_holder,
+    lock_scope_usage,
+    read_scope_usage,
+    release_lock,
+    unresolved,
+    write_scope_usage,
+)
 from .keystore import KEY_SIZE
 from .receipt import (
     Outcome,
@@ -129,7 +147,11 @@ class Preview:
 @dataclass
 class Op:
     """Handed to apply: the operation id, the idempotency key to send upstream
-    and the lease in seconds (apply should finish within it)."""
+    and the timeout in seconds. apply MUST honour timeout (pass it to every
+    request it makes): the gate cannot cancel apply, and the operation's lease
+    ends 5 s after the timeout, when `operation resolve` may record an outcome. A
+    write resolved while apply was still running keeps that resolution and is
+    reported as E_OUTCOME_UNKNOWN (CLI-058)."""
 
     id: str
     idempotency_key: str = ""
@@ -204,6 +226,38 @@ def rejected(err: BaseException | None = None) -> RejectedError:
 
 
 DEFAULT_TIMEOUT = float(DEFAULT_LEASE_SECONDS)
+# The lease outlasts apply's timeout by this much, so operation resolve cannot start
+# while apply may still be running (CLI-058, A6).
+LEASE_GRACE = 5.0
+
+
+def untrusted_paths(v: Any) -> list[str]:
+    """Result.untrusted as a list of strings (anything else is dropped)."""
+    if isinstance(v, (list, tuple)):
+        return [p for p in v if isinstance(p, str)]
+    return []
+
+
+def origin_of(j: Journal, r: Record) -> tuple[str, Record]:
+    """Follow replay_of from an applied record to the original operation (a replay
+    of a replay answers with the original, CLI-062). Returns the original's id and
+    the deepest record that can still be read: the original, or the replay whose
+    copies stand in for it once the original was pruned."""
+    op_id = r.operation_id
+    for _ in range(8):
+        if not r.replay_of:
+            break
+        op_id = r.replay_of
+        try:
+            o, exists = j.read(op_id)
+        except (CorruptRecord, OSError, Error):
+            break
+        if not exists or o is None:
+            break
+        r = o
+    return op_id, r
+
+
 GATE_CODES = (
     "E_OUTCOME_UNKNOWN",
     "E_PARTIAL",
@@ -317,6 +371,10 @@ class WriteOutcome:
     outcome: Outcome = field(default_factory=Outcome)
     observed: dict[str, Any] = field(default_factory=dict)
     result_data: Any = field(default_factory=dict)
+    # Result.data could not be encoded as JSON: data.result is {} (A2)
+    unencodable: bool = False
+    # the record was resolved by hand while apply ran: the outcome is unknown (A6)
+    resolved_meanwhile: bool = False
 
 
 @dataclass
@@ -337,7 +395,8 @@ MAX_STORED_RESULT = 4096
 @dataclass
 class Issued:
     """A planned write: its preview, operation id and token (None, with a None
-    expiry, when the write cannot apply)."""
+    expiry, when the write cannot apply); or, when replay is set, the answer to a
+    repeated idempotent request found before Preview (P4)."""
 
     pobj: dict[str, Any]
     id: str
@@ -345,6 +404,7 @@ class Issued:
     expires: str | None = None
     can_apply: bool = False
     untrusted: list[str] = field(default_factory=list)
+    replay: dict[str, Any] | None = None
 
 
 def mint(
@@ -388,6 +448,9 @@ class GateRun:
         self.confirm_set = False
         self.dangerous_flag = False
         self.idem = ""
+        # the operation whose dispatching record is written: from then on nothing
+        # reports dispatch_state not_started (CLI-057, A2)
+        self.dispatched_id = ""
 
     # ---------------------------------------------------------------- reporting
 
@@ -400,10 +463,72 @@ class GateRun:
     def succeed(self, data: dict[str, Any], untrusted: list[str]) -> None:
         try:
             gen = to_generic(data)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, RecursionError):
+            if self.dispatched_id:
+                raise self.fail(self.after_dispatch_error(self.dispatched_id)) from None
             raise self.fail(internal_error("The write result cannot be encoded as JSON.")) from None
         if not self.st.gate.set:
             self.st.gate = Result_(set=True, data=gen, raw=data, untrusted=untrusted, library=True)
+
+    def lookup(self, op_id: str) -> str:
+        return f"{self.tool()} operation show --id {op_id}"
+
+    def after_dispatch_error(self, op_id: str, exc: BaseException | None = None) -> Error:
+        """A failure the library cannot classify once the dispatching record is
+        written (CLI-057, A2): the outcome is unknown, never "nothing was sent". A
+        crash adds its text as details.cause."""
+        lookup = self.lookup(op_id)
+        e = new_error(
+            "E_OUTCOME_UNKNOWN",
+            "The write may have been applied, but its result could not be reported; nothing "
+            "will be retried.",
+            {
+                "operation_id": op_id,
+                "lookup": lookup,
+                "dispatch_state": "unknown",
+                "next_action": (
+                    f"Run `{lookup}` and re-read the target before anything else; do not resend."
+                ),
+            },
+        )
+        if exc is not None:
+            e.details["cause"] = truncate_runes(f"{type(exc).__name__}: {exc}", 300)
+            e.untrusted = ["cause"]
+        return e
+
+    def resolved_meanwhile_error(self, op_id: str) -> Error:
+        """The record was resolved by hand while apply ran (A6): that resolution
+        stands, and the outcome of this run is unknown."""
+        lookup = self.lookup(op_id)
+        return new_error(
+            "E_OUTCOME_UNKNOWN",
+            "The operation was resolved by hand while it was still running; its outcome is "
+            "unknown.",
+            {
+                "operation_id": op_id,
+                "lookup": lookup,
+                "dispatch_state": "unknown",
+                "next_action": (
+                    f"Run `{lookup}` and re-read the target before anything else; do not resend."
+                ),
+            },
+        )
+
+    def unencodable_notice(self, op_id: str) -> None:
+        """Result.data could not be encoded (A2): the receipt stands, data.result
+        is {}, and the run says so (a notice, and a defect for conformance)."""
+        self.a.notice(
+            Notice(
+                type="result_unencodable",
+                severity="warning",
+                message="The change was dispatched, but the tool's result could not be encoded, "
+                f"so data.result is empty; run `{self.lookup(op_id)}` for the receipt.",
+            )
+        )
+        self.a.defect(
+            "Apply returned a Result.data that cannot be encoded as JSON (UUID, Decimal, Path, set "
+            "and the like); the gate replaced data.result with {}."
+        )
 
     def tool(self) -> str:
         return self.a.tool_name()
@@ -479,6 +604,70 @@ class GateRun:
             "--evidence <text>`.",
         )
         e.details["active_operation"] = op_id
+        return e
+
+    def lock_held(self, target: str, holder: str) -> Error:
+        """lock_held at confirm (CLI-057 step 9): another confirm on the target is
+        between its checks and its dispatching record."""
+        e = conflict_error(
+            "lock_held",
+            "Another confirm on the same target is still running; nothing was sent.",
+            "Run the same command again in a few seconds; the confirm token stays valid until "
+            "it expires.",
+        )
+        e.details["target"] = target
+        if holder:
+            e.details["active_operation"] = holder
+        return e
+
+    def lock_targets(self, state: str, keys: list[str], op_id: str) -> Callable[[], None]:
+        """Take the per-target locks of a confirm (CLI-057 step 9, A3):
+        <state>/locks/<first 32 hex of sha256(target key)>.lock holding the
+        operation id, every target of a batch in sorted order, with the journal
+        lock's primitive and stale-break rule; still held by another confirm after
+        10 s in all, lock_held. Returns the release function; the caller releases
+        once the dispatching record is written."""
+        d = os.path.join(state, "locks")
+        ensure_private_dir(d)
+        owner = op_id.encode("utf-8")
+        held: list[str] = []
+
+        def release() -> None:
+            for p in reversed(held):
+                release_lock(p, owner)
+            held.clear()
+
+        paths: dict[str, str] = {}
+        for key in keys:
+            paths[os.path.join(d, sha256_hex(raw_bytes(key))[:32] + ".lock")] = key
+        deadline = time.monotonic() + TARGET_LOCK_WAIT
+        for path in sorted(paths):
+            try:
+                got = acquire_lock(path, max(deadline - time.monotonic(), 0.0), owner)
+            except OSError as exc:
+                release()
+                raise io_error(
+                    "The confirm lock cannot be taken; nothing was sent.",
+                    f"Check that {d} is writable.",
+                    exc,
+                ) from None
+            if not got:
+                release()
+                raise self.lock_held(paths[path], lock_holder(path))
+            held.append(path)
+        return release
+
+    def idempotency_resolved(self, op_id: str) -> Error:
+        """idempotency_resolved (CLI-062): the earlier request with this key was
+        resolved by hand as applied or partial, or was a batch that ended
+        partial. Nothing is sent again."""
+        e = conflict_error(
+            "idempotency_resolved",
+            "A request with this idempotency key was already resolved by hand; nothing was sent.",
+            f"Run `{self.tool()} operation show --id {op_id}` to see what was recorded; if the "
+            "change is missing, repeat the request with a new --idempotency-key.",
+        )
+        e.details["operation_id"] = op_id
         return e
 
     def check_unresolved(self, j: Journal, targets: list[str], exclude: set[str]) -> None:
@@ -616,7 +805,7 @@ class GateRun:
         return Claims(
             v=2,
             tool=claim_string(self.tool()),
-            tool_version=claim_string(self.a.version),
+            tool_version=claim_string(self.a._version()),
             op=op_id,
             cmd=claim_string(self.path),
             inv=b.inv,
@@ -741,13 +930,28 @@ class GateRun:
     def plan_single(self, spec: WriteSpec) -> None:
         if self.m.is_dangerous() and not self.dangerous_flag:
             raise self.fail(self.dangerous_refusal(spec))
-        p = self._guard(lambda: self.prepare_single(spec))
+        p = self._guard(lambda: self.prepare_single(spec, True))
+        if p.replay is not None:
+            self.succeed(p.replay, p.untrusted)
+            return
         self.issue(p)
 
-    def prepare_single(self, spec: WriteSpec) -> Issued:
-        """The plan steps of a single write (CLI-051): scope, unresolved operations,
-        the read-only preview, the binding, the planned record and the token.
-        Raises the Error that stops it (not recorded as the run's outcome)."""
+    def lookup_key(self, j: Journal, state: str, target: str) -> Record | None:
+        """The idempotency lookup of a dry-run or bare call (P4): it runs before
+        Preview, so an earlier request with this --idempotency-key is answered even
+        when a Preview would refuse the duplicate. Returns the operation to replay,
+        or raises the mismatch, resolved or unresolved conflict, as at confirm."""
+        ident = self.identity()
+        key = self.a.load_key(state, True)
+        assert key is not None
+        b = self.a.bind_invocation(self.st, self.node, self.m, key)
+        return self.idempotent(j, b, ident, target, set(), True)
+
+    def prepare_single(self, spec: WriteSpec, lookup: bool = False) -> Issued:
+        """The plan steps of a single write (CLI-051): scope, the idempotency lookup
+        when a key is given (lookup; P4), unresolved operations, the read-only
+        preview, the binding, the planned record and the token. Raises the Error
+        that stops it (not recorded as the run's outcome)."""
         a = self.a
         state = a.ensure_state_dir()
         j = a.open_journal(state, True)
@@ -757,6 +961,11 @@ class GateRun:
             a.check_scope(sc, need, j)
         except Error as e:
             raise self.with_preview(e, spec, sc, need, j) from None
+        if lookup and self.idem:
+            prev = self.lookup_key(j, state, claim_string(spec.target.key))
+            if prev is not None:
+                data, untrusted, _, _ = self.replay_of(j, prev)
+                return Issued(pobj={}, id="", untrusted=untrusted, replay=data)
         self.unresolved_error(j, [spec.target.key], set())
         pv = self.call_preview(spec.preview)
         de = self.check_declared(pv)
@@ -771,7 +980,7 @@ class GateRun:
         key = a.load_key(state, True)
         assert key is not None
         b = a.bind_invocation(self.st, self.node, self.m, key)
-        self.idempotent(j, b, "", spec.target.key)
+        self.idempotent(j, b, ident, claim_string(spec.target.key), set(), False)
         op_id = new_operation_id(False)
         now = a._now()
         exp = now + TOKEN_LIFETIME
@@ -835,7 +1044,9 @@ class GateRun:
         return r
 
     def verify_stored_token(self, kind: str) -> tuple[str, bytes, Journal, Record]:
-        """Confirm steps 1-6: format, key, record, MAC, expiry, single use."""
+        """Confirm steps 1-6: format, key, record, MAC, single use, expiry. A used
+        token is token_used whatever its age, so only a token that was never used
+        can come back as token_expired with a fresh plan (A1)."""
         a = self.a
         parsed = parse_token(self.confirm)
         if parsed is None:
@@ -870,6 +1081,8 @@ class GateRun:
             )
         from ._util import parse_time
 
+        if j.is_consumed(rec.operation_id) or rec.status != "planned":
+            raise self.token_used(rec.operation_id)
         exp = parse_time(rec.claims.exp)
         if exp is None or not a._now() < exp:
             raise conflict_error(
@@ -877,8 +1090,6 @@ class GateRun:
                 "The confirm token has expired; nothing was sent.",
                 "Run the same command again with --dry-run to get a new token.",
             )
-        if j.is_consumed(rec.operation_id) or rec.status != "planned":
-            raise self.token_used(rec.operation_id)
         return state, key, j, rec
 
     def compare_inputs(self, c: Claims, b: Binding) -> str:
@@ -886,7 +1097,7 @@ class GateRun:
         must match the claims. Returns the first differing parameter."""
         if c.tool != claim_string(self.tool()) or c.cmd != claim_string(self.path):
             return "command"
-        if c.tool_version != claim_string(self.a.version):
+        if c.tool_version != claim_string(self.a._version()):
             return "tool_version"
         for n in sorted(set(c.inputs) | set(b.digests)):
             if c.inputs.get(n, "") != b.digests.get(n, ""):
@@ -936,8 +1147,8 @@ class GateRun:
         """The label of a bound input that is absent from the current invocation."""
         from .binding import label_for
 
-        if name == "args":
-            return "args"
+        if name in ("args", "profile") or name.startswith("setting."):
+            return name
         if self.node.flag(name) is not None:
             return "--" + name
         for file in sorted(self.m.file_inputs):
@@ -988,6 +1199,40 @@ class GateRun:
             raise self.fail(self.input_mismatch(rec, b, p))
         if self.m.is_dangerous() and not self.dangerous_flag:
             raise self.fail(self.dangerous_required())
+        release = self._guard(lambda: self.lock_targets(state, [spec.target.key], rec.operation_id))
+        try:
+            timeout = self.checks_single(spec, state, j, rec, b)
+        finally:
+            release()
+        if timeout is None:
+            return  # an idempotent replay: nothing was sent
+        stored = rec.preview if isinstance(rec.preview, dict) else {}
+        try:
+            res, apply_err = self.call_apply(spec.apply, Op(rec.operation_id, self.idem, timeout))
+            out = self.classify(rec.operation_id, spec.target, stored, res, apply_err)
+            self.finish_record(j, rec, out)
+            self.report(rec.operation_id, out, res, spec)
+        except Error:
+            if self.st.gate.set:
+                raise  # the gate's own report
+            raise self.fail(self.after_dispatch_error(rec.operation_id)) from None
+        except (Exception, KeyboardInterrupt) as exc:
+            # the record stays dispatching: its lease blocks the target, then it reads
+            # as unknown
+            raise self.fail(self.after_dispatch_error(rec.operation_id, exc)) from None
+
+    def checks_single(
+        self, spec: WriteSpec, state: str, j: Journal, rec: Record, b: Binding
+    ) -> float | None:
+        """Confirm steps 9 to 14 under the target lock: the single-use marker again,
+        scope and budget, unresolved operations, preview and drift, identity, the
+        idempotency key, the marker and the budget count, and the dispatching
+        record. Returns apply's timeout, or None when an idempotent replay answered
+        the request."""
+        a = self.a
+        assert rec.claims is not None
+        if self._guard(lambda: j.is_consumed(rec.operation_id)):
+            raise self.fail(self.token_used(rec.operation_id))  # lost a race on this token
         stored = rec.preview if isinstance(rec.preview, dict) else {}
         sc = a.load_scope(state)
         need = self.need(
@@ -995,14 +1240,7 @@ class GateRun:
         )
         self._guard(lambda: a.check_scope(sc, need, j))
         if sc.digest != rec.claims.scope:
-            raise self.fail(
-                conflict_error(
-                    "scope_changed",
-                    "The scope file changed since the preview; nothing was sent.",
-                    "Run the same command again with --dry-run to get a token under the current "
-                    "scope.",
-                )
-            )
+            raise self.fail(self.scope_changed())
         need.operations = 1
         self._guard(lambda: a.check_scope(sc, need, j))
         self.check_unresolved(j, [spec.target.key], {rec.operation_id})
@@ -1014,83 +1252,169 @@ class GateRun:
                 e = self.with_fresh_plan(e, spec)
             raise self.fail(e) from None
         ident = self._guard(self.identity)
-        if claim_string(ident.account) != rec.claims.account:
-            raise self.fail(
-                self.token_mismatch(
-                    "account", "The confirm token was issued for a different account."
-                )
-            )
-        if claim_string(ident.host) != rec.claims.host:
-            raise self.fail(
-                self.token_mismatch("host", "The confirm token was issued for a different host.")
-            )
+        self.check_identity(rec.claims, ident)
         if claim_string(spec.target.key) != rec.claims.target:
             raise self.fail(
                 self.token_mismatch(
                     "target", "The confirm token was issued for a different target."
                 )
             )
-        prev = self._guard(lambda: self.idempotent(j, b, rec.operation_id, spec.target.key))
+        target = claim_string(spec.target.key)
+        prev = self._guard(lambda: self.idempotent(j, b, ident, target, {rec.operation_id}, True))
         now = a._now()
         if prev is not None:
-            st = effective_status(prev, now)
-            if st == "applied" and prev.receipt is not None:
-                self.replay(j, rec, prev, now)
-                return
-            if unresolved(st):
-                raise self.fail(self.unresolved_conflict(prev.operation_id))
-        created = self._guard(lambda: j.consume(rec.operation_id, now))
-        if not created:
-            raise self.fail(self.token_used(rec.operation_id))
+            self.replay(j, sc, rec, prev, now)
+            return None
+        self._guard(lambda: self.consume_counted(j, sc, need, rec.operation_id, 1, now))
         timeout = spec.timeout if spec.timeout > 0 else DEFAULT_TIMEOUT
         rec.status = "dispatching"
         rec.dispatched_at = time_string(now)
-        rec.lease_until = time_string(now + _dt.timedelta(seconds=timeout))
+        rec.lease_until = time_string(now + _dt.timedelta(seconds=timeout + LEASE_GRACE))
         self._guard(lambda: j.write(rec))
-        res, apply_err = self.call_apply(spec.apply, Op(rec.operation_id, self.idem, timeout))
-        out = self.classify(rec.operation_id, spec.target, stored, res, apply_err)
-        self.finish_record(j, rec, out)
-        self.report(rec.operation_id, out, res, spec)
+        self.dispatched_id = rec.operation_id
+        return timeout
 
-    def idempotent(self, j: Journal, b: Binding, self_id: str, target_key: str) -> Record | None:
-        """An earlier dispatched operation with the same idempotency key (CLI-062);
-        a different request (inputs or target, decision 32) under the same key is
-        idempotency_mismatch."""
+    def scope_changed(self) -> Error:
+        return conflict_error(
+            "scope_changed",
+            "The scope file changed since the preview; nothing was sent.",
+            "Run the same command again with --dry-run to get a token under the current scope.",
+        )
+
+    def check_identity(self, c: Claims, ident: Identity) -> None:
+        """The account and host the write acts as must be those of the token."""
+        if claim_string(ident.account) != c.account:
+            raise self.fail(
+                self.token_mismatch(
+                    "account", "The confirm token was issued for a different account."
+                )
+            )
+        if claim_string(ident.host) != c.host:
+            raise self.fail(
+                self.token_mismatch("host", "The confirm token was issued for a different host.")
+            )
+
+    def consume_counted(
+        self, j: Journal, sc: ScopeState, need: ScopeNeed, op_id: str, n: int, now: _dt.datetime
+    ) -> None:
+        """Confirm step 13 (A4): under the budget lock, create the single-use marker
+        of op_id and add n operations to its scope's count in scope-usage.json. A
+        marker that exists is token_used; a count that would pass
+        limits.max_operations is the budget_spent refusal, and then no marker is
+        created. n is 0 for a replay, which sends nothing."""
+        unlock = lock_scope_usage(j.state_dir, op_id)
+        try:
+            if j.is_consumed(op_id):
+                raise self.token_used(op_id)
+            scope_id = sc.id()
+            if scope_id is not None and n > 0:
+                usage = read_scope_usage(j.state_dir)
+                count = usage.get(scope_id, 0)
+                limit = sc.file.max_operations if sc.file is not None else None
+                if limit is not None and count + n > limit:
+                    need.operations = n
+                    raise self.a.scope_refusal(sc, "budget_spent", need, {}, count)
+                usage[scope_id] = count + n
+                write_scope_usage(j.state_dir, usage)
+            if not j.consume(op_id, now):
+                raise self.token_used(op_id)
+        finally:
+            unlock()
+
+    def refund_budget(self, j: Journal, scope_id: str | None, n: int) -> None:
+        """Give back the budget of batch items that were never dispatched (A4).
+        Best effort: a failure only over-counts."""
+        if not scope_id or n <= 0:
+            return
+        try:
+            unlock = lock_scope_usage(j.state_dir, "")
+        except Error:
+            return
+        try:
+            usage = read_scope_usage(j.state_dir)
+            usage[scope_id] = max(usage.get(scope_id, 0) - n, 0)
+            write_scope_usage(j.state_dir, usage)
+        except Error:
+            pass
+        finally:
+            unlock()
+
+    def idempotent(
+        self,
+        j: Journal,
+        b: Binding,
+        ident: Identity,
+        target: str,
+        exclude: set[str],
+        full: bool,
+    ) -> Record | None:
+        """The idempotency lookup (CLI-062, CLI-057 step 12, A5) over every earlier
+        operation of any command, single write or batch, confirmed with this
+        --idempotency-key. They match only when the command path, inputs digest,
+        target, account and host are all equal; any difference is
+        idempotency_mismatch naming the latest one that differs, so a reused key
+        never answers with another request's receipt. At confirm (full) their
+        states then decide, the one that never sends a write twice first: one
+        still unknown is unresolved_operation; one resolved by hand as applied or
+        partial, or that ended partial, is idempotency_resolved; one applied is
+        returned, to replay; otherwise (not applied, failed, resolved as not
+        applied) None, and the request may be sent again. target is the claim
+        value (a batch's is the digest of its target list)."""
         if not self.idem:
             return None
-        prev = j.find_idempotent(self.path, self.idem, self_id)
-        if prev is None:
+        found = j.find_idempotent(self.idem, exclude)
+        for prev in found:
+            c = prev.claims
+            if (
+                c is None
+                or prev.command != self.path
+                or c.cmd != claim_string(self.path)
+                or c.inv != b.inv
+                or c.target != target
+                or c.account != claim_string(ident.account)
+                or c.host != claim_string(ident.host)
+            ):
+                ce = conflict_error(
+                    "idempotency_mismatch",
+                    "This idempotency key was already used for a different request; nothing "
+                    "was sent.",
+                    "Use a new --idempotency-key for a different request, or repeat the "
+                    "original request exactly.",
+                )
+                ce.details["operation_id"] = prev.operation_id
+                raise ce
+        if not full:
             return None
-        if (
-            prev.claims is None
-            or prev.claims.inv != b.inv
-            or prev.claims.target != claim_string(target_key)
-        ):
-            ce = conflict_error(
-                "idempotency_mismatch",
-                "This idempotency key was already used for a different request; nothing was sent.",
-                "Use a new --idempotency-key for a different request, or repeat the original "
-                "request exactly.",
-            )
-            ce.details["operation_id"] = prev.operation_id
-            raise ce
-        return prev
+        now = self.a._now()
+        for prev in found:
+            if prev.resolution is None and unresolved(effective_status(prev, now)):
+                raise self.unresolved_conflict(prev.operation_id)
+        replayable: Record | None = None
+        for prev in found:
+            st = effective_status(prev, now)
+            res = prev.resolution
+            if (res is not None and res.outcome != "not_applied") or (
+                res is None and st == "partial"
+            ):
+                # part or all of it took effect: sending it again could apply that twice
+                raise self.idempotency_resolved(prev.operation_id)
+            if res is None and st == "applied":
+                if prev.kind == "batch" or prev.receipt is not None:
+                    if replayable is None:
+                        replayable = prev
+                else:
+                    # applied, with nothing to replay
+                    raise self.idempotency_resolved(prev.operation_id)
+        return replayable
 
-    def replay(self, j: Journal, rec: Record, prev: Record, now: _dt.datetime) -> None:
-        """Answer a repeated idempotent request with the original receipt."""
-        created = self._guard(lambda: j.consume(rec.operation_id, now))
-        if not created:
-            raise self.fail(self.token_used(rec.operation_id))
-        receipt = dict(prev.receipt) if isinstance(prev.receipt, dict) else {}
+    def replay_of(self, j: Journal, prev: Record) -> tuple[dict[str, Any], list[str], str, Record]:
+        """The answer to a repeated idempotent request (CLI-062): the original
+        operation's id, its receipt with replayed: true and its result (projected by
+        --fields, P12). It also returns the original's id and the record the answer
+        came from, which a confirm records its replay against."""
+        origin, src = origin_of(j, prev)
+        receipt = dict(src.receipt) if isinstance(src.receipt, dict) else {}
         receipt["replayed"] = True
-        rec.status = "applied"
-        rec.finished_at = time_string(now)
-        rec.replay_of = prev.operation_id
-        rec.receipt = receipt
-        try:
-            j.write(rec)
-        except Error:
-            self.a.notice(journal_notice())
         untrusted = []
         obs = receipt.get("observed")
         if isinstance(obs, dict) and obs:
@@ -1099,12 +1423,51 @@ class GateRun:
         # back with the replay; its paths of external text are not recorded, so all
         # of it is declared untrusted.
         result: Any = {}
-        if prev.result is not None:
-            result = prev.result
+        if src.result is not None:
+            result = self.project_result(src.result)
             untrusted.append("data.result")
-        self.succeed(
-            {"operation_id": prev.operation_id, "receipt": receipt, "result": result}, untrusted
+        return (
+            {"operation_id": origin, "receipt": receipt, "result": result},
+            untrusted,
+            origin,
+            src,
         )
+
+    def replay(
+        self, j: Journal, sc: ScopeState, rec: Record, prev: Record, now: _dt.datetime
+    ) -> None:
+        """Answer a repeated idempotent request at confirm with the original receipt
+        and result (CLI-062) and record the replay; nothing is sent and nothing is
+        counted against the budget."""
+        data, untrusted, origin, src = self.replay_of(j, prev)
+        self._guard(lambda: self.consume_counted(j, sc, ScopeNeed(), rec.operation_id, 0, now))
+        rec.status = "applied"
+        rec.finished_at = time_string(now)
+        rec.replay_of = origin
+        rec.receipt = data["receipt"]
+        rec.result = src.result
+        try:
+            j.write(rec)
+        except Error:
+            self.a.notice(journal_notice())
+        self.succeed(data, untrusted)
+
+    def project_result(self, result: Any) -> Any:
+        """Apply --fields to a confirmed write's result with the command's output
+        schema, as App.ok does for a read (P12). Without --fields the result is
+        returned whole (a write's default fields do not apply); the receipt is never
+        projected."""
+        if not self.st.fields.set:
+            return result
+        try:
+            gen = to_generic(result)
+        except (TypeError, ValueError):
+            return result
+        if gen is None:
+            return result
+        schema = self.a.schema_of(self.m)
+        shape = schema.shape or ("array" if isinstance(gen, list) else "object")
+        return self.a.project(self.st, self.m, schema, shape, gen)
 
     def classify(
         self,
@@ -1230,8 +1593,16 @@ class GateRun:
         if o.failed_stage:
             receipt["failed_stage"] = o.failed_stage
         data: Any = {}
+        unencodable = False
         if apply_err is None and res.data is not None:
-            data = res.data
+            # The receipt stands whatever the tool's result is; a result that
+            # cannot be encoded becomes {} (A2).
+            try:
+                data = to_generic(res.data)
+            except (TypeError, ValueError, RecursionError):
+                data, unencodable = {}, True
+            if data is None:
+                data = {}
         return WriteOutcome(
             receipt=receipt,
             ok=ok,
@@ -1242,11 +1613,14 @@ class GateRun:
             outcome=o,
             observed=observed,
             result_data=data,
+            unencodable=unencodable,
         )
 
     def finish_record(self, j: Journal, rec: Record, out: WriteOutcome) -> None:
-        """Store the final status and receipt (confirm step 15). A record that was
-        resolved meanwhile keeps its resolution; the late receipt is kept beside it."""
+        """Store the final status and receipt (confirm step 18). The record is read
+        again under its lock: one that was resolved by hand while apply ran keeps
+        its resolution (the late receipt is kept beside it), and the outcome of
+        this run is reported as unknown (out.resolved_meanwhile, A6)."""
         unlock = None
         try:
             unlock = j.lock(rec.operation_id)
@@ -1258,6 +1632,7 @@ class GateRun:
             except Exception:
                 cur, exists = None, False
             if exists and cur is not None and cur.resolution is not None:
+                out.resolved_meanwhile = True
                 cur.late_receipt = to_generic(out.receipt)
                 try:
                     j.write(cur)
@@ -1290,15 +1665,25 @@ class GateRun:
     def report(
         self, op_id: str, out: WriteOutcome, res: Result, spec: WriteSpec | None = None
     ) -> None:
-        """Emit a confirmed write per the receipt rules (confirm step 16)."""
+        """Emit a confirmed write per the receipt rules (confirm step 19)."""
         t = self.tool()
         lookup = f"{t} operation show --id {op_id}"
+        if out.resolved_meanwhile:
+            raise self.fail(self.resolved_meanwhile_error(op_id))
         if out.ok:
-            untrusted = prefix_paths("data.result", res.untrusted)
+            untrusted: list[str] = []
+            if out.unencodable:
+                self.unencodable_notice(op_id)
+            else:
+                untrusted = prefix_paths("data.result", untrusted_paths(res.untrusted))
             if out.observed:
                 untrusted.append("data.receipt.observed")
             self.succeed(
-                {"operation_id": op_id, "receipt": out.receipt, "result": out.result_data},
+                {
+                    "operation_id": op_id,
+                    "receipt": out.receipt,
+                    "result": self.project_result(out.result_data),
+                },
                 untrusted,
             )
             return
@@ -1373,12 +1758,14 @@ class GateRun:
             e.details["dispatch_state"] = out.dispatch
             if out.observed:
                 e.untrusted = e.untrusted + ["receipt.observed"]
-            if out.dispatch == "not_started":
+            own = e.details.get("next_action")
+            na = own if isinstance(own, str) else ""
+            if out.dispatch == "not_started" and not na.strip():
                 e.details["next_action"] = (
                     "Nothing was sent. Fix the cause, then run the command again with --dry-run "
                     "for a new token."
                 )
-            elif not (isinstance(e.details.get("next_action"), str) and e.details["next_action"]):
+            elif na == "":
                 e.details["next_action"] = (
                     "The upstream refused the write and nothing changed; fix the request, then run "
                     "--dry-run again."
@@ -1432,6 +1819,14 @@ class GateRun:
         sc = a.load_scope(state)
         need = self.need(keys, [], [], len(items))
         self._guard(lambda: a.check_scope(sc, need, j))
+        # With --idempotency-key, an earlier batch with this key is answered before
+        # any Preview runs (P4).
+        if self.idem:
+            prev = self._guard(lambda: self.lookup_key(j, state, digest_list(keys)))
+            if prev is not None:
+                data, untrusted, _, _ = self._guard(lambda: self.batch_replay_of(j, prev))
+                self.succeed(data, untrusted)
+                return
         self.check_unresolved(j, keys, set())
         plans = self._guard(lambda: self.preview_items(items))
         for p in plans:
@@ -1442,6 +1837,7 @@ class GateRun:
         key = self._guard(lambda: a.load_key(state, True))
         assert key is not None
         b = self._guard(lambda: a.bind_invocation(self.st, self.node, self.m, key))
+        self._guard(lambda: self.idempotent(j, b, ident, digest_list(keys), set(), False))
         batch_id = new_operation_id(True)
         now = a._now()
         exp = now + TOKEN_LIFETIME
@@ -1564,19 +1960,56 @@ class GateRun:
                 raise self.fail(self.token_used(rec.operation_id))
             item_recs.append(ir)
         keys = [it.target.key for it in items]
+        release = self._guard(lambda: self.lock_targets(state, keys, rec.operation_id))
+        try:
+            ready = self.checks_batch(spec, items, state, j, rec, item_recs, b)
+        finally:
+            release()
+        if ready is None:
+            return  # an idempotent replay of the whole batch: nothing was sent
+        timeout, sc_id = ready
+        continue_on_error = not self.m.is_dangerous()
+        f = self.node.flag("continue-on-error")
+        if f is not None:
+            continue_on_error = bool(f.value)
+        if spec.continue_on_error is not None:
+            continue_on_error = spec.continue_on_error
+        try:
+            self.run_batch(j, rec, items, item_recs, timeout, continue_on_error, sc_id)
+        except Error:
+            if self.st.gate.set:
+                raise  # the gate's own report
+            raise self.fail(self.after_dispatch_error(rec.operation_id)) from None
+        except (Exception, KeyboardInterrupt) as exc:
+            raise self.fail(self.after_dispatch_error(rec.operation_id, exc)) from None
+
+    def checks_batch(
+        self,
+        spec: BatchSpec,
+        items: list[BatchItem],
+        state: str,
+        j: Journal,
+        rec: Record,
+        item_recs: list[Record],
+        b: Binding,
+    ) -> tuple[float, str | None] | None:
+        """Confirm steps 9 to 14 of a batch, under every item target's lock: the
+        single-use marker again, scope and budget (each item counts), unresolved
+        operations, targets, previews and drift, identity, the batch's idempotency
+        key, the marker and the budget count, and the dispatching record. Returns
+        apply's timeout per item and the scope id, or None when an idempotent
+        replay answered the request."""
+        a = self.a
+        assert rec.claims is not None
+        if self._guard(lambda: j.is_consumed(rec.operation_id)):
+            raise self.fail(self.token_used(rec.operation_id))  # lost a race on this token
+        keys = [it.target.key for it in items]
         stored = rec.preview if isinstance(rec.preview, dict) else {}
         sc = a.load_scope(state)
         need = self.need(keys, strings_at(stored, "destinations"), strings_at(stored, "outputs"), 0)
         self._guard(lambda: a.check_scope(sc, need, j))
         if sc.digest != rec.claims.scope:
-            raise self.fail(
-                conflict_error(
-                    "scope_changed",
-                    "The scope file changed since the preview; nothing was sent.",
-                    "Run the same command again with --dry-run to get a token under the current "
-                    "scope.",
-                )
-            )
+            raise self.fail(self.scope_changed())
         need.operations = len(items)
         self._guard(lambda: a.check_scope(sc, need, j))
         exclude = {rec.operation_id, *(rec.items or [])}
@@ -1617,32 +2050,109 @@ class GateRun:
                 )
             )
         ident = self._guard(self.identity)
-        if claim_string(ident.account) != rec.claims.account:
-            raise self.fail(
-                self.token_mismatch(
-                    "account", "The confirm token was issued for a different account."
-                )
-            )
-        if claim_string(ident.host) != rec.claims.host:
-            raise self.fail(
-                self.token_mismatch("host", "The confirm token was issued for a different host.")
-            )
+        self.check_identity(rec.claims, ident)
+        # the batch's own key is looked up like a single write's (A5)
+        prev = self._guard(
+            lambda: self.idempotent(j, b, ident, digest_list(keys), {rec.operation_id}, True)
+        )
         now = a._now()
-        created = self._guard(lambda: j.consume(rec.operation_id, now))
-        if not created:
-            raise self.fail(self.token_used(rec.operation_id))
+        if prev is not None:
+            self.replay_batch(j, sc, rec, item_recs, prev, now)
+            return None
+        self._guard(lambda: self.consume_counted(j, sc, need, rec.operation_id, len(items), now))
         timeout = spec.timeout if spec.timeout > 0 else DEFAULT_TIMEOUT
         rec.status = "dispatching"
         rec.dispatched_at = time_string(now)
-        rec.lease_until = time_string(now + _dt.timedelta(seconds=timeout * len(items)))
+        rec.lease_until = time_string(
+            now + _dt.timedelta(seconds=timeout * len(items) + LEASE_GRACE)
+        )
         self._guard(lambda: j.write(rec))
-        continue_on_error = not self.m.is_dangerous()
-        f = self.node.flag("continue-on-error")
-        if f is not None:
-            continue_on_error = bool(f.value)
-        if spec.continue_on_error is not None:
-            continue_on_error = spec.continue_on_error
-        self.run_batch(j, rec, items, item_recs, timeout, continue_on_error)
+        self.dispatched_id = rec.operation_id
+        return timeout, sc.id()
+
+    def batch_replay_of(
+        self, j: Journal, prev: Record
+    ) -> tuple[dict[str, Any], list[str], Record, list[tuple[dict[str, Any], Any]]]:
+        """The answer to a repeated batch (A5): the original batch's id, its per-item
+        receipts (replayed: true) and results (projected by --fields, P12), and a
+        summary. It also returns the record the answer came from and, per item, the
+        receipt and result a confirm records its replay with. Items that cannot be
+        read make the replay impossible: raises E_IO, and nothing is sent."""
+        origin, src = origin_of(j, prev)
+        entries: list[Any] = []
+        copies: list[tuple[dict[str, Any], Any]] = []
+        observed_any = result_any = False
+        for item_id in src.items or []:
+            err: BaseException | None = None
+            try:
+                it, exists = j.read(item_id)
+            except (CorruptRecord, OSError, Error) as exc:
+                it, exists, err = None, False, exc
+            if not exists or it is None or it.target is None or it.receipt is None:
+                raise io_error(
+                    "The earlier batch with this idempotency key cannot be read, so its "
+                    "result cannot be repeated; nothing was sent.",
+                    f"Run `{self.tool()} operation show --id {origin}` and ask the user to "
+                    "check the state directory.",
+                    err,
+                )
+            receipt = dict(it.receipt) if isinstance(it.receipt, dict) else {}
+            receipt["replayed"] = True
+            entry: dict[str, Any] = {
+                "target": it.target.key,
+                "operation_id": it.operation_id,
+                "ok": True,
+                "receipt": receipt,
+            }
+            obs = receipt.get("observed")
+            if isinstance(obs, dict) and obs:
+                observed_any = True
+            if it.result is not None:
+                entry["result"] = self.project_result(it.result)
+                result_any = True
+            entries.append(entry)
+            copies.append((receipt, it.result))
+        untrusted = []
+        if observed_any:
+            untrusted.append("data.items[].receipt.observed")
+        if result_any:
+            untrusted.append("data.items[].result")
+        n = len(entries)
+        summary = {"total": n, "succeeded": n, "failed": 0, "unknown": 0, "skipped": 0}
+        data = {"operation_id": origin, "items": entries, "summary": summary}
+        return data, untrusted, src, copies
+
+    def replay_batch(
+        self,
+        j: Journal,
+        sc: ScopeState,
+        rec: Record,
+        item_recs: list[Record],
+        prev: Record,
+        now: _dt.datetime,
+    ) -> None:
+        """Answer a repeated batch at confirm (A5): nothing is sent, nothing is
+        counted, and the new batch and its items are recorded as replays of the
+        originals."""
+        data, untrusted, src, copies = self._guard(lambda: self.batch_replay_of(j, prev))
+        self._guard(lambda: self.consume_counted(j, sc, ScopeNeed(), rec.operation_id, 0, now))
+        src_items = src.items or []
+        for i, ir in enumerate(item_recs):
+            if i >= len(src_items):
+                break
+            ir.status, ir.finished_at, ir.replay_of = "applied", time_string(now), src_items[i]
+            ir.receipt, ir.result = copies[i]
+            try:
+                j.write(ir)
+            except Error:
+                self.a.notice(journal_notice())
+        rec.status, rec.finished_at = "applied", time_string(now)
+        rec.replay_of = data["operation_id"]
+        try:
+            j.write(rec)
+        except Error:
+            self.a.notice(journal_notice())
+        self.succeed(data, untrusted)
 
     def run_batch(
         self,
@@ -1652,106 +2162,136 @@ class GateRun:
         item_recs: list[Record],
         timeout: float,
         continue_on_error: bool,
+        scope_id: str | None = None,
     ) -> None:
-        """Apply the items in order and report the batch (CLI-063)."""
+        """Apply the items in order and report the batch (CLI-063). Each item's
+        upstream idempotency key is <key>/<first 16 hex of sha256(target key)>,
+        stable across dry-runs (CLI-062); items never dispatched give their budget
+        back (A4)."""
         m = self.m
         results: list[Any] = []
         first_fail: WriteOutcome | None = None
-        succeeded = failed = unknown_n = skipped = 0
+        succeeded = failed = unknown_n = skipped = never_sent = 0
         any_applied = any_dispatched = stop = observed_any = False
         result_untrusted: list[str] = []
-        for it, ir in zip(items, item_recs, strict=False):
-            now = self.a._now()
-            if stop:
-                o = sanitize_outcome(
-                    Outcome(
-                        execution="not_started",
-                        change=pick(
-                            m.has_effect("change", "configure"), "not_applied", "not_applicable"
-                        ),
-                        delivery=pick(m.has_effect("deliver"), "not_attempted", "not_applicable"),
-                        persistence=pick(
-                            m.has_effect("artifact", "persist"), "unchanged", "not_applicable"
-                        ),
-                        verification="not_applicable",
+        try:
+            for it, ir in zip(items, item_recs, strict=False):
+                now = self.a._now()
+                if stop:
+                    o = sanitize_outcome(
+                        Outcome(
+                            execution="not_started",
+                            change=pick(
+                                m.has_effect("change", "configure"), "not_applied", "not_applicable"
+                            ),
+                            delivery=pick(
+                                m.has_effect("deliver"), "not_attempted", "not_applicable"
+                            ),
+                            persistence=pick(
+                                m.has_effect("artifact", "persist"), "unchanged", "not_applicable"
+                            ),
+                            verification="not_applicable",
+                        )
                     )
-                )
-                receipt = self.skipped_receipt(ir.operation_id, it.target, o)
-                ir.status = "not_applied"
-                ir.finished_at = time_string(now)
-                ir.receipt = to_generic(receipt)
+                    receipt = self.skipped_receipt(ir.operation_id, it.target, o)
+                    ir.status = "not_applied"
+                    ir.finished_at = time_string(now)
+                    ir.receipt = to_generic(receipt)
+                    try:
+                        j.write(ir)
+                    except Error:
+                        self.a.notice(journal_notice())
+                    results.append(
+                        {
+                            "target": it.target.key,
+                            "operation_id": ir.operation_id,
+                            "ok": False,
+                            "receipt": receipt,
+                        }
+                    )
+                    skipped += 1
+                    never_sent += 1
+                    continue
+                ir.status = "dispatching"
+                ir.dispatched_at = time_string(now)
+                ir.lease_until = time_string(now + _dt.timedelta(seconds=timeout + LEASE_GRACE))
                 try:
                     j.write(ir)
-                except Error:
-                    self.a.notice(journal_notice())
-                results.append(
-                    {
-                        "target": it.target.key,
-                        "operation_id": ir.operation_id,
-                        "ok": False,
-                        "receipt": receipt,
-                    }
+                except Error as e:
+                    out = WriteOutcome(ok=False, code=e.code, cause=e, dispatch="not_started")
+                    results.append(
+                        {
+                            "target": it.target.key,
+                            "operation_id": ir.operation_id,
+                            "ok": False,
+                            "error": self.item_error(out),
+                        }
+                    )
+                    failed += 1
+                    never_sent += 1
+                    if first_fail is None:
+                        first_fail = out
+                    stop = True
+                    continue
+                res, apply_err = self.call_apply(
+                    it.apply, Op(ir.operation_id, self.item_key(it.target.key), timeout)
                 )
-                skipped += 1
-                continue
-            ir.status = "dispatching"
-            ir.dispatched_at = time_string(now)
-            ir.lease_until = time_string(now + _dt.timedelta(seconds=timeout))
-            try:
-                j.write(ir)
-            except Error as e:
-                out = WriteOutcome(ok=False, code=e.code, cause=e, dispatch="not_started")
-                results.append(
-                    {
-                        "target": it.target.key,
-                        "operation_id": ir.operation_id,
-                        "ok": False,
-                        "error": self.item_error(out),
-                    }
-                )
-                failed += 1
-                if first_fail is None:
-                    first_fail = out
-                stop = True
-                continue
-            key = (self.idem + "/" + ir.operation_id) if self.idem else ""  # decision 31
-            res, apply_err = self.call_apply(it.apply, Op(ir.operation_id, key, timeout))
-            stored = ir.preview if isinstance(ir.preview, dict) else {}
-            out = self.classify(ir.operation_id, it.target, stored, res, apply_err)
-            self.finish_record(j, ir, out)
-            if out.dispatch != "not_started":
-                any_dispatched = True
-            entry: dict[str, Any] = {
-                "target": it.target.key,
-                "operation_id": ir.operation_id,
-                "ok": out.ok,
-                "receipt": out.receipt,
-            }
-            if out.observed:
-                observed_any = True
-            o = out.outcome
-            if (
-                o.change in ("applied", "partial")
-                or o.delivery in ("delivered", "partial")
-                or o.persistence in ("saved", "partial")
-            ):
-                any_applied = True
-            if out.ok:
-                succeeded += 1
-                if res.data is not None:
-                    entry["result"] = out.result_data
-                    result_untrusted.extend(prefix_paths("data.items[].result", res.untrusted))
-            elif out.code == "E_OUTCOME_UNKNOWN":
-                unknown_n += 1
-                entry["error"] = self.item_error(out)
-            else:
-                failed += 1
-                entry["error"] = self.item_error(out)
-                if first_fail is None:
-                    first_fail = out
-            results.append(entry)
-            if not out.ok and not continue_on_error:
-                stop = True
+                stored = ir.preview if isinstance(ir.preview, dict) else {}
+                out = self.classify(ir.operation_id, it.target, stored, res, apply_err)
+                self.finish_record(j, ir, out)
+                if out.resolved_meanwhile:
+                    # resolved by hand while apply still ran: the item's outcome is unknown (A6)
+                    out.ok, out.code, out.cause, out.dispatch = (
+                        False,
+                        "E_OUTCOME_UNKNOWN",
+                        None,
+                        "unknown",
+                    )
+                if out.dispatch != "not_started":
+                    any_dispatched = True
+                entry: dict[str, Any] = {
+                    "target": it.target.key,
+                    "operation_id": ir.operation_id,
+                    "ok": out.ok,
+                    "receipt": out.receipt,
+                }
+                if out.observed:
+                    observed_any = True
+                o = out.outcome
+                if (
+                    o.change in ("applied", "partial")
+                    or o.delivery in ("delivered", "partial")
+                    or o.persistence in ("saved", "partial")
+                ):
+                    any_applied = True
+                if out.ok:
+                    succeeded += 1
+                    if res.data is not None:
+                        entry["result"] = (
+                            out.result_data
+                            if out.unencodable
+                            else self.project_result(out.result_data)
+                        )
+                        if out.unencodable:
+                            self.unencodable_notice(ir.operation_id)
+                        else:
+                            result_untrusted.extend(
+                                prefix_paths("data.items[].result", untrusted_paths(res.untrusted))
+                            )
+                elif out.code == "E_OUTCOME_UNKNOWN":
+                    unknown_n += 1
+                    entry["error"] = self.item_error(out)
+                else:
+                    failed += 1
+                    entry["error"] = self.item_error(out)
+                    if first_fail is None:
+                        first_fail = out
+                results.append(entry)
+                if not out.ok and not continue_on_error:
+                    stop = True
+        finally:
+            # items never dispatched (skipped after a stop) give their unit back (A4)
+            self.refund_budget(j, scope_id, never_sent)
         summary = {
             "total": len(items),
             "succeeded": succeeded,
@@ -1837,6 +2377,14 @@ class GateRun:
         if observed_any:
             e.untrusted = e.untrusted + ["items[].receipt.observed"]
         raise self.fail(e)
+
+    def item_key(self, target_key: str) -> str:
+        """A batch item's upstream idempotency key (CLI-062): <key>/<first 16 hex
+        characters of sha256(item target key)>, the same for every dry-run of the
+        batch and distinct per target. "" without --idempotency-key."""
+        if not self.idem:
+            return ""
+        return self.idem + "/" + sha256_hex(raw_bytes(target_key))[:16]
 
     def skipped_receipt(self, op_id: str, t: Target, o: Outcome) -> dict[str, Any]:
         return {

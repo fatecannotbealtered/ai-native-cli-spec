@@ -14,10 +14,13 @@ Settings come from a JSON file, and each one can be overridden by an environment
     claude_bin        EVAL_CLAUDE_BIN         claude
     git_bash          EVAL_GIT_BASH           none
     expected_cwd      EVAL_EXPECTED_CWD       none: the working directory most trials of the batch started in
+    aicli_dir         EVAL_AICLI_DIR          template/python/aicli of this repository: the validator for 2.0 arms
 
 The admin token itself may also come from EVAL_ADMIN_TOKEN (environment only, never the file). Relative paths
 resolve against the file's folder (in the file) or the current directory (in variables); empty values mean
 "not set"; keys starting with "_" are comments; unknown keys are errors. README.md documents every setting.
+Whether an arm is a 1.x or a 2.0 build is set per arm in arms.json ("spec"), because a baseline and its
+candidate may differ.
 """
 
 from __future__ import annotations
@@ -44,7 +47,12 @@ SETTINGS = {
     "claude_bin": ("EVAL_CLAUDE_BIN", False),
     "git_bash": ("EVAL_GIT_BASH", True),
     "expected_cwd": ("EVAL_EXPECTED_CWD", False),
+    "aicli_dir": ("EVAL_AICLI_DIR", True),
 }
+
+# arms.json "spec": the major version of ai-native-cli-spec an arm's build follows. "2.0" turns on the 2.0
+# features for that arm's trials (scope files, envelope validation); absent means 1.x.
+ARM_SPECS = {"1": "1.x", "1.x": "1.x", "2": "2.0", "2.0": "2.0"}
 
 
 class ConfigError(Exception):
@@ -142,6 +150,11 @@ class Config:
     @property
     def expected_cwd(self) -> str:
         return self._values.get("expected_cwd") or ""
+
+    @property
+    def aicli_dir(self) -> Path:
+        """The aicli package whose validate.py checks the recorded output of 2.0 arms (VER-002)."""
+        return self._values.get("aicli_dir") or EVAL_DIR.parent.parent / "template" / "python" / "aicli"
 
 
 def load() -> Config:
@@ -244,8 +257,28 @@ def load_arms(names: list) -> dict:
                 raise ConfigError(f"arm {name}: {real_bin} has sha256 {got}; arms.json records {want}")
         else:
             print(f"warning: arm {name} records no sha256 for its binary (VER-006 freezes it)", file=sys.stderr)
-        out[name] = {**arm, "real_bin": real_bin, "skill_dir": skill_dir}
+        spec = ARM_SPECS.get(str(arm.get("spec") or "1.x"))
+        if spec is None:
+            raise ConfigError(f"{path}: arm {name}: spec must be \"1.x\" or \"2.0\", not {arm.get('spec')!r}")
+        out[name] = {**arm, "real_bin": real_bin, "skill_dir": skill_dir, "spec": spec}
     return out
+
+
+def check_trial_env(var: str) -> None:
+    """Fail unless the recorder's private config lets a trial override `var` (its trial_env list), which a
+    lost-reply trial needs to point the tool at the fault proxy. seed.py writes the file from tool.py."""
+    path = CFG.secrets_dir / "recorder.json"
+    try:
+        priv = json.loads(path.read_text(encoding="utf-8-sig"))
+    except OSError:
+        raise ConfigError(f"no recorder config at {path}; run python harness/seed.py") from None
+    except ValueError as e:
+        raise ConfigError(f"{path}: {e}") from None
+    allowed = {str(k).upper() for k in priv.get("trial_env") or []}
+    if var.upper() not in allowed:
+        raise ConfigError(f"{path} does not let trials override {var} (trial_env), which lost-reply trials need: "
+                          "re-run python harness/seed.py, then rebuild the recorder with "
+                          "python harness/build_recorder.py")
 
 
 def bash_path(p: Path) -> str:

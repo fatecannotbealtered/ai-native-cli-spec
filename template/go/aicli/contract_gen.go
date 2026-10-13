@@ -177,9 +177,9 @@ var (
 	// problemValues: Values of details.problem (CLI-012).
 	problemValues = []string{"unknown_command", "unknown_flag", "unexpected_argument", "missing_parameter", "invalid_value", "conflicting_flags", "unsupported_format", "input_too_large", "confirmation_required", "dangerous_flag_required"}
 	// conflictValues: Values of details.conflict (CLI-013).
-	conflictValues = []string{"token_mismatch", "token_expired", "token_used", "state_drift", "scope_changed", "unresolved_operation", "lock_held", "upstream_conflict", "idempotency_mismatch"}
+	conflictValues = []string{"token_mismatch", "token_expired", "token_used", "state_drift", "scope_changed", "unresolved_operation", "lock_held", "upstream_conflict", "idempotency_mismatch", "idempotency_resolved"}
 	// gateConflictValues: Conflicts the gate finds before anything is sent (always not_started).
-	gateConflictValues = []string{"token_mismatch", "token_expired", "token_used", "state_drift", "scope_changed", "unresolved_operation", "lock_held"}
+	gateConflictValues = []string{"token_mismatch", "token_expired", "token_used", "state_drift", "scope_changed", "unresolved_operation", "lock_held", "idempotency_resolved"}
 	// humanActionValues: Values of details.action for E_HUMAN_REQUIRED (CLI-065).
 	humanActionValues = []string{"sign_in", "approve", "solve_challenge", "scan_qr", "install_component", "other"}
 	// globalFlags: Global control flags reserved on every command (without dashes).
@@ -339,7 +339,7 @@ var (
 	// changelogRequiredKeys: Required keys of changelog data.
 	changelogRequiredKeys = []string{"current_version", "entries"}
 	// changelogOptionalKeys: Optional keys of changelog data.
-	changelogOptionalKeys = []string{"since", "count"}
+	changelogOptionalKeys = []string{"since", "count", "truncated", "truncated_reason", "omitted"}
 	// changelogEntryKeys: Keys of a changelog entry.
 	changelogEntryKeys = []string{"version", "date", "changes"}
 	// changelogCategories: Keep a Changelog categories.

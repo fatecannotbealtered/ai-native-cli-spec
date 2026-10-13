@@ -1,9 +1,9 @@
 """The tool under test, as the generic harness sees it. Worked example: gitlab-cli on a disposable GitLab.
 
 To port the harness to another tool, rewrite this file, gl.py (the upstream client used for seeding, resets
-and grading), seed.py (the dataset) and tasks.py (tasks, resets, graders, ready checks). config.py, plan.py,
-lane.py, collect.py, compare.py, report.py, run.py, build_recorder.py, the recorder and the trial workflow
-are generic.
+and grading), seed.py (the dataset) and tasks.py (tasks, resets, graders, ready checks, scope grants).
+config.py, plan.py, lane.py, collect.py, compare.py, report.py, run.py, build_recorder.py, scopefile.py,
+recorded.py, faultproxy.py, the recorder and the trial workflow are generic.
 """
 
 from __future__ import annotations
@@ -20,23 +20,37 @@ AGENT_ENV_DROP_PREFIXES = ("GITLAB_",)
 # A Bash command matching one of these reached the upstream without the tool (flagged by collect.py and run.py).
 DIRECT_API_PATTERNS = [r"/api/v4"]
 
+# The variable that carries the upstream address. A lost-reply trial points it at the fault proxy through its
+# run-config.json, so recorder_config() lists it in trial_env.
+UPSTREAM_URL_ENV = "GITLAB_CLI_HOST"
+
+# ai-native-cli-spec 2.0 (arms with "spec": "2.0" in arms.json). STATE_DIR is the tool's state directory under
+# its home (SEC-030: ~/.<tool>); the harness writes each trial's scope file there as scope.json (SEC-011). The
+# two variables would move the scope file or the state directory, so the recorder must drop both from the
+# agent's environment (here through drop_env_prefixes); plan.py and run.py refuse to start if it does not.
+STATE_DIR = "." + NAME
+SCOPE_FILE_ENV = "GITLAB_CLI_SCOPE_FILE"
+STATE_DIR_ENV = "GITLAB_CLI_STATE_DIR"
+
 
 def recorder_config(agent_token: str) -> dict:
     """The recorder's private config; seed.py writes it to <work_dir>/.secrets/recorder.json.
 
     The recorder removes drop_env, every variable starting with one of drop_env_prefixes and every variable it
     is about to set from the environment it gives the real binary, then sets set_env. It always gives the binary
-    a per-trial HOME, USERPROFILE, APPDATA and LOCALAPPDATA and removes the XDG_* directories.
+    a per-trial HOME, USERPROFILE, APPDATA and LOCALAPPDATA and removes the XDG_* directories. A trial's
+    run-config.json may override the variables listed in trial_env, and no others.
     """
     return {
         "tool": NAME,
         "set_env": {
-            "GITLAB_CLI_HOST": CFG.upstream_url,
+            UPSTREAM_URL_ENV: CFG.upstream_url,
             "GITLAB_CLI_TOKEN": agent_token,
             "GITLAB_CLI_NO_UPDATE_CHECK": "1",
         },
         "drop_env": ["GITLAB_TOKEN", "GITLAB_HOST"],
         "drop_env_prefixes": ["GITLAB_CLI_"],
+        "trial_env": [UPSTREAM_URL_ENV],
     }
 
 

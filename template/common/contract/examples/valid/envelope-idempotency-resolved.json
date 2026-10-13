@@ -1,0 +1,16 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_CONFLICT",
+    "message": "A request with this idempotency key was already resolved by hand; nothing was sent.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "not_started",
+      "next_action": "Run `gitlab-cli operation show --id op_q3m7ztbx2kfh5wyrdc4nveap6u` to see what was recorded; if the change is missing, repeat the request with a new --idempotency-key.",
+      "conflict": "idempotency_resolved",
+      "operation_id": "op_q3m7ztbx2kfh5wyrdc4nveap6u"
+    }
+  },
+  "meta": {"duration_ms": 6}
+}

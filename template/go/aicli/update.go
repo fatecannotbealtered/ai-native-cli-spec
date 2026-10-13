@@ -135,7 +135,7 @@ func (a *App) newUpdate(ctx context.Context) *updateRun {
 	if cfg.Run == nil {
 		cfg.Run = runArgv
 	}
-	return &updateRun{a: a, cfg: cfg, ctx: ctx, tool: a.toolName(), current: a.Version, sigStatus: "not_checked"}
+	return &updateRun{a: a, cfg: cfg, ctx: ctx, tool: a.toolName(), current: a.version(), sigStatus: "not_checked"}
 }
 
 func (a *App) runUpdate(cmd *cobra.Command, _ []string) error {
@@ -234,9 +234,11 @@ func (u *updateRun) partial(cause error) *Error {
 	return e
 }
 
-// withSyncCommand adds skill_sync_command when the Skills were not synced.
+// withSyncCommand adds skill_sync_command only when the Skill sync could not finish
+// (F10). Not for skipped, not_needed or synced: update installs no missing Skill, so
+// the command would answer the same again.
 func (u *updateRun) withSyncCommand(d map[string]any) map[string]any {
-	if s := d["skill_sync_status"]; s == "skipped" || s == "failed" {
+	if d["skill_sync_status"] == "failed" {
 		d["skill_sync_command"] = u.tool + " update"
 	}
 	return d
@@ -263,6 +265,12 @@ func (u *updateRun) run(cmd *cobra.Command) (map[string]any, *Error) {
 	}
 	if !repoPattern.MatchString(u.cfg.Repo) {
 		return nil, internalError("App.Update.Repo is not a GitHub owner/name.")
+	}
+	// A development build (App.Version not a semantic version, P14) has no release
+	// to compare with or to replace: nothing is contacted or downloaded.
+	if u.a.devBuild() {
+		return nil, u.fail("E_UNSUPPORTED", fmt.Sprintf("%s %s is a development build; install a release to update.", u.tool, u.current),
+			fmt.Sprintf("Install %s with the install command in its README.", u.tool))
 	}
 	check, _ := flags.GetBool("check")
 	if dry, _ := flags.GetBool("dry-run"); dry {
@@ -303,8 +311,12 @@ func (u *updateRun) run(cmd *cobra.Command) (map[string]any, *Error) {
 	newer := curErr != nil || CompareVersions(target, cur) > 0
 	downgrade := want != nil && allowDowngrade && curErr == nil && CompareVersions(target, cur) < 0
 	install := newer || downgrade
+	// The notice cache holds the real latest release, as discovery found it; a
+	// --target-version is not news about the latest (E13).
 	if check {
-		u.record(target, severity)
+		if want == nil {
+			u.record(target, severity)
+		}
 		d := map[string]any{"status": "up_to_date", "current_version": u.current, "target_version": u.current,
 			"update_available": false, "install_method": u.method, "signature_status": "not_checked", "skill_sync_status": "skipped"}
 		if install {
@@ -318,10 +330,12 @@ func (u *updateRun) run(cmd *cobra.Command) (map[string]any, *Error) {
 	u.previous = u.current
 	if !install {
 		// Already current: no download, no package manager; finish a Skill sync an
-		// earlier run left undone.
-		u.record(target, severity)
+		// earlier run left undone, for this tool's own Skills only (E3).
+		if want == nil {
+			u.record(target, severity)
+		}
 		u.target = u.current
-		status, err := u.syncSkills(exe, u.current)
+		status, err := u.syncSkills(exe, u.current, u.ownSkills(exe))
 		if err != nil {
 			return nil, u.partial(err)
 		}
@@ -374,15 +388,23 @@ func (u *updateRun) installWithManager(exe string, target Version) (map[string]a
 			fmt.Sprintf("Install %s with the package-manager command in its README instead.", u.tool))
 	}
 	command := strings.Join(argv, " ")
-	ctx, cancel := context.WithTimeout(u.ctx, managerTimeout)
+	// A running package manager is not killed by an interrupt (E9): it runs under a
+	// context that is not cancelled, within the 10-minute cap, and SIGINT and SIGTERM
+	// are held until it and the version check finish, so the run reports what
+	// happened.
+	release := holdInterrupts()
+	defer release()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(u.ctx), managerTimeout)
 	_, runErr := u.cfg.Run(ctx, argv)
 	cancel()
-	if runErr != nil && errors.Is(runErr, exec.ErrNotFound) {
+	// A manager that never started sent nothing (E13): exec.ErrDot is a manager found
+	// only in the current directory, which update never runs.
+	if runErr != nil && (errors.Is(runErr, exec.ErrNotFound) || errors.Is(runErr, exec.ErrDot)) {
 		return nil, u.fail("E_CONFIG", fmt.Sprintf("%s was not found on PATH.", manager),
 			fmt.Sprintf("Install %s, or reinstall %s with the install command in its README.", manager, u.tool))
 	}
 	u.dispatched = true
-	observed := u.observeVersion(exe, true)
+	observed := u.installedVersion(exe, target)
 	if !sameVersion(observed, target) {
 		if runErr != nil {
 			e := u.fail("E_IO", fmt.Sprintf("`%s` failed, so %s is still %s.", command, u.tool, u.current),
@@ -398,7 +420,7 @@ func (u *updateRun) installWithManager(exe string, target Version) (map[string]a
 			fmt.Sprintf("Check which %s comes first on PATH, then run `%s update` again.", u.tool, u.tool))
 	}
 	u.replaced = true
-	status, err := u.syncSkills(exe, target.String())
+	status, err := u.syncSkills(exe, target.String(), nil)
 	if err != nil {
 		return nil, u.partial(err)
 	}
@@ -406,6 +428,45 @@ func (u *updateRun) installWithManager(exe string, target Version) (map[string]a
 		"target_version": target.String(), "previous_version": u.previous, "update_available": false,
 		"install_method": u.method, "signature_status": "not_checked", "signature_verified": false,
 		"skill_sync_status": status, "binary_replaced": true, "command": argv}), nil
+}
+
+// lookPath finds a program on PATH (a test seam). exec.LookPath never resolves a
+// program from the current directory: it answers exec.ErrDot instead.
+var lookPath = exec.LookPath
+
+// installedVersion is the version the installed tool reports after a package
+// manager ran (E6): first the tool PATH finds by its command name, since a manager
+// may install it at a new path (pnpm 11's store does), then the executable that runs
+// this update. The target version from either decides; otherwise the first version
+// seen is returned.
+func (u *updateRun) installedVersion(exe string, target Version) string {
+	var candidates []string
+	if p, err := lookPath(u.tool); err == nil && p != "" {
+		candidates = append(candidates, p)
+	}
+	if exe != "" && !contains(candidates, exe) {
+		candidates = append(candidates, exe)
+	}
+	first := ""
+	for _, c := range candidates {
+		v := u.observeVersion(c, true)
+		if sameVersion(v, target) {
+			return v
+		}
+		if first == "" {
+			first = v
+		}
+	}
+	return first
+}
+
+// holdInterrupts keeps SIGINT and SIGTERM from ending the process until the returned
+// function is called (E9): while a signal is subscribed, Go does not apply its
+// default action.
+func holdInterrupts() func() {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	return func() { signal.Stop(ch) }
 }
 
 // observeVersion runs `<exe> --version` and returns the version its JSON envelope
@@ -476,18 +537,20 @@ func (a *App) refreshUpdateNotice(ctx context.Context) {
 	if json.Unmarshal(body, &rel) != nil || rel.Draft || rel.Prerelease {
 		return
 	}
+	// A prerelease tag is never the latest, whatever GitHub's flag says (E2).
 	v, err := ParseVersion(rel.TagName)
-	if err != nil {
+	if err != nil || v.Pre != "" {
 		return
 	}
-	_ = a.RecordUpdateCheck(v.String(), updateSeverity(a.Version, v, []ghRelease{rel}))
+	_ = a.RecordUpdateCheck(v.String(), updateSeverity(a.version(), v, []ghRelease{rel}))
 }
 
 // ---------------------------------------------------------------- install method
 
 // DetectInstallMethod names what owns the installed executable (CLI-070), first
-// match wins: a node_modules path is pnpm (a .pnpm segment), yarn (a .yarn segment
-// or /yarn/global/) or npm; a Cellar segment, /opt/homebrew/ or /home/linuxbrew/ is
+// match wins: pnpm 11's global store (store/v<digits>/links segments) is pnpm; a
+// node_modules path is pnpm (a .pnpm segment), yarn (a .yarn segment or
+// /yarn/global/) or npm; a Cellar segment, /opt/homebrew/ or /home/linuxbrew/ is
 // brew; a binary with Go module build info in GOBIN, else GOPATH/bin, else ~/go/bin
 // is go; anything else is binary (the tool replaces its own file).
 func DetectInstallMethod(exe string) string {
@@ -497,6 +560,8 @@ func DetectInstallMethod(exe string) string {
 	slashed := filepath.ToSlash(exe)
 	segs := strings.FieldsFunc(exe, func(r rune) bool { return r == '/' || r == '\\' })
 	switch {
+	case pnpmStore(segs):
+		return "pnpm"
 	case contains(segs, "node_modules"):
 		switch {
 		case contains(segs, ".pnpm"):
@@ -511,6 +576,19 @@ func DetectInstallMethod(exe string) string {
 		return "go"
 	}
 	return "binary"
+}
+
+var pnpmStoreVersion = regexp.MustCompile(`^v[0-9]+$`)
+
+// pnpmStore reports a path inside pnpm 11's global store: the segments store,
+// v<digits> and links in a row (E6).
+func pnpmStore(segs []string) bool {
+	for i := 0; i+2 < len(segs); i++ {
+		if segs[i] == "store" && pnpmStoreVersion.MatchString(segs[i+1]) && segs[i+2] == "links" {
+			return true
+		}
+	}
+	return false
 }
 
 // goInstalled reports a Go-built executable in the directory `go install` uses.

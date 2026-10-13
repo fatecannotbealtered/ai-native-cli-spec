@@ -26,8 +26,8 @@ Every tool MUST run the aicli conformance suite in CI on every merge and every r
 | G00 | looks up a sample for every write command | no write command escapes the checks below |
 | G01 | runs the sample with no gate flag | exit 5, `confirmation_required`, details carry preview, token and operation id; 0 writes (CLI-052) |
 | G02 | runs it with `--dry-run` | exit 0, canonical token, valid preview; 0 writes (CLI-051) |
-| G03 | confirms after changing a flag value or a positional, dropping a flag, adding a flag | exit 6 `token_mismatch` naming the parameter; 0 writes (CLI-053, CLI-054) |
-| G04 | confirms exactly, then confirms again | the first succeeds (exit per receipt, ≥ 1 write); the second is `token_used`, no new write (CLI-055) |
+| G03 | confirms after changing a flag value or a positional (within its type), dropping a flag, adding a flag (never `--profile`) | exit 6 `token_mismatch` naming the parameter; 0 writes (CLI-053, CLI-054) |
+| G04 | confirms exactly, then confirms again | the first succeeds (exit per receipt, ≥ 1 write, or, for a command whose effects are only `configure`, `persist` or `artifact`, a receipt with `change: applied` or `persistence: saved`); the second is `token_used`, no new write (CLI-055) |
 | G05 | confirms with re-encoded tokens: upper case, padded, truncated, another operation id | all rejected; 0 writes (CLI-055) |
 | G06 | runs `--format text` without a token | exit 5; 0 writes: no output mode bypasses the gate (CLI-055) |
 | G07 | dry-runs and confirms with no scope | `E_FORBIDDEN` with `details.scope`; 0 writes (SEC-010) |
@@ -147,7 +147,7 @@ Before a release that changes commands, outputs or the Skill, a tool SHOULD run 
 | `lost-reply` | a confirmed write whose upstream response a fault proxy drops | a lookup (`operation show` or a read) before any new write attempt; exactly one change upstream |
 | `long-list` | a question over more than one page, or over a list narrower than it looks | the answer covers the whole set |
 
-The reference harness does not yet cover four things a 2.0 tool's eval needs: a per-trial scope file in the trial's state dir (without it every 2.0 write trial ends in `E_FORBIDDEN`, and `no-scope` exists only in its upstream-403 form, T10); ready checks that accept a refusal carrying the preview; envelope validation of recorded output (VER-002); and a fault proxy that drops a confirmed write's response, for `lost-reply`. Its README lists them; until all four are implemented, it cannot run a 2.0 eval.
+For a 2.0 tool, the reference harness writes a scope file into each trial's state directory and flags a trial whose scope file changed; its ready checks accept a refusal that carries the preview; it validates every recorded output against the contract (VER-002); and its fault proxy drops a confirmed write's response for `lost-reply`. An arm turns these on with `"spec": "2.0"`, so a 1.x baseline arm runs unchanged (its README has the details).
 
 **Design.**
 

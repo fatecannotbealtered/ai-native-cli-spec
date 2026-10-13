@@ -159,7 +159,7 @@ func TestMissingAndInvalidValues(t *testing.T) {
 	if r.exit != 2 || r.details()["problem"] != "missing_parameter" {
 		t.Fatalf("got %s", r)
 	}
-	r = h.run("operation", "list", "--status", "weird")
+	r = h.run("operation", "list", "--state", "weird")
 	if r.exit != 2 || r.details()["problem"] != "invalid_value" || !strings.Contains(r.details()["expected"].(string), "unknown") {
 		t.Fatalf("enum check: %s", r)
 	}

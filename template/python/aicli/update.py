@@ -29,13 +29,13 @@ import re
 import secrets
 import shutil
 import signal
-import ssl
 import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -47,7 +47,7 @@ from typing import TYPE_CHECKING, Any
 
 from ._util import go_quote, truncate_runes
 from .builtins import skill_versions
-from .contract_gen import SPEC_VERSION, UPDATE_INSTALL_METHODS
+from .contract_gen import UPDATE_INSTALL_METHODS
 from .errors import Error, internal_error, new_error, usage
 from .journal import rename_retry
 from .keystore import is_link_or_reparse
@@ -63,7 +63,8 @@ if TYPE_CHECKING:
     from ._tree import Node
     from .app import App
 
-REQUEST_TIMEOUT = 30.0  # every request (CLI-110)
+REQUEST_TIMEOUT = 30.0  # every request (CLI-110): the longest wait without data
+DOWNLOAD_DEADLINE = 600.0  # the longest any one download may take in all (E13)
 REFRESH_TIMEOUT = 3.0  # doctor's refresh of the update notice
 VERSION_TIMEOUT = 30.0  # `<binary> --version`
 MANAGER_TIMEOUT = 600.0  # a package manager run
@@ -74,6 +75,7 @@ MAX_EXTRACTED = 512 << 20  # any one extracted file
 OIDC_ISSUER = "https://token.actions.githubusercontent.com"
 CHECKSUMS = "checksums.txt"
 BUNDLE = "checksums.txt.sigstore.json"
+_IS_WINDOWS = os.name == "nt"  # the swap's Windows algorithm (tests set it)
 
 SIGNATURE_FAILED = (
     "The release signature did not verify, so the update was refused and the installed version "
@@ -143,6 +145,13 @@ def verify_sigstore_bundle(artifact: bytes, bundle: bytes, identity: str, issuer
     except ImportError as exc:
         raise _NoVerifier(str(exc)) from None
     try:
+        # The trust root refresh cannot use the update's network settings (E12):
+        # sigstore-python (4.x) builds its TUF updater inside Verifier.production()
+        # and offers no way to pass a session or fetcher, so python-tuf's default
+        # urllib3 fetcher runs. It reads HTTPS_PROXY, HTTP_PROXY and NO_PROXY and
+        # waits 30 s per request like the update, but it does not add
+        # <PREFIX>_CA_FILE to the system roots and sends its own User-Agent. A tool
+        # behind a TLS-inspecting proxy gets E_NETWORK at verify_signature.
         verifier = Verifier.production()
     except Exception as exc:  # the TUF refresh of the trust root failed
         raise TrustRootUnavailable(str(exc)) from exc
@@ -160,16 +169,27 @@ def _segments(path: str) -> list[str]:
     return [s for s in re.split(r"[\\/]+", path) if s]
 
 
+def _pnpm_store(segs: list[str]) -> bool:
+    """A store/v<n>/links run of segments: pnpm 11's global store."""
+    return any(
+        segs[i] == "store" and re.fullmatch(r"v[0-9]+", segs[i + 1]) and segs[i + 2] == "links"
+        for i in range(len(segs) - 2)
+    )
+
+
 def install_method_for(path: str, frozen: bool) -> str:
     """The install method of a tool whose code lies at path (CLI-070, first match
     wins): "source" for a Python tool that is neither frozen nor installed in a
-    site-packages or dist-packages directory; pnpm, yarn or npm under node_modules;
-    brew in a Homebrew Cellar; pip for an installed Python package; else binary."""
+    site-packages or dist-packages directory; pnpm in pnpm 11's global store
+    (store/v<n>/links); pnpm, yarn or npm under node_modules; brew in a Homebrew
+    Cellar; pip for an installed Python package; else binary."""
     segs = _segments(path)
     slashed = path.replace("\\", "/")
     site = "site-packages" in segs or "dist-packages" in segs
     if not frozen and not site:
         return "source"
+    if _pnpm_store(segs):
+        return "pnpm"
     if "node_modules" in segs:
         if ".pnpm" in segs:
             return "pnpm"
@@ -283,18 +303,16 @@ class _TooLarge(_NetError):
     pass
 
 
+class _InsecureRedirect(_NetError):
+    """A redirect to a URL that is not https (E13)."""
+
+
 class _BadAnswer(_NetError):
     pass
 
 
 class _WriteFailed(Exception):
     pass
-
-
-class _CAFileError(Exception):
-    def __init__(self, path: str) -> None:
-        super().__init__(path)
-        self.path = path
 
 
 def _host(url: str) -> str:
@@ -306,8 +324,18 @@ def _host(url: str) -> str:
     return netloc.rsplit("@", 1)[-1].lower()
 
 
-class _NoDowngradeRedirect(urllib.request.HTTPRedirectHandler):
-    """Redirects, but never from https to anything else."""
+def https_url(raw: str) -> bool:
+    """An https URL with a host (E13: release assets and redirects)."""
+    try:
+        p = urllib.parse.urlsplit(raw)
+    except ValueError:
+        return False
+    return p.scheme.lower() == "https" and bool(p.hostname)
+
+
+class _HttpsRedirects(urllib.request.HTTPRedirectHandler):
+    """Redirects stay on https (E13); the GitHub token still goes to the API host
+    only (it is an unredirected header)."""
 
     def redirect_request(
         self,
@@ -318,8 +346,11 @@ class _NoDowngradeRedirect(urllib.request.HTTPRedirectHandler):
         headers: Any,
         newurl: str,
     ) -> urllib.request.Request | None:
-        if req.full_url.lower().startswith("https:") and not newurl.lower().startswith("https:"):
-            return None
+        target = urllib.parse.urljoin(req.full_url, newurl)
+        if urllib.parse.urlsplit(target).scheme.lower() != "https":
+            with contextlib.suppress(Exception):
+                fp.close()
+            raise _InsecureRedirect()
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
@@ -331,23 +362,19 @@ class _Net:
         self.timeout = timeout
         self.api = (cfg.api_base or "https://api.github.com").rstrip("/")
         self.api_host = _host(self.api)
-        self.user_agent = f"{app.tool_name()}/{app.version} aicli/{SPEC_VERSION}"
+        self.user_agent = app.user_agent()
         self.token = (app._env("GITHUB_TOKEN") or app._env("GH_TOKEN")).strip()
         self._opener: urllib.request.OpenerDirector | None = None
 
     def opener(self) -> urllib.request.OpenerDirector:
+        """The opener on App.ssl_context (CLI-110, P10): the proxy from the
+        environment, the system roots plus <PREFIX>_CA_FILE, https-only redirects.
+        An unusable CA file raises its E_CONFIG Error."""
         if self._opener is None:
-            ctx = ssl.create_default_context()  # system roots, verification on
-            ca = (self.app._env(self.app._prefix() + "_CA_FILE") or "").strip()
-            if ca:
-                try:
-                    ctx.load_verify_locations(cafile=ca)
-                except (OSError, ssl.SSLError, ValueError):
-                    raise _CAFileError(ca) from None
             self._opener = urllib.request.build_opener(
                 urllib.request.ProxyHandler(urllib.request.getproxies_environment()),
-                urllib.request.HTTPSHandler(context=ctx),
-                _NoDowngradeRedirect(),
+                urllib.request.HTTPSHandler(context=self.app.ssl_context()),
+                _HttpsRedirects(),
             )
         return self._opener
 
@@ -380,25 +407,38 @@ class _Net:
         except (OSError, http.client.HTTPException, ValueError):
             raise _Unreachable(host) from None
 
-    def _read(self, resp: Any, n: int, host: str) -> bytes:
+    def _read(self, resp: Any, n: int, host: str, deadline: float) -> bytes:
+        """Up to n bytes: what one read of the connection returns (read1), so a
+        server that trickles data cannot outlast the deadline (E13)."""
+        if time.monotonic() > deadline:
+            raise _TimedOut()
         try:
-            return resp.read(n)
+            read1 = getattr(resp, "read1", None)
+            return read1(n) if read1 is not None else resp.read(n)
         except TimeoutError:
             raise _TimedOut() from None
         except (OSError, http.client.HTTPException, ValueError):
             raise _Unreachable(host) from None
 
     def get(self, url: str, limit: int) -> bytes:
-        """The body of url, at most limit bytes (_TooLarge beyond)."""
+        """The body of url, at most limit bytes (_TooLarge beyond), within the
+        download deadline."""
+        deadline = time.monotonic() + DOWNLOAD_DEADLINE
         resp = self._open(url)
+        host = _host(url)
+        body = bytearray()
         try:
-            body = self._read(resp, limit + 1, _host(url))
+            while True:
+                chunk = self._read(resp, 1 << 16, host, deadline)
+                if not chunk:
+                    break
+                body += chunk
+                if len(body) > limit:
+                    raise _TooLarge()
         finally:
             with contextlib.suppress(Exception):
                 resp.close()
-        if len(body) > limit:
-            raise _TooLarge()
-        return body
+        return bytes(body)
 
     def get_json(self, url: str) -> Any:
         try:
@@ -409,7 +449,9 @@ class _Net:
             raise _BadAnswer() from None
 
     def get_to(self, url: str, path: str, limit: int) -> str:
-        """Stream url into path (at most limit bytes); the SHA-256 of the body."""
+        """Stream url into path (at most limit bytes, within the download deadline
+        of 10 minutes besides the idle timeout); the SHA-256 of the body."""
+        deadline = time.monotonic() + DOWNLOAD_DEADLINE
         resp = self._open(url)
         h = hashlib.sha256()
         n = 0
@@ -421,7 +463,7 @@ class _Net:
                 except OSError:
                     raise _WriteFailed() from None
                 while True:
-                    chunk = self._read(resp, 1 << 20, host)
+                    chunk = self._read(resp, 1 << 20, host, deadline)
                     if not chunk:
                         break
                     n += len(chunk)
@@ -557,7 +599,9 @@ def _reported_version(out: bytes) -> str | None:
 
 class _UnsafeArchive(Exception):
     """An archive entry that may not be extracted: an absolute path, a .. segment,
-    a link, a device file or a file over 512 MiB. name is the entry's name."""
+    a drive or stream name (":"), a control character, a link, a device file, a
+    repeated name, a file over 512 MiB, or an archive over 10,000 entries or 1 GiB
+    in all. name is the entry's name."""
 
     def __init__(self, name: str) -> None:
         super().__init__(name)
@@ -568,10 +612,21 @@ class _BadArchive(Exception):
     """An archive that cannot be read."""
 
 
+MAX_ENTRIES = 10_000  # entries in a release archive
+MAX_TOTAL = 1 << 30  # bytes extracted from one archive
+
+
 def _entry_path(name: str) -> str:
     """An archive entry's path relative to the archive root; _UnsafeArchive for an
-    absolute path, a backslash or a .. segment."""
-    if not name or name.startswith("/") or "\\" in name or re.match(r"[A-Za-z]:", name):
+    absolute path, a backslash, any ":" (a drive or a stream), a control character
+    or a .. segment."""
+    if (
+        not name
+        or name.startswith("/")
+        or "\\" in name
+        or ":" in name
+        or any(ord(c) < 0x20 or ord(c) == 0x7F for c in name)
+    ):
         raise _UnsafeArchive(name)
     parts = [p for p in name.split("/") if p not in ("", ".")]
     if any(p == ".." for p in parts):
@@ -583,29 +638,54 @@ def _wanted(rel: str, binary: str) -> bool:
     return rel == binary or rel == "skills" or rel.startswith("skills/")
 
 
-def _write_member(src: Any, name: str, dest: str, size: int) -> None:
-    if size > MAX_EXTRACTED:
+def _check_entries(entries: list[tuple[str, bool]]) -> None:
+    """The archive-wide checks (E13): at most 10,000 entries, every name safe,
+    and no file name twice (after "." and empty segments are dropped)."""
+    if len(entries) > MAX_ENTRIES:
+        raise _UnsafeArchive(entries[MAX_ENTRIES][0])
+    seen: set[str] = set()
+    for name, is_dir in entries:
+        rel = _entry_path(name)
+        if is_dir:
+            continue
+        if rel in seen:
+            raise _UnsafeArchive(name)
+        seen.add(rel)
+
+
+class _Budget:
+    """The bytes an extraction may still write (1 GiB in all)."""
+
+    def __init__(self) -> None:
+        self.left = MAX_TOTAL
+
+
+def _write_member(src: Any, name: str, dest: str, size: int, budget: _Budget) -> None:
+    if size > MAX_EXTRACTED or size > budget.left:
         raise _UnsafeArchive(name)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     n = 0
-    with open(dest, "wb") as out:
+    with open(dest, "xb") as out:
         while True:
             chunk = src.read(1 << 20)
             if not chunk:
                 break
             n += len(chunk)
-            if n > MAX_EXTRACTED:
+            if n > MAX_EXTRACTED or len(chunk) > budget.left:
                 raise _UnsafeArchive(name)
+            budget.left -= len(chunk)
             out.write(chunk)
 
 
 def extract_release(archive: str, dest: str, binary: str) -> None:
     """Extract binary and the skills/ tree from the archive root into dest. An
-    absolute path, a .. segment, a link or a device file anywhere in the archive,
-    or a file over 512 MiB, makes it unsafe (_UnsafeArchive); an archive that cannot
-    be read is _BadArchive. Other files are ignored. OSError when dest cannot be
-    written."""
+    unsafe entry anywhere in the archive (an absolute path, a .. segment, a ":", a
+    link, a device file, a repeated name, a file over 512 MiB) or an archive over
+    10,000 entries or 1 GiB extracted makes it unsafe (_UnsafeArchive); an archive
+    that cannot be read is _BadArchive. Other files are ignored. OSError when dest
+    cannot be written."""
     os.makedirs(dest, exist_ok=True)
+    budget = _Budget()
     if archive.endswith(".zip"):
         try:
             zf = zipfile.ZipFile(archive)
@@ -617,7 +697,7 @@ def extract_release(archive: str, dest: str, binary: str) -> None:
                 kind = stat.S_IFMT((info.external_attr >> 16) & 0xFFFF)
                 if kind and kind not in (stat.S_IFREG, stat.S_IFDIR):
                     raise _UnsafeArchive(info.filename)  # a link or a device
-                _entry_path(info.filename)
+            _check_entries([(i.filename, i.is_dir()) for i in infos])
             for info in infos:
                 rel = _entry_path(info.filename)
                 if not rel or info.is_dir() or not _wanted(rel, binary):
@@ -625,7 +705,9 @@ def extract_release(archive: str, dest: str, binary: str) -> None:
                 target = os.path.join(dest, *rel.split("/"))
                 try:
                     with zf.open(info) as src:
-                        _write_member(src, info.filename, target, info.file_size)
+                        _write_member(src, info.filename, target, info.file_size, budget)
+                except FileExistsError:
+                    raise _UnsafeArchive(info.filename) from None
                 except (zipfile.BadZipFile, ValueError, RuntimeError, EOFError):
                     raise _BadArchive(archive) from None
         return
@@ -641,7 +723,7 @@ def extract_release(archive: str, dest: str, binary: str) -> None:
         for m in members:
             if not (m.isfile() or m.isdir()):
                 raise _UnsafeArchive(m.name)  # a link or a device
-            _entry_path(m.name)
+        _check_entries([(m.name, m.isdir()) for m in members])
         for m in members:
             rel = _entry_path(m.name)
             if not rel or m.isdir() or not _wanted(rel, binary):
@@ -651,7 +733,10 @@ def extract_release(archive: str, dest: str, binary: str) -> None:
                 if src is None:
                     raise _UnsafeArchive(m.name)
                 with src:
-                    _write_member(src, m.name, os.path.join(dest, *rel.split("/")), m.size)
+                    target = os.path.join(dest, *rel.split("/"))
+                    _write_member(src, m.name, target, m.size, budget)
+            except FileExistsError:
+                raise _UnsafeArchive(m.name) from None
             except (tarfile.TarError, EOFError):
                 raise _BadArchive(archive) from None
 
@@ -660,8 +745,23 @@ def extract_release(archive: str, dest: str, binary: str) -> None:
 
 
 def _copy_tree(src: str, dst: str) -> None:
-    """Copy a Skill directory (links are followed)."""
-    shutil.copytree(src, dst)
+    """Copy a Skill directory without following links (E3): directories and
+    regular files are copied; symbolic links, junctions and special files are
+    left out."""
+    os.makedirs(dst)
+    with os.scandir(src) as it:
+        entries = sorted(it, key=lambda e: e.name)
+    for e in entries:
+        st = os.lstat(e.path)
+        if is_link_or_reparse(st):
+            continue
+        target = os.path.join(dst, e.name)
+        if stat.S_ISDIR(st.st_mode):
+            _copy_tree(e.path, target)
+        elif stat.S_ISREG(st.st_mode):
+            shutil.copyfile(e.path, target, follow_symlinks=False)
+            with contextlib.suppress(OSError):
+                shutil.copymode(e.path, target, follow_symlinks=False)
 
 
 def _skill_version(skill_dir: str) -> str:
@@ -674,15 +774,19 @@ def _skill_version(skill_dir: str) -> str:
 
 
 def _replace_dir(src: str, root: str, name: str) -> None:
-    """Replace <root>/<name> with a copy of src: copy beside it, move the old one
-    aside, move the copy in, remove the old one. Renames are retried briefly on
-    Windows, where a scanner may still hold the files just written."""
+    """Replace <root>/<name> with a copy of src (links not followed): copy beside
+    it, move the old one aside, move the copy in, remove the old one; a missing
+    <root>/<name> is simply created. Renames are retried briefly on Windows, where
+    a scanner may still hold the files just written."""
     tag = secrets.token_hex(4)
     new = os.path.join(root, f".{name}.new-{tag}")
     old = os.path.join(root, f".{name}.old-{tag}")
     dst = os.path.join(root, name)
     try:
         _copy_tree(src, new)
+        if not os.path.lexists(dst):
+            rename_retry(new, dst)
+            return
         rename_retry(dst, old)
         try:
             rename_retry(new, dst)
@@ -692,13 +796,68 @@ def _replace_dir(src: str, root: str, name: str) -> None:
     finally:
         if os.path.lexists(new):
             shutil.rmtree(new, ignore_errors=True)
-    shutil.rmtree(old, ignore_errors=True)
+    if os.path.islink(old):
+        with contextlib.suppress(OSError):
+            os.remove(old)
+    else:
+        shutil.rmtree(old, ignore_errors=True)
+
+
+def skill_names(skills_dir: str) -> list[str]:
+    """The Skills in a skills/ directory: real directories (not links) holding a
+    SKILL.md, by name."""
+    try:
+        entries = list(os.scandir(skills_dir))
+    except OSError:
+        return []
+    out = []
+    for e in entries:
+        if e.name.startswith("."):
+            continue
+        try:
+            st = os.lstat(e.path)
+            md = os.lstat(os.path.join(e.path, "SKILL.md"))
+        except OSError:
+            continue
+        if is_link_or_reparse(st) or not stat.S_ISDIR(st.st_mode):
+            continue
+        if is_link_or_reparse(md) or not stat.S_ISREG(md.st_mode):
+            continue
+        out.append(e.name)
+    return sorted(out)
+
+
+def _dir_names(d: str) -> list[str]:
+    """The directories (not links) directly in d, by name."""
+    try:
+        entries = list(os.scandir(d))
+    except OSError:
+        return []
+    out = []
+    for e in entries:
+        try:
+            st = os.lstat(e.path)
+        except OSError:
+            continue
+        if not is_link_or_reparse(st) and stat.S_ISDIR(st.st_mode):
+            out.append(e.name)
+    return sorted(out)
+
+
+_SKILL_FRONTMATTER = re.compile(r"^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)")
+_SKILL_REQUIRES = re.compile(r"^[ \t]+requires\.skills:[ \t]*\"?([^\"\s#]+)\"?", re.MULTILINE)
+
+
+def _same_version_text(a: str, b: str) -> bool:
+    """Two equal semantic versions."""
+    va, vb = _parse_or_none(a), _parse_or_none(b)
+    return va is not None and vb is not None and compare_versions(va, vb) == 0
 
 
 def npm_package_root(exe: str, package: str) -> str | None:
     """The directory of the npm package named package that holds exe: walk up from
     exe to the first package.json whose name is package."""
-    if not package:
+    if not package or not exe:
         return None
     d = os.path.dirname(os.path.abspath(exe))
     while True:
@@ -756,13 +915,43 @@ class _Interrupts:
 # ---------------------------------------------------------------- the run
 
 
-def _default_run(argv: list[str], timeout: float) -> tuple[int, bytes]:
-    """Run argv without a shell; the exit code and stdout with stderr. A program
-    that does not exist raises FileNotFoundError; a run over timeout is killed and
-    fails."""
+def find_program(name: str, path: str | None = None) -> str | None:
+    """A program found on PATH the safe way (CLI-070 item 2, E1): only absolute
+    PATH entries are searched, so an empty, "." or relative entry is skipped and
+    the current directory is never searched implicitly (shutil.which searches it
+    first on Windows, where a cloned repository's npm.bat would run). On Windows the
+    name is tried with each PATHEXT extension (as is too when it has one). path is
+    the PATH value (default the process environment's)."""
+    from .scope import _is_abs
+
+    if not name:
+        return None
+    if path is None:
+        path = os.environ.get("PATH", "")
+    windows = os.name == "nt"
+    candidates = [name]
+    if windows:
+        exts = [e for e in (os.environ.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD").split(";") if e]
+        candidates = ([name] if os.path.splitext(name)[1] else []) + [name + e for e in exts]
+    for d in path.split(os.pathsep):
+        d = d.strip().strip('"') if windows else d
+        if not d or not _is_abs(d):
+            continue
+        for c in candidates:
+            p = os.path.join(d, c)
+            if os.path.isfile(p) and (windows or os.access(p, os.X_OK)):
+                return p
+    return None
+
+
+def _default_run(argv: list[str], timeout: float, path: str | None = None) -> tuple[int, bytes]:
+    """Run argv without a shell; the exit code and stdout with stderr. A bare
+    program name is looked up with find_program (absolute PATH entries only); a
+    program that does not exist raises FileNotFoundError; a run over timeout is
+    killed and fails."""
     prog = argv[0]
     if not (os.path.isabs(prog) or os.sep in prog or (os.altsep and os.altsep in prog)):
-        found = shutil.which(prog)
+        found = find_program(prog, path)
         if found is None:
             raise FileNotFoundError(prog)
         prog = found
@@ -800,7 +989,7 @@ class _Updater:
         self.node = node
         self.cfg = cfg
         self.tool = app.tool_name()
-        self.current = app.version
+        self.current = app._version()
         self.stage = "discover"
         self.method = ""
         self.exe = ""
@@ -809,9 +998,13 @@ class _Updater:
         self.dispatch_unknown = False
         self.replaced = False
         self.signature = "not_checked"
-        self.rollback = ""  # why moving the old binary back failed, for the swap error
+        self.old_binary = ""  # where a failed swap left the running binary
         self.tmp = ""
         self.interrupts = _Interrupts()
+        # the Skills the verified release ships (binary path); None when no
+        # release was installed in this run
+        self.release_skills: list[str] | None = None
+        self.path = app._env("PATH")  # where programs are looked up (absolute entries)
 
     # ---------------------------------------------------------------- errors
 
@@ -867,13 +1060,6 @@ class _Updater:
         """A network failure while checking for releases, or while downloading
         v<version>."""
         tool = self.tool
-        if isinstance(exc, _CAFileError):
-            prefix = self.app._prefix()
-            return self.fail(
-                "E_CONFIG",
-                f"{prefix}_CA_FILE names {exc.path}, which is not a readable PEM certificate file.",
-                f"Point {prefix}_CA_FILE at a PEM file of CA certificates, or unset it.",
-            )
         if isinstance(exc, _HTTPStatus):
             remaining = ""
             if exc.headers is not None:
@@ -900,6 +1086,15 @@ class _Updater:
         if isinstance(exc, _BadAnswer):
             return self.fail(
                 "E_NETWORK", f"The release source sent an answer {tool} cannot read.", self.again()
+            )
+        if isinstance(exc, _InsecureRedirect):
+            # usually a network's sign-in page; nothing was fetched over plain http
+            return self.fail(
+                "E_NETWORK",
+                "The release source redirected to a URL that is not https, so nothing was "
+                "downloaded.",
+                "Check the network or HTTPS_PROXY (a network's sign-in page redirects like this), "
+                f"then run `{tool} update` again.",
             )
         host = exc.host if isinstance(exc, _Unreachable) else ""
         msg = f"Could not reach {host} to check for releases."
@@ -992,7 +1187,9 @@ class _Updater:
                     raise self.partial(self.current) from None
                 raise self.interrupted() from None
             finally:
-                if self.tmp:
+                # A swap that could not be undone keeps the new binary where it is:
+                # the tool may be missing, and the user may need it (E10).
+                if self.tmp and not self.dispatch_unknown:
                     shutil.rmtree(self.tmp, ignore_errors=True)
 
     def package_name(self) -> str:
@@ -1008,13 +1205,28 @@ class _Updater:
 
     def manager_argv(self, target: Version) -> list[str] | None:
         try:
-            return package_manager_args(self.method, self.package_name(), target)
+            return self.install_argv(package_manager_args(self.method, self.package_name(), target))
         except ValueError:
             return None
+
+    def install_argv(self, argv: list[str]) -> list[str]:
+        """The argv to run: pip is the running interpreter's `python -m pip`, so the
+        upgrade lands in the environment this tool runs from (E7)."""
+        if self.method == "pip" and argv and argv[0] == "pip":
+            return [sys.executable, "-m", *argv]
+        return argv
 
     def flow(self, check: bool, target_text: str | None, allow: bool) -> dict[str, Any]:
         app, cfg, tool = self.app, self.cfg, self.tool
         self.begin("discover")
+        # A development build (App.version not a semantic version, P14) has no
+        # release to compare with or to replace: nothing is contacted or downloaded.
+        if app._dev_build():
+            raise self.fail(
+                "E_UNSUPPORTED",
+                f"{tool} {self.current} is a development build; install a release to update.",
+                f"Install {tool} with the install command in its README.",
+            )
         # the order of the checks: the target, how the tool was installed, the HTTP
         # client (<PREFIX>_CA_FILE), then the clean-up and the network
         requested: Version | None = None
@@ -1023,16 +1235,11 @@ class _Updater:
                 requested = check_update_target(self.current, target_text, allow)
             except Error as e:
                 raise self.wrap(e) from None
+        # --check never needs the executable; the binary path asks for it at download
         try:
-            self.exe = (cfg.executable or default_executable)()
+            self.exe = (cfg.executable or default_executable)() or ""
         except OSError:
             self.exe = ""
-        if not self.exe:
-            raise self.fail(
-                "E_IO",
-                f"{tool} cannot find its own executable, so it cannot update itself.",
-                f"Reinstall {tool} with the install command in its README.",
-            )
         method = (cfg.install_method or detect_install_method)(self.exe)
         if method == "source":
             raise self.fail(
@@ -1049,20 +1256,21 @@ class _Updater:
         net = _Net(app, cfg, REQUEST_TIMEOUT)
         try:
             net.opener()
-        except _CAFileError as exc:
-            raise self.net_error(exc) from None
+        except Error as e:
+            raise self.wrap(e) from None
         if not check and method == "binary":
             self.remove_stale(self.exe)
         try:
             target, latest, release, considered = self.discover(net, requested)
-        except (_NetError, _CAFileError) as exc:
+        except _NetError as exc:
             raise self.net_error(exc) from None
         cur = _parse_or_none(self.current)
         if cur is None:
             up_to_date = False  # a development build takes any release
         else:
+            # a downgrade needs both --target-version and --allow-downgrade (E5)
             c = compare_versions(target, cur)
-            up_to_date = c <= 0 and not (allow and c < 0)
+            up_to_date = c <= 0 and not (allow and requested is not None and c < 0)
         self.target = target
         if latest is not None:
             with contextlib.suppress(Error, OSError):
@@ -1103,7 +1311,10 @@ class _Updater:
                 data.update(signature_status="not_checked", signature_verified=False, command=argv)
             sync = self.sync_or_partial(self.current, str(target))
             data["skill_sync_status"] = sync
-        if sync in ("failed", "skipped"):
+        # Only a sync that could not finish names the command that finishes it; a
+        # Skill that is not installed is not a reason, since update never installs
+        # one (CLI-070 item 6, F10).
+        if sync == "failed":
             data["skill_sync_command"] = f"{tool} update"
         return data
 
@@ -1148,9 +1359,16 @@ class _Updater:
             tag = rel.get("tag_name")
             tag = tag if isinstance(tag, str) else ""
             try:
-                considered.append((parse_version(tag), rel))
+                v = parse_version(tag)
             except ValueError:
                 self.app.debug(f"update: skipped release tag {tag} (not a semantic version)")
+                continue
+            if v.pre:
+                # a prerelease is installed only when asked for with --target-version,
+                # whatever the release's prerelease flag says (E2)
+                self.app.debug(f"update: skipped release tag {tag} (a prerelease)")
+                continue
+            considered.append((v, rel))
         if not considered:
             raise self.fail(
                 "E_UNSUPPORTED",
@@ -1185,7 +1403,17 @@ class _Updater:
     def run_cmd(self, argv: list[str], timeout: float) -> tuple[int, bytes]:
         if self.cfg.run is not None:
             return self.cfg.run(list(argv))
-        return _default_run(argv, timeout)
+        return _default_run(argv, timeout, self.path)
+
+    def installed_version_argv(self) -> list[str]:
+        """How to ask the installed tool its version after a package manager ran
+        (E6): the tool's command found again on PATH (absolute entries only), since
+        an upgrade can move it (pnpm 11 leaves the old store path behind); else the
+        running copy's own path."""
+        found = find_program(self.tool, self.path)
+        if found:
+            return _version_argv(found)
+        return _version_argv(self.exe) if self.cfg.executable else _self_version_argv()
 
     def observe_version(self, argv: list[str]) -> str | None:
         try:
@@ -1210,13 +1438,15 @@ class _Updater:
         if not pkg:
             raise unknown
         try:
-            argv = package_manager_args(manager, pkg, target)
+            argv = self.install_argv(package_manager_args(manager, pkg, target))
         except ValueError as exc:
             raise self.fail(
                 "E_UNSUPPORTED",
                 f"{manager} cannot install {tool} {target}: {exc}.",
                 f"Install {tool} with the package-manager command in its README instead.",
             ) from None
+        if manager == "pip":
+            self.require_pip(pkg)
         self.interrupts.committing = True
         try:
             code, _ = self.run_cmd(argv, MANAGER_TIMEOUT)
@@ -1229,9 +1459,8 @@ class _Updater:
                 f"Install {manager}, or reinstall {tool} with the install command in its README.",
             ) from None
         except OSError:
-            code = -1
-        cmd_argv = _version_argv(self.exe) if self.cfg.executable else _self_version_argv()
-        observed = self.observe_version(cmd_argv)
+            code = -1  # the manager never started: nothing was installed
+        observed = self.observe_version(self.installed_version_argv())
         if not _same_version(observed, target):
             text = " ".join(argv)
             if code != 0:
@@ -1250,11 +1479,28 @@ class _Updater:
         self.replaced = True
         return argv
 
+    def require_pip(self, pkg: str) -> None:
+        """The running interpreter must have pip (E7): a uv tool or some pipx
+        environments have none, and their own upgrade command is the way."""
+        try:
+            code, _ = self.run_cmd([sys.executable, "-m", "pip", "--version"], VERSION_TIMEOUT)
+        except OSError:
+            code = -1
+        if code != 0:
+            raise self.fail(
+                "E_UNSUPPORTED",
+                f"{self.tool} cannot update itself with pip: its Python environment has no pip.",
+                f"This Python environment has no pip; upgrade with `pipx upgrade {pkg}` or "
+                f"`uv tool upgrade {pkg}`.",
+            )
+
     # ---------------------------------------------------------------- binary
 
     def remove_stale(self, exe: str) -> None:
         """Remove <exe>.old and <exe>.old-<n> left by an earlier update on Windows
         (best effort)."""
+        if not exe:
+            return
         d, base = os.path.split(exe)
         try:
             names = os.listdir(d or ".")
@@ -1285,6 +1531,23 @@ class _Updater:
             )
         if CHECKSUMS not in assets or BUNDLE not in assets:
             raise self.no_signed_checksums(version)
+        # Every download is https (E13); a release that names another one cannot be
+        # installed by update (the stage codes of download have no integrity failure).
+        for name in (archive_name, CHECKSUMS, BUNDLE):
+            if not https_url(assets[name]):
+                raise self.fail(
+                    "E_UNSUPPORTED",
+                    f"Release v{version} names a download that is not https, so it was not "
+                    "installed.",
+                    f"Install {tool} with the package-manager command in its README instead, and "
+                    "report the release to the tool's maintainers.",
+                )
+        if not self.exe:
+            raise self.fail(
+                "E_IO",
+                f"{tool} cannot find its own executable, so it cannot update itself.",
+                f"Reinstall {tool} with the install command in its README.",
+            )
         exe_dir = os.path.dirname(os.path.abspath(self.exe))
         try:
             self.tmp = tempfile.mkdtemp(prefix=f".{tool}-update-", dir=exe_dir)
@@ -1295,7 +1558,7 @@ class _Updater:
             bundle = net.get(assets[BUNDLE], MAX_SIGNED_FILE)
         except _TooLarge:
             raise self.no_signed_checksums(version) from None
-        except (_NetError, _CAFileError) as exc:
+        except _NetError as exc:
             raise self.net_error(exc, version) from None
         archive = os.path.join(self.tmp, archive_name)
         try:
@@ -1304,7 +1567,7 @@ class _Updater:
             raise self.checksum_failed() from None
         except _WriteFailed:
             raise self.cannot_write(exe_dir) from None
-        except (_NetError, _CAFileError) as exc:
+        except _NetError as exc:
             raise self.net_error(exc, version) from None
 
         self.begin("verify_signature")
@@ -1378,17 +1641,25 @@ class _Updater:
 
     def swap(self, new: str) -> None:
         """The commit point: rename the new binary over the running one (Windows:
-        move the running one aside first, and back if the second rename fails)."""
+        move the running one aside first, and back if the second rename fails). When
+        moving it back fails too, the tool may be missing: dispatch_state unknown and
+        a next_action that names the file to rename back (E10)."""
         exe = self.exe
         self.interrupts.committing = True
-        self.rollback = ""
         try:
-            if os.name == "nt":
+            if _IS_WINDOWS:
                 self._swap_windows(new, exe)
             else:
                 rename_retry(new, exe)
         except OSError as exc:
-            reason = _reason(exc) + self.rollback
+            if self.dispatch_unknown:
+                raise self.fail(
+                    "E_IO",
+                    "The update failed and the old version could not be put back; "
+                    f"{self.tool} may be missing.",
+                    f"Rename {self.old_binary} back to {exe}, then run {self.tool} --version.",
+                ) from None
+            reason = _reason(exc)
             raise self.fail(
                 "E_IO",
                 f"Replacing {exe} failed: {reason}; {self.tool} is still {self.current}.",
@@ -1414,37 +1685,37 @@ class _Updater:
         except OSError:
             try:
                 rename_retry(old, exe)
-            except OSError as back:
+            except OSError:
                 self.dispatch_unknown = True
-                self.rollback = (
-                    f" (moving the old binary back also failed: {_reason(back)}; it is at {old})"
-                )
+                self.old_binary = old
             raise
 
     def replace_skills(self, extracted: str) -> None:
-        """<exe dir>/skills becomes the release's skills/ (the source of later
-        syncs)."""
-        exe_dir = os.path.dirname(os.path.abspath(self.exe))
-        dst = os.path.join(exe_dir, "skills")
+        """In <exe dir>/skills, put each Skill directory of the verified release's
+        skills/ at skills/<name>, one name at a time (E3): the directory itself and
+        the other names in it, which may be other tools' Skills in a shared
+        directory, are left alone; a release without skills/ leaves it alone. The
+        names become the Skills this run syncs."""
         src = os.path.join(extracted, "skills")
-        aside = ""
-        if os.path.lexists(dst):
-            aside = os.path.join(exe_dir, f".skills.old-{secrets.token_hex(4)}")
-            rename_retry(dst, aside)
+        self.release_skills = []
         try:
-            if os.path.isdir(src):
-                rename_retry(src, dst)
+            st = os.lstat(src)
         except OSError:
-            if aside:
-                with contextlib.suppress(OSError):
-                    rename_retry(aside, dst)
-            raise
-        if aside:
-            if os.path.islink(aside):
-                with contextlib.suppress(OSError):
-                    os.remove(aside)
-            else:
-                shutil.rmtree(aside, ignore_errors=True)
+            return
+        if is_link_or_reparse(st) or not stat.S_ISDIR(st.st_mode):
+            return
+        names = _dir_names(src)
+        dst = os.path.join(os.path.dirname(os.path.abspath(self.exe)), "skills")
+        try:
+            st = os.lstat(dst)
+        except FileNotFoundError:
+            os.mkdir(dst, 0o755)
+        else:
+            if is_link_or_reparse(st) or not stat.S_ISDIR(st.st_mode):
+                raise OSError(f"{dst} is not a directory")
+        for name in names:
+            _replace_dir(os.path.join(src, name), dst, name)
+            self.release_skills.append(name)
 
     # ---------------------------------------------------------------- Skills
 
@@ -1452,48 +1723,86 @@ class _Updater:
         """Where the installed package keeps its Skills: <exe dir>/skills for a
         binary, skills/ in the npm wrapper package, none for the others."""
         if self.method == "binary":
+            if not self.exe:
+                return None
             return os.path.join(os.path.dirname(os.path.abspath(self.exe)), "skills")
         if self.method in ("npm", "pnpm", "yarn"):
             root = npm_package_root(self.exe, self.cfg.npm_package)
             return os.path.join(root, "skills") if root else None
         return None
 
+    def own_skills(self, source: str) -> list[str] | None:
+        """The Skills this run syncs (E3). After an install, the names the verified
+        release shipped. On an up-to-date run of a binary install, the tool's own
+        Skills in <exe dir>/skills, which other tools in the same directory may share:
+        the entry Skill named after the tool and the domain Skills whose
+        metadata.requires.skills names it (SKL-010). None, every Skill of the
+        source, for the package-manager installs, whose package holds only this
+        tool's Skills."""
+        if self.release_skills is not None:
+            return self.release_skills
+        if self.method != "binary":
+            return None
+        names: list[str] = []
+        for name in _dir_names(source):
+            if name == self.tool:
+                names.append(name)
+                continue
+            try:
+                with open(os.path.join(source, name, "SKILL.md"), "rb") as fh:
+                    text = fh.read(256 << 10).decode("utf-8", "replace")
+            except OSError:
+                continue
+            fm = _SKILL_FRONTMATTER.match(text)
+            m = _SKILL_REQUIRES.search(fm.group(1)) if fm else None
+            if m is not None and m.group(1) == self.tool:
+                names.append(name)
+        return names
+
     def sync(self, version: str) -> str:
-        """Copy each Skill of the installed package over the installed copies that
-        are real directories with another metadata.version (links are left alone,
-        missing copies are not created): synced, not_needed or skipped."""
+        """Copy each Skill of the installed package into the Skill directories that
+        hold it (stage skill_sync): a real directory is replaced by a copy, a link is
+        left alone, a missing one is not created; own_skills limits which Skills.
+        Links are never followed: a source Skill or a skills/ directory that is a
+        link is not copied. Returns skipped (no source, or no Skill installed
+        anywhere), not_needed (every installed copy already has this version) or
+        synced (something was copied); a failure raises."""
         self.begin("skill_sync")
         source = self.skill_source()
-        if not source or not os.path.isdir(source):
+        if not source:
             return "skipped"
-        want = _parse_or_none(version)
-        names = sorted(
-            n
-            for n in os.listdir(source)
-            if not n.startswith(".") and os.path.isdir(os.path.join(source, n))
-        )
-        installed = copied = False
-        for name in names:
+        try:
+            st = os.lstat(source)
+        except OSError:
+            return "skipped"
+        if is_link_or_reparse(st) or not stat.S_ISDIR(st.st_mode):
+            return "skipped"
+        names = self.own_skills(source)
+        skills = [n for n in skill_names(source) if names is None or n in names]
+        found: list[tuple[str, str, bool, bool]] = []  # skill, path, link, current
+        for name in skills:
             for root in self.app._skill_dirs():
                 dst = os.path.join(root, name)
                 try:
-                    st = os.lstat(dst)
-                except FileNotFoundError:
+                    dst_st = os.lstat(dst)
+                except OSError:
                     continue
-                installed = True
-                if is_link_or_reparse(st) or not stat.S_ISDIR(st.st_mode):
+                link = is_link_or_reparse(dst_st)
+                if not link and not stat.S_ISDIR(dst_st.st_mode):
                     continue
-                have = _skill_version(dst)
-                hv = _parse_or_none(have)
-                if have == version or (
-                    hv is not None and want is not None and compare_versions(hv, want) == 0
-                ):
-                    continue
-                _replace_dir(os.path.join(source, name), root, name)
-                copied = True
-        if not installed:
+                current = _same_version_text(_skill_version(dst), version)
+                found.append((name, root, link, current))
+        if not found:
             return "skipped"
-        return "synced" if copied else "not_needed"
+        if all(current for _, _, _, current in found):
+            return "not_needed"
+        copied = 0
+        for name, root, link, current in found:
+            if link or current:
+                continue
+            _replace_dir(os.path.join(source, name), root, name)
+            copied += 1
+        return "synced" if copied else "skipped"
 
     def sync_or_partial(self, previous: str, version: str) -> str:
         """The Skill sync after an install, or of an up-to-date install: its
@@ -1523,11 +1832,13 @@ def refresh_update_notice(app: App, timeout: float = REFRESH_TIMEOUT) -> None:
         net = _Net(app, cfg, timeout)
         repo = "/".join(urllib.parse.quote(p, safe="") for p in cfg.repo.split("/"))
         rel = net.get_json(f"{net.api}/repos/{repo}/releases/latest")
-        if not isinstance(rel, dict):
+        if not isinstance(rel, dict) or rel.get("draft") or rel.get("prerelease"):
             return
         tag = rel.get("tag_name")
         v = parse_version(tag if isinstance(tag, str) else "")
-        severity = update_severity(_parse_or_none(app.version), v, [(v, rel)])
+        if v.pre:
+            return  # a prerelease is never advertised (E2, CLI-071)
+        severity = update_severity(_parse_or_none(app._version()), v, [(v, rel)])
         app.record_update_check(str(v), severity)
     except Exception:  # best effort: doctor never fails on it
         return

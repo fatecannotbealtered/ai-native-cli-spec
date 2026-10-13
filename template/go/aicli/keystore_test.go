@@ -222,7 +222,7 @@ func TestAtomicRecordWritesNeverExposePartialContent(t *testing.T) {
 	j := &journal{dir: dir}
 	id := "op_aaaaaaaaaaaaaaaaaaaaaaaaaa"
 	small := &record{V: 2, OperationID: id, Kind: "single", Command: "x", Status: "planned", Target: &targetJSON{Key: "k"},
-		CreatedAt: "2026-01-01T00:00:00Z", ExpiresAt: "2026-01-01T00:10:00Z"}
+		Effects: []string{"change"}, CreatedAt: "2026-01-01T00:00:00Z", ExpiresAt: "2026-01-01T00:10:00Z"}
 	big := *small
 	big.Preview = json.RawMessage(`{"pad":"` + strings.Repeat("x", 64<<10) + `"}`)
 	if e := j.write(small); e != nil {
@@ -432,7 +432,7 @@ func TestPruneKeepsUnresolvedRecords(t *testing.T) {
 	old := timeString(now.Add(-40 * 24 * time.Hour))
 	mk := func(id, status string, lease *string) {
 		r := &record{V: 2, OperationID: id, Kind: "single", Command: "x", Status: status, Target: &targetJSON{Key: "k"},
-			CreatedAt: old, ExpiresAt: old, FinishedAt: &old, LeaseUntil: lease}
+			Effects: []string{"change"}, CreatedAt: old, ExpiresAt: old, FinishedAt: &old, LeaseUntil: lease}
 		if e := j.write(r); e != nil {
 			t.Fatal(e)
 		}

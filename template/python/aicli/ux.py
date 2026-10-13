@@ -221,6 +221,36 @@ def near_secret(name: str, secret: set[str]) -> bool:
     )
 
 
+def known_flag(node: Node | None, tok: str) -> bool:
+    """Whether a flag token names a flag of node (long, or each of its shorthands)."""
+    if node is None:
+        return False
+    if tok.startswith("--"):
+        return node.flag(tok[2:].split("=", 1)[0]) is not None
+    return bool(tok[1:2]) and node.shorthand_flag(tok[1]) is not None
+
+
+def mask_shorthands(node: Node | None, tok: str, secret: set[str]) -> tuple[str, bool] | None:
+    """A shorthand token (-k v, -k=v, -kv, -abk v) with the value of a secret flag
+    masked: the token to show and whether the next token is the secret's value.
+    None when no secret flag takes a value in it."""
+    if node is None:
+        return None
+    s = tok[1:]
+    for i, c in enumerate(s):
+        f = node.shorthand_flag(c)
+        if f is None:
+            return None
+        if f.no_opt_def_val:
+            continue  # a boolean: the next letter is another shorthand
+        if not near_secret(f.name, secret):
+            return None
+        if i + 1 < len(s):
+            return "-" + s[: i + 1] + "=***", False
+        return tok, True
+    return None
+
+
 _SHELL_SPECIAL = set("\"'`$\\|&;<>()*?[]{}!#~")
 
 
@@ -262,7 +292,7 @@ class UXMixin:
                     c.cmd,
                     {
                         "tool": self.tool_name(),
-                        "version": self.version,
+                        "version": self._version(),
                         "spec_version": SPEC_VERSION,
                         "schema_version": SCHEMA_VERSION,
                     },
@@ -324,23 +354,33 @@ class UXMixin:
         nxt = f"Run `{group.command_path} --help` to list every command under it."
         if suggestions:
             best = suggestions[0]
+            best_words = best.removeprefix(self._root.name).removeprefix(" ").split()
             dropped = [False]
-            positionals = [0]
+            kept: list[str] = []
 
             def edit(_i: int, tok: str, kind: str) -> list[str]:
-                if kind == "positional":
-                    if not dropped[0] and tok == word:
-                        dropped[0] = True
-                        return []
-                    positionals[0] += 1
+                if kind == "positional" and not dropped[0] and tok == word:
+                    dropped[0] = True
+                    return []
+                kept.append(tok)
                 return [tok]
 
             line, ok = self.command_line(best, edit)
-            target = self.command_by_path(best.removeprefix(self._root.name).removeprefix(" "))
+            # The remaining arguments are read as the suggested command reads them
+            # (P11): a value of one of its flags is not a positional argument.
+            _, kinds = self.classify([*best_words, *kept])
+            positionals = sum(1 for k in kinds[len(best_words) :] if k == "positional")
+            target = self.command_by_path(" ".join(best_words))
             is_group = target is not None and (target is self._root or target.has_subcommands())
-            m = self.meta_for(target) if target is not None else None
-            takes = 1 if m is not None and m.positional else 0
-            if ok and not is_group and positionals[0] > takes:
+            takes, variadic = 0, False
+            if target is not None:
+                m = self.meta_for(target)
+                for p in positionals_of(target, m):
+                    takes += p.count
+                    variadic = variadic or p.variadic
+                if m is not None and m.positional and takes == 0:
+                    takes = 1
+            if ok and not is_group and not variadic and positionals > takes:
                 # The rewritten line would be refused (unexpected_argument): point to
                 # the command's own help instead of a command that cannot run.
                 nxt = (
@@ -676,35 +716,43 @@ class UXMixin:
         st = self._run
         if st is None:
             return "", False
-        _, kinds = self.classify(st.args)
-        out = path.split()
+        node, kinds = self.classify(st.args)
+        toks: list[tuple[str, str]] = [(w, "word") for w in path.split()]
         for i, tok in enumerate(st.args):
             if kinds[i] == "word":
                 continue
-            out += edit(i, tok, kinds[i]) if edit is not None else [tok]
-        out += list(extra)
-        return self.render_command(out), True
+            for t in edit(i, tok, kinds[i]) if edit is not None else [tok]:
+                toks.append((t, kinds[i]))
+        toks += [(t, "flag" if t.startswith("--") else "value") for t in extra]
+        return self.render_command([t for t, _ in toks], [k for _, k in toks], node), True
 
     def secret_flag_names(self: App) -> set[str]:
-        """Every flag name a command declares secret (Meta.secrets)."""
-        return {s for m in self._reg.meta.values() for s in m.secrets}
+        """Every flag name a command declares secret (Meta.secrets with its twins)
+        and the flags of Secret settings (B2)."""
+        names = {s for m in self._reg.meta.values() for s in m.secrets}
+        names.update(s.flag for s in self.settings or [] if s.secret and s.flag)
+        return names
 
-    def render_command(self: App, tokens: list[str]) -> str:
+    def render_command(
+        self: App, tokens: list[str], kinds: list[str], node: Node | None = None
+    ) -> str:
         """Tokens joined into one shell-ready line, quoting where needed and masking
         the values of flags declared secret and of flags whose names are close to a
-        secret flag's."""
+        secret flag's (D6). kinds are the classify labels of the tokens, so a
+        secret's value is masked however it was given: --long v, --long=v, -s v,
+        -s=v, -sv, or a value that starts with "-"."""
         from .app import split_flag
 
         secret = self.secret_flag_names()
         out: list[str] = []
         mask_next = False
-        for tok in tokens:
-            if mask_next and not tok.startswith("-"):
+        for tok, kind in zip(tokens, kinds, strict=False):
+            if mask_next and (kind != "flag" or not known_flag(node, tok)):
                 out.append("***")
                 mask_next = False
                 continue
             mask_next = False
-            if tok.startswith("--") and len(tok) > 2:
+            if kind == "flag" and tok.startswith("--") and len(tok) > 2:
                 name, _, inline = split_flag(tok)
                 if near_secret(name, secret):
                     if inline:
@@ -712,6 +760,12 @@ class UXMixin:
                     else:
                         out.append(tok)
                         mask_next = True
+                    continue
+            elif kind == "flag" and tok.startswith("-") and len(tok) > 1:
+                masked = mask_shorthands(node, tok, secret)
+                if masked is not None:
+                    out.append(masked[0])
+                    mask_next = masked[1]
                     continue
             out.append(shell_word(tok))
         return " ".join(out)
@@ -727,8 +781,6 @@ class UXMixin:
             return
         st.cmd = c
         m = self.meta_for(c)
-        if m is not None:
-            self.deprecation_notices(c, m)
         self.apply_output_flags(c)
         if m is not None and m.positional and len(args) == 1:
             f = c.flag(m.positional)
@@ -758,6 +810,10 @@ class UXMixin:
                     e.details["expected"] = typ
                     raise e from None
             st.positional_consumed = True
+        if m is not None:
+            # after Meta.positional is bound, so a deprecated flag given as the
+            # positional is noticed too (Go's order, D10)
+            self.deprecation_notices(c, m)
         self.check_required(c)
         if m is not None:
             self.check_file_inputs(c, m)
@@ -768,19 +824,22 @@ class UXMixin:
         """A deprecated notice for each use of a deprecated command and of each
         deprecated flag given on the command line (CLI-081)."""
         from .envelope import Notice
+        from .registry import replacement_text
         from .selfupdate import parse_version
 
-        if m.deprecated:
+        if replacement_text(m.deprecated):
             tool = self.tool_name()
-            msg = f"`{c.path}` is deprecated: {m.deprecated.removesuffix('.')}."
+            msg = f"`{c.path}` is deprecated: {replacement_text(m.deprecated)}."
             try:
-                msg += f" It will be removed in {tool} {parse_version(self.version).major + 1}.0.0."
+                msg += (
+                    f" It will be removed in {tool} {parse_version(self._version()).major + 1}.0.0."
+                )
             except ValueError:
                 msg += f" It will be removed in the next major version of {tool}."
             self.notice(Notice(type="deprecated", severity="warning", message=msg))
         for name in sorted(m.deprecated_flags):
             f = c.flag(name)
-            text = m.deprecated_flags[name].removesuffix(".")
+            text = replacement_text(m.deprecated_flags[name])
             if f is not None and f.changed and text:
                 self.notice(
                     Notice(
@@ -835,23 +894,26 @@ class UXMixin:
                 raise e
 
     def check_fields(self: App, c: Node, m: Meta | None) -> None:
-        """Field names the command's schema does not declare (CLI-040)."""
+        """Field names the command's schema does not declare (CLI-040). context
+        accepts every top-level key it returns (P13)."""
         st = self._run
         assert st is not None
         if not st.fields.set or st.fields.all:
             return
-        s = self.schema_of(m)
-        if not s.fields:
+        fields = list(self.schema_of(m).fields)
+        if c.builtin and c.name == "context" and c.parent is self._root:
+            fields = self.context_fields()
+        if not fields:
             return
-        unknown = [n for n in st.fields.names if n not in s.fields and n != "ref"]
+        unknown = [n for n in st.fields.names if n not in fields and n != "ref"]
         if unknown:
             e = usage(
                 "invalid_value",
                 "--fields",
                 f"--fields names {len(unknown)} field(s) this command does not return.",
             )
-            e.details["expected"] = ",".join(s.fields)
-            e.details["did_you_mean"] = closest_words(unknown[0], s.fields)
+            e.details["expected"] = ",".join(fields)
+            e.details["did_you_mean"] = closest_words(unknown[0], fields)
             e.details["next_action"] = "Use field names from details.expected, or --fields all."
             raise e
 

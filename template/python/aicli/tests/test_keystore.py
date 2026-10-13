@@ -170,6 +170,7 @@ def _record(op_id: str, **kw: object) -> Record:
         "command": "x",
         "status": "planned",
         "target": TargetRef("k"),
+        "effects": ["change"],
         "created_at": "2026-01-01T00:00:00Z",
         "expires_at": "2026-01-01T00:10:00Z",
     }

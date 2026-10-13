@@ -334,7 +334,7 @@ func (a *App) defaultNextAction(code string, details map[string]any) string {
 	case "E_CONFLICT":
 		return "Re-read the current state, then run the command again with --dry-run."
 	case "E_OUTCOME_UNKNOWN":
-		return fmt.Sprintf("Run `%s operation list --status unknown` and look the operation up before doing anything else.", tool)
+		return fmt.Sprintf("Run `%s operation list --state unknown` and look the operation up before doing anything else.", tool)
 	case "E_NETWORK":
 		return "Check connectivity to the upstream, then retry."
 	case "E_RATE_LIMITED":
@@ -432,6 +432,14 @@ func (a *App) normalizeError(e *Error) (errorObject, int, []string) {
 	message := strings.TrimSpace(e.Message)
 	if message == "" {
 		message = spec.Meaning
+	}
+	// No emitted error shows a secret, wherever its text came from: the message, a
+	// cause or upstream message, a panic text or any nested detail (D1, SEC-021).
+	if secrets := a.errorSecrets(); len(secrets) > 0 {
+		message = redactWith(message, secrets)
+		if d, ok := redactValue(details, secrets).(map[string]any); ok {
+			details = d
+		}
 	}
 	var untrusted []string
 	for _, p := range e.Untrusted {

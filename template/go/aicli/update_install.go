@@ -20,6 +20,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 )
@@ -108,7 +109,7 @@ func (u *updateRun) verify(checksums, bundle []byte, identity string) error {
 	if u.cfg.Verify != nil {
 		return u.cfg.Verify(u.ctx, checksums, bundle, identity, githubActionsIssuer)
 	}
-	client := &http.Client{Transport: u.client.Transport, Timeout: trustRootTimeout}
+	client := &http.Client{Transport: u.client.Transport, Timeout: trustRootTimeout, CheckRedirect: u.client.CheckRedirect}
 	return verifySigstoreBundle(u.ctx, client, checksums, bundle, identity, githubActionsIssuer)
 }
 
@@ -126,6 +127,14 @@ func (u *updateRun) installBinary(exe string, rel *ghRelease, target Version) (m
 	if sums == nil || bundle == nil {
 		return nil, u.noSignedChecksums(version)
 	}
+	// Every download is https (E13); a release that names another one cannot be
+	// installed by update (the stage codes of download have no integrity failure).
+	for _, a := range []*ghAsset{asset, sums, bundle} {
+		if !httpsURL(a.URL) {
+			return nil, u.fail("E_UNSUPPORTED", fmt.Sprintf("Release v%s names a download that is not https, so it was not installed.", version),
+				fmt.Sprintf("Install %s with the package-manager command in its README instead, and report the release to the tool's maintainers.", u.tool))
+		}
+	}
 	if exe == "" {
 		return nil, u.fail("E_IO", fmt.Sprintf("%s cannot find its own executable, so it cannot update itself.", u.tool),
 			fmt.Sprintf("Reinstall %s with the install command in its README.", u.tool))
@@ -135,7 +144,14 @@ func (u *updateRun) installBinary(exe string, rel *ghRelease, target Version) (m
 	if err != nil {
 		return nil, u.cannotWrite(dir)
 	}
-	defer func() { _ = os.RemoveAll(tmp) }()
+	// After a failed rollback the new binary in tmp may be the only working copy
+	// (E10): it is kept then.
+	keepTmp := false
+	defer func() {
+		if !keepTmp {
+			_ = os.RemoveAll(tmp)
+		}
+	}()
 
 	ext := ".tar.gz"
 	if strings.HasSuffix(asset.Name, ".zip") {
@@ -228,21 +244,31 @@ func (u *updateRun) installBinary(exe string, rel *ghRelease, target Version) (m
 		return nil, u.fail("E_INTEGRITY", fmt.Sprintf("The downloaded binary reports version %s, not %s, so it was not installed.", observed, version),
 			signatureNext)
 	}
-	if err := swapBinary(runtime.GOOS, newBin, exe, fileOps{rename: renameRetry, remove: os.Remove}); err != nil {
+	if err := swapBinary(swapOS, newBin, exe, swapOps); err != nil {
 		var rb *rollbackError
-		u.lost = errors.As(err, &rb)
+		if errors.As(err, &rb) {
+			// The old binary could not be moved back (E10): the tool may be missing.
+			u.lost, keepTmp = true, true
+			return nil, u.fail("E_IO", fmt.Sprintf("The update failed and the old version could not be put back; %s may be missing.", u.tool),
+				fmt.Sprintf("Rename %s back to %s, then run %s --version.", rb.old, exe, u.tool))
+		}
 		return nil, u.fail("E_IO", fmt.Sprintf("Replacing %s failed: %s; %s is still %s.", exe, failureReason(err), u.tool, u.current),
 			fmt.Sprintf("Close other running copies of %s, then run `%s update` again.", u.tool, u.tool))
 	}
 	u.replaced, u.dispatched = true, true
-	// The release's skills/ beside the binary is the source of this and later syncs.
+	// <exe dir>/skills may be shared by several tools (E3): only the Skills this
+	// release ships are replaced, one skills/<name> at a time, and only they are
+	// synced. A release without skills/ leaves the directory alone.
+	shipped := []string{}
 	if skills != "" {
 		u.begin("skill_sync")
-		if err := replaceDir(skills, filepath.Join(dir, "skills")); err != nil {
+		names, err := replaceSkillDirs(skills, filepath.Join(dir, "skills"))
+		if err != nil {
 			return nil, u.partial(err)
 		}
+		shipped = names
 	}
-	status, err := u.syncSkills(exe, version)
+	status, err := u.syncSkills(exe, version, shipped)
 	if err != nil {
 		return nil, u.partial(err)
 	}
@@ -297,10 +323,26 @@ func fileSHA256(path string) (string, error) {
 
 // ---------------------------------------------------------------- extraction
 
+// The caps of one archive's extraction (E13): entries of any kind, and the bytes
+// of every file written. Variables only so that tests can lower them.
+var (
+	maxArchiveEntries       = 10000
+	maxExtractedTotal int64 = 1 << 30
+)
+
+// swapOS and swapOps are the platform and file operations of the swap (tests
+// replace them to reach the Windows rollback anywhere).
+var (
+	swapOS  = runtime.GOOS
+	swapOps = fileOps{rename: renameRetry, remove: os.Remove}
+)
+
 // extractor writes <bin> and the skills/ tree of a release archive into dir.
 type extractor struct {
 	dir, bin            string
 	foundBin, hasSkills bool
+	entries             int
+	written             int64
 }
 
 // extractRelease extracts the binary and skills/ from the archive root into dir.
@@ -402,8 +444,13 @@ func cleanArchiveName(name string) (string, bool) {
 	return path.Clean(n), true
 }
 
-// entry places one archive entry; open is nil for a directory.
+// entry places one archive entry; open is nil for a directory. An archive of more
+// than 10,000 entries is refused at the entry past the cap.
 func (x *extractor) entry(name string, mode fs.FileMode, open func() (io.ReadCloser, error)) error {
+	x.entries++
+	if x.entries > maxArchiveEntries {
+		return unsafeEntry(name)
+	}
 	clean, ok := cleanArchiveName(name)
 	if !ok {
 		return unsafeEntry(name)
@@ -434,7 +481,8 @@ func (x *extractor) entry(name string, mode fs.FileMode, open func() (io.ReadClo
 	return nil
 }
 
-// writeFile writes one extracted file (at most 512 MiB; a repeated name is refused).
+// writeFile writes one extracted file (at most 512 MiB, and at most 1 GiB for all
+// files together; a repeated name is refused).
 func (x *extractor) writeFile(name, clean string, perm fs.FileMode, open func() (io.ReadCloser, error)) error {
 	target := filepath.Join(x.dir, filepath.FromSlash(clean))
 	if _, err := os.Lstat(target); err == nil {
@@ -452,16 +500,18 @@ func (x *extractor) writeFile(name, clean string, perm fs.FileMode, open func() 
 	if err != nil {
 		return fmt.Errorf("%w: %w", errWrite, err)
 	}
-	n, err := io.Copy(writeTagger{f}, io.LimitReader(r, extractedLimit+1))
+	limit := max(min(int64(extractedLimit), maxExtractedTotal-x.written), 0)
+	n, err := io.Copy(writeTagger{f}, io.LimitReader(r, limit+1))
 	if cerr := f.Close(); err == nil && cerr != nil {
 		err = fmt.Errorf("%w: %w", errWrite, cerr)
 	}
+	x.written += n
 	switch {
 	case err != nil && errors.Is(err, errWrite):
 		return err
 	case err != nil:
 		return errBadArchive
-	case n > extractedLimit:
+	case n > limit:
 		return unsafeEntry(name)
 	}
 	return nil
@@ -517,7 +567,8 @@ func swapBinary(goos, newPath, exe string, ops fileOps) error {
 	}
 	if err := ops.rename(newPath, exe); err != nil {
 		if rerr := ops.rename(old, exe); rerr != nil {
-			return &rollbackError{fmt.Errorf("%s (moving the old binary back also failed: %s; it is at %s)", failureReason(err), failureReason(rerr), old)}
+			return &rollbackError{err: fmt.Errorf("%s (moving the old binary back also failed: %s; it is at %s)", failureReason(err), failureReason(rerr), old),
+				old: old}
 		}
 		return err
 	}
@@ -525,8 +576,12 @@ func swapBinary(goos, newPath, exe string, ops fileOps) error {
 }
 
 // rollbackError is a failed swap whose rollback failed too: the running binary
-// is no longer at its path, so the install state is unknown.
-type rollbackError struct{ err error }
+// is no longer at its path, so the install state is unknown. old is where the old
+// binary is now.
+type rollbackError struct {
+	err error
+	old string
+}
 
 func (e *rollbackError) Error() string { return e.err.Error() }
 
@@ -574,6 +629,76 @@ func randomSuffix() string {
 	return hex.EncodeToString(b)
 }
 
+// replaceSkillDirs puts each Skill directory of a verified release's skills/ (src)
+// at dst/<name>, one name at a time (E3): dst itself and the other names in it,
+// which may be other tools' Skills in a shared directory, are left alone. It
+// returns the names it placed.
+func replaceSkillDirs(src, dst string) ([]string, error) {
+	if info, err := os.Lstat(dst); err == nil && (info.Mode()&fs.ModeSymlink != 0 || info.Mode()&fs.ModeIrregular != 0 || !info.IsDir()) {
+		return nil, fmt.Errorf("%s is not a directory", dst)
+	} else if errors.Is(err, fs.ErrNotExist) {
+		if err := os.Mkdir(dst, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
+			return nil, err
+		}
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return nil, err
+	}
+	names := []string{}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if err := replaceDir(filepath.Join(src, e.Name()), filepath.Join(dst, e.Name())); err != nil {
+			return names, err
+		}
+		names = append(names, e.Name())
+	}
+	return names, nil
+}
+
+var skillRequires = regexp.MustCompile(`(?m)^[ \t]+requires\.skills:[ \t]*"?([^"\s#]+)"?`)
+
+// ownSkills is the tool's own Skills in a binary install's <exe dir>/skills, which
+// other tools in the same directory may share (E3): the entry Skill named after the
+// tool and the domain Skills whose metadata.requires.skills names it (SKL-010). It
+// is nil, every Skill of the source, for the package-manager installs, whose
+// package holds only this tool's Skills.
+func (u *updateRun) ownSkills(exe string) []string {
+	if u.method != "binary" {
+		return nil
+	}
+	names := []string{}
+	src := u.skillSource(exe)
+	if src == "" {
+		return names
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return names
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if e.Name() == u.tool {
+			names = append(names, e.Name())
+			continue
+		}
+		b, err := readSmallFile(filepath.Join(src, e.Name(), "SKILL.md"), 256<<10)
+		if err != nil {
+			continue
+		}
+		if fm := skillFrontmatter.FindStringSubmatch(string(b)); fm != nil {
+			if m := skillRequires.FindStringSubmatch(fm[1]); m != nil && m[1] == u.tool {
+				names = append(names, e.Name())
+			}
+		}
+	}
+	return names
+}
+
 // ---------------------------------------------------------------- Skill sync
 
 // skillSource is the installed package's skills/ directory: beside the binary for
@@ -618,13 +743,18 @@ func npmPackageRoot(exe, pkg string) string {
 
 // syncSkills copies each Skill of the installed package into the Skill directories
 // that hold it (stage skill_sync): a real directory is replaced by a copy, a link
-// is left alone, a missing one is not created. It returns skipped (no source, or
-// no Skill installed anywhere), not_needed (every installed copy already has this
-// version), synced (something was copied), or failed with the error.
-func (u *updateRun) syncSkills(exe, version string) (string, error) {
+// is left alone, a missing one is not created. names limits the sync to those
+// Skills (nil: every Skill of the source, E3). Links are never followed: a source
+// Skill or a skills/ directory that is a link is not copied. It returns skipped (no
+// source, or no Skill installed anywhere), not_needed (every installed copy already
+// has this version), synced (something was copied), or failed with the error.
+func (u *updateRun) syncSkills(exe, version string, names []string) (string, error) {
 	u.begin("skill_sync")
 	src := u.skillSource(exe)
 	if src == "" {
+		return "skipped", nil
+	}
+	if info, err := os.Lstat(src); err != nil || info.Mode()&fs.ModeSymlink != 0 || info.Mode()&fs.ModeIrregular != 0 || !info.IsDir() {
 		return "skipped", nil
 	}
 	entries, err := os.ReadDir(src)
@@ -633,7 +763,10 @@ func (u *updateRun) syncSkills(exe, version string) (string, error) {
 	}
 	var skills []string
 	for _, e := range entries {
-		if info, err := os.Stat(filepath.Join(src, e.Name(), "SKILL.md")); e.IsDir() && err == nil && info.Mode().IsRegular() {
+		if names != nil && !contains(names, e.Name()) {
+			continue
+		}
+		if info, err := os.Lstat(filepath.Join(src, e.Name(), "SKILL.md")); e.IsDir() && err == nil && info.Mode().IsRegular() {
 			skills = append(skills, e.Name())
 		}
 	}

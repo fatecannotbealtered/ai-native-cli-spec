@@ -127,16 +127,21 @@ def test_profile_selection(h: THarness) -> None:
 
 
 def test_unknown_profile(h: THarness) -> None:
+    """D4/D5: an unknown profile stops every tool command before it runs, and the
+    requested name is only in details.profile (untrusted), never in the message."""
     h.build = settings_app
     path = settings_file(h, {"profiles": {"work": {}, "home": {}}})
     h.env["NOTES_PROFILE"] = "wrok"
     r = h.run("probe", "--name", "host")
     assert r.exit == 4 and r.code() == "E_CONFIG", r
-    assert r.env["error"]["message"] == f"No profile named `wrok` in {path}."
+    assert r.env["error"]["message"] == "The requested profile is not in the settings file."
     assert r.details()["did_you_mean"] == ["work"], r.details()
+    assert r.details()["profile"] == "wrok" and r.details()["source"] == "env", r.details()
+    assert "error.details.profile" in r.env["meta"]["untrusted"], r.env["meta"]
     assert r.details()["next_action"] == (
-        "Use one of the profiles `notes context` lists, or ask the user to add `wrok`."
+        f"Use one of the profiles in details.did_you_mean, or add the profile to {path}."
     )
+    assert "wrok" not in r.env["error"]["message"] + r.details()["next_action"]
     assert r.details()["dispatch_state"] == "not_started"
     # context never fails on it: it lists the profiles to choose from
     want = {"name": None, "source": "none", "profiles": ["home", "work"], "file": path}
@@ -235,7 +240,7 @@ def test_profile_flag_is_bound_into_the_token(h: THarness) -> None:
     h.build = settings_app
     settings_file(h, {"profiles": {"work": {}, "home": {}}})
     tok = h.must_token("note", "update", "1", "--title", "X", "--profile", "work")
-    expect_mismatch(h.run("note", "update", "1", "--title", "X", "--confirm", tok), "--profile")
+    expect_mismatch(h.run("note", "update", "1", "--title", "X", "--confirm", tok), "profile")
     tok = h.must_token("note", "update", "1", "--title", "X", "--profile", "work")
     r = h.run("note", "update", "1", "--title", "X", "--profile", "work", "--confirm", tok)
     assert r.exit == 0, r

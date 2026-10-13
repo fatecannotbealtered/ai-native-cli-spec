@@ -389,13 +389,19 @@ func TestBulkTagReportsEachItem(t *testing.T) {
 func TestIdempotentCreateReturnsTheFirstResult(t *testing.T) {
 	e := newEnv(t, fullScope())
 	args := []string{"note", "create", "--title", "Once", "--idempotency-key", "create-once-1"}
-	first := e.run(append(args, "--confirm", e.dryRun(args...))...)
-	second := e.run(append(args, "--confirm", e.dryRun(args...))...)
-	if first.exit != 0 || second.exit != 0 || e.store.Writes() != 1 {
-		t.Fatalf("first %s second %s writes %d", first.out, second.out, e.store.Writes())
+	// The second token is issued before the first confirm; a dry-run after it is
+	// answered with the replay at once (P4).
+	tok1, tok2 := e.dryRun(args...), e.dryRun(args...)
+	first := e.run(append(args, "--confirm", tok1)...)
+	second := e.run(append(args, "--confirm", tok2)...)
+	third := e.run(append(args, "--dry-run")...)
+	if first.exit != 0 || second.exit != 0 || third.exit != 0 || e.store.Writes() != 1 {
+		t.Fatalf("first %s second %s third %s writes %d", first.out, second.out, third.out, e.store.Writes())
 	}
-	if second.data()["receipt"].(map[string]any)["replayed"] != true {
-		t.Fatalf("the repeat must be a replay: %s", second.out)
+	for _, r := range []result{second, third} {
+		if r.data()["receipt"].(map[string]any)["replayed"] != true || r.data()["operation_id"] != first.data()["operation_id"] {
+			t.Fatalf("the repeat must be a replay of the first: %s", r.out)
+		}
 	}
 }
 
@@ -554,10 +560,20 @@ func TestHostIsASettingWithProfiles(t *testing.T) {
 			t.Fatalf("doctor settings check: %v", m)
 		}
 	}
-	// a write refuses to run against an unknown profile
-	r := e.run("note", "create", "--title", "x", "--profile", "nope", "--dry-run")
-	if r.exit != 4 || r.code() != "E_CONFIG" || !strings.Contains(r.out, "No profile named `nope`") {
-		t.Fatalf("unknown profile: %s", r.out)
+	// every tool command refuses to run against an unknown profile; the name is in
+	// details.profile, never in the message (CLI-101)
+	for _, args := range [][]string{{"note", "create", "--title", "x", "--dry-run"}, {"note", "list"}} {
+		r := e.run(append(args, "--profile", "nope")...)
+		message, _ := r.doc["error"].(map[string]any)["message"].(string)
+		if r.exit != 4 || r.code() != "E_CONFIG" || r.details()["profile"] != "nope" || message != "The requested profile is not in the settings file." {
+			t.Fatalf("unknown profile: %s", r.out)
+		}
+	}
+	// the profile is bound into a write's token, whatever chose it (CLI-054)
+	tok := e.dryRun("note", "create", "--title", "x")
+	r := e.run("note", "create", "--title", "x", "--profile", "home", "--confirm", tok)
+	if r.code() != "E_CONFLICT" || r.details()["parameter"] != "profile" {
+		t.Fatalf("a token made under work must not confirm under home: %s", r.out)
 	}
 }
 

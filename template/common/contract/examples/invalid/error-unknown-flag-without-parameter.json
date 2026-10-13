@@ -10,7 +10,7 @@
       "next_action": "There is no --all: pass --limit 100 and follow next_cursor while has_more is true.",
       "problem": "unknown_flag",
       "did_you_mean": ["--limit"],
-      "usage": "gitlab-cli pipeline list --project <project> [--status <status>] [--branch <name>] [--limit <1-100>] [--cursor <cursor>]"
+      "usage": "gitlab-cli pipeline list --project <project> [--state <state>] [--branch <name>] [--limit <1-100>] [--cursor <cursor>]"
     }
   },
   "meta": {"duration_ms": 2}

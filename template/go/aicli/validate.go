@@ -1202,7 +1202,9 @@ func validateScopeRefusal(v *validation, p string, x any) {
 			if t, has := mo["target"]; has && !isText(t) {
 				v.add(pj(pj(p, "missing"), "target"), "must be a non-empty string")
 			}
-			for _, k := range []string{"destinations", "outputs"} {
+			// outputs: new files outside the scope's outputs; roots: existing files the
+			// write would overwrite, outside its roots (C1).
+			for _, k := range []string{"destinations", "outputs", "roots"} {
 				if val, has := mo[k]; has && !textList(val) {
 					v.add(pj(pj(p, "missing"), k), "must be an array of non-empty strings")
 				}
@@ -1216,8 +1218,22 @@ func validateScopeRefusal(v *validation, p string, x any) {
 
 // ---------------------------------------------------------------- errors
 
-func validateUpdateFailure(v *validation, p string, d map[string]any) {
+// checkSyncCommand enforces F10 (P16): skill_sync_command comes only when the Skill
+// sync could not finish (skill_sync_status failed, or the E_PARTIAL at skill_sync,
+// partialSync), and then always; never with skipped, not_needed or synced.
+func checkSyncCommand(v *validation, p string, d map[string]any, partialSync bool) {
+	ss := d["skill_sync_status"]
+	if (ss == "skipped" || ss == "not_needed" || ss == "synced") && hasKey(d, "skill_sync_command") {
+		v.add(pj(p, "skill_sync_command"), "comes only when the Skill sync could not finish, not with skill_sync_status %v (F10)", ss)
+	}
+	if (ss == "failed" || partialSync) && !hasKey(d, "skill_sync_command") {
+		v.add(p, "missing key \"skill_sync_command\": the Skill sync could not finish (F10)")
+	}
+}
+
+func validateUpdateFailure(v *validation, p, code string, d map[string]any) {
 	requireKeys(v, p, d, updateFailureDetailKeys)
+	checkSyncCommand(v, p, d, code == "E_PARTIAL" && d["stage"] == "skill_sync")
 	if s, has := d["stage"]; has {
 		if st, _ := s.(string); !contains(updateStages, st) {
 			v.add(pj(p, "stage"), "must be an update stage")
@@ -1234,7 +1250,7 @@ func validateUpdateFailure(v *validation, p string, d map[string]any) {
 		}
 	}
 	if d["binary_replaced"] == true {
-		requireKeys(v, p, d, []string{"target_version", "skill_sync_command"})
+		requireKeys(v, p, d, []string{"target_version"})
 		if st := d["stage"]; st != "replace" && st != "skill_sync" {
 			v.add(pj(p, "stage"), "is replace or skill_sync once the binary is replaced")
 		}
@@ -1301,6 +1317,7 @@ func validateUpdateData(v *validation, p string, x any) {
 	if c, has := d["skill_sync_command"]; has && !isText(c) {
 		v.add(pj(p, "skill_sync_command"), "must be a non-empty string")
 	}
+	checkSyncCommand(v, p, d, false)
 	if c, has := d["command"]; has {
 		if list, _ := c.([]any); !isText(c) && (len(list) == 0 || !textList(c)) {
 			v.add(pj(p, "command"), "must be the command text or its argv")
@@ -1500,7 +1517,7 @@ func validateErrorDetails(v *validation, p, code string, d map[string]any) {
 	}
 	updateDetails := hasKey(d, "stage") && hasKey(d, "binary_replaced")
 	if updateDetails {
-		validateUpdateFailure(v, p, d)
+		validateUpdateFailure(v, p, code, d)
 	}
 	// dispatched means a write's request reached the upstream, so the error says
 	// what happened to it (decision 1); the listed codes have their own rule.
@@ -1544,7 +1561,8 @@ func validateErrorDetails(v *validation, p, code string, d map[string]any) {
 		if conflict == "token_mismatch" && !hasKey(d, "parameter") {
 			v.add(p, "missing key \"parameter\"")
 		}
-		if (conflict == "unresolved_operation" || conflict == "lock_held") && !hasKey(d, "active_operation") {
+		// lock_held names the running operation only when the lock's owner is known (P15).
+		if conflict == "unresolved_operation" && !hasKey(d, "active_operation") {
 			v.add(p, "missing key \"active_operation\"")
 		}
 	case "E_FORBIDDEN":
@@ -2612,7 +2630,7 @@ func validateErrorTable(v *validation, p string, x any, requireCore bool) {
 // validateTree checks the command tree (CLI-021): paths are unique, a path is a
 // command or a group but not both, and no alias collides with a path or another
 // alias.
-func validateTree(v *validation, p string, paths, aliases []string) {
+func validateTree(v *validation, p string, paths []string, aliases map[string][]string) {
 	count := map[string]int{}
 	for _, path := range paths {
 		count[path]++
@@ -2634,11 +2652,35 @@ func validateTree(v *validation, p string, paths, aliases []string) {
 			}
 		}
 	}
-	for _, alias := range aliases {
-		if count[alias] > 0 {
-			v.add(p, "alias '%s' collides with a command path or another alias (CLI-021)", alias)
+	// Aliases are per parent (P1): `label create` and `milestone create` may both have
+	// the alias add. An alias collides only with the name of a sibling (a command or a
+	// group under the same parent) or another sibling's alias, and a root alias also
+	// with a built-in name.
+	children := map[string]map[string]bool{}
+	for _, path := range paths {
+		words := strings.Fields(path)
+		for i := range words {
+			parent := strings.Join(words[:i], " ")
+			if children[parent] == nil {
+				children[parent] = map[string]bool{}
+			}
+			children[parent][words[i]] = true
 		}
-		count[alias]++
+	}
+	taken := map[string]bool{}
+	for _, path := range sortedKeys(aliases) {
+		words := strings.Fields(path)
+		if len(words) == 0 {
+			continue
+		}
+		parent := strings.Join(words[:len(words)-1], " ")
+		for _, alias := range aliases[path] {
+			qualified := strings.TrimSpace(parent + " " + alias)
+			if children[parent][alias] || taken[qualified] || (parent == "" && isReservedRoot(alias)) {
+				v.add(p, "alias '%s' collides with a command path or another alias (CLI-021)", qualified)
+			}
+			taken[qualified] = true
+		}
 	}
 }
 
@@ -2843,12 +2885,12 @@ func validateReferenceFull(data map[string]any) error {
 			return
 		}
 		paths := make([]string, len(cmds))
-		var aliases []string
+		aliases := map[string][]string{}
 		byPath := map[string]map[string]any{}
 		for i, c := range cmds {
 			cm := c.(map[string]any)
 			paths[i], _ = cm["path"].(string)
-			aliases = append(aliases, stringList(cm["aliases"])...)
+			aliases[paths[i]] = append(aliases[paths[i]], stringList(cm["aliases"])...)
 			byPath[paths[i]] = cm
 		}
 		validateTree(v, "data.commands", paths, aliases)
@@ -3145,6 +3187,20 @@ func validateChangelog(data map[string]any) error {
 			if n, ok := intOf(c); !ok || n != int64(len(entries)) {
 				v.add("data.count", "equals the number of entries")
 			}
+		}
+		// A changelog cut to the size budget says so (CLI-041, CLI-042).
+		if t, has := data["truncated"]; has && t != true {
+			v.add("data.truncated", "is true when present")
+		}
+		if data["truncated"] == true {
+			if !isText(data["truncated_reason"]) {
+				v.add("data.truncated_reason", "a truncated changelog says why (CLI-041)")
+			}
+			if n, ok := intOf(data["omitted"]); !ok || n < 1 {
+				v.add("data.omitted", "counts the entries left out, a positive integer")
+			}
+		} else if hasKey(data, "truncated_reason") || hasKey(data, "omitted") {
+			v.add("data", "truncated_reason and omitted come with truncated: true")
 		}
 		var versions []Version
 		for i, e := range entries {

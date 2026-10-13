@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
 
+# SEC-050: every job gets read access only; the release job, which signs and
+# publishes, and the npm job, which publishes with provenance, ask for more.
+permissions:
+  contents: read
+
 # VER-008: the release path runs the same gates as the merge path (ci.yml) --
 # formatting, vet, lint, tests with the conformance suite, the dependency audits,
 # the version guard and the spec/library drift guard -- before anything is built
@@ -203,9 +208,33 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p dist
+          mkdir -p dist verify
           gh release download "${GITHUB_REF_NAME}" --dir dist --pattern "*.tar.gz" --pattern "*.zip"
+          gh release download "${GITHUB_REF_NAME}" --dir verify --pattern "checksums.txt" --pattern "checksums.txt.sigstore.json"
           find dist -type f \( -name "*.tar.gz" -o -name "*.zip" \) -print
+
+      # SEC-050: the archives repackaged for npm are the ones this tag's release job
+      # signed: checksums.txt is verified against its Sigstore bundle, bound to the
+      # exact identity of this workflow at this tag, and every archive against
+      # checksums.txt, before anything is repackaged.
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Verify the signed checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cosign verify-blob \
+            --bundle verify/checksums.txt.sigstore.json \
+            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${GITHUB_REF}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            verify/checksums.txt
+          cd dist
+          for f in *.tar.gz *.zip; do
+            [ -e "$f" ] || continue
+            grep -q "  ${f}\$" ../verify/checksums.txt || { echo "::error::${f} is not listed in checksums.txt"; exit 1; }
+          done
+          sha256sum --check --ignore-missing ../verify/checksums.txt
 
       - name: Prepare npm platform packages
         run: node scripts/prepare-npm-platform-packages.js dist npm-platform
@@ -216,6 +245,10 @@ jobs:
           set -euo pipefail
           VERSION=$(node -p "require('./package.json').version")
           ROOT_PKG=$(node -p "require('./package.json').name")
+          # A prerelease (a semver tag with a "-" part) goes to the next dist-tag, so
+          # `npm install -g` never picks it up implicitly (CLI-070).
+          DIST_TAG=latest
+          case "$VERSION" in *-*) DIST_TAG=next ;; esac
 
           for dir in npm-platform/*; do
             [ -d "$dir" ] || continue
@@ -224,7 +257,7 @@ jobs:
               echo "npm package ${PKG}@${VERSION} already published; skipping"
               continue
             fi
-            npm publish "./$dir" --access public --provenance
+            npm publish "./$dir" --access public --provenance --tag "$DIST_TAG"
           done
 
           if npm view "${ROOT_PKG}@${VERSION}" version 2>/dev/null | grep -qx "${VERSION}"; then
@@ -235,4 +268,4 @@ jobs:
           # source of truth): rewrite optionalDependencies to the published
           # version so an npm install never resolves a stale platform binary.
           node -e "const fs=require('fs'),p=require('./package.json');for(const k in (p.optionalDependencies||{}))p.optionalDependencies[k]=p.version;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+String.fromCharCode(10))"
-          npm publish --access public --provenance
+          npm publish --access public --provenance --tag "$DIST_TAG"

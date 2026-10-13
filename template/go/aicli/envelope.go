@@ -431,11 +431,23 @@ func (a *App) emit(st *runState, res result) int {
 	env := errorEnvelope{OK: false, SchemaVersion: SchemaVersion, Error: obj, Meta: meta}
 	b, err := encodeJSON(env, st.pretty)
 	if err != nil {
-		obj = errorObject{Code: "E_UNKNOWN", Message: "The error could not be encoded as JSON.", Retryable: false,
-			Details: map[string]any{"dispatch_state": obj.Details["dispatch_state"], "next_action": "Report this bug in the tool."}}
+		// Keep what says whether a write went out and where to look it up (CLI-011).
+		details := map[string]any{"dispatch_state": obj.Details["dispatch_state"], "next_action": "Report this bug in the tool."}
+		for _, k := range []string{"operation_id", "lookup"} {
+			if s, ok := obj.Details[k].(string); ok {
+				details[k] = s
+			}
+		}
+		code, message := "E_UNKNOWN", "The error could not be encoded as JSON."
+		if details["dispatch_state"] != "not_started" && hasKey(details, "operation_id") && hasKey(details, "lookup") {
+			// A dispatched write's error is never "nothing was sent" (A2).
+			code, message = "E_OUTCOME_UNKNOWN", "The write's error could not be encoded as JSON, so its outcome is unknown."
+			details["next_action"] = "Run the command in details.lookup and re-read the target before anything else; do not resend."
+		}
+		obj = errorObject{Code: code, Message: message, Retryable: false, Details: details}
 		env = errorEnvelope{OK: false, SchemaVersion: SchemaVersion, Error: obj, Meta: metaObject{DurationMS: meta.DurationMS}}
 		b, _ = encodeJSON(env, false)
-		exit = coreCodes["E_UNKNOWN"].exit
+		exit = coreCodes[code].exit
 	}
 	_, _ = stdout.Write(b)
 	return exit

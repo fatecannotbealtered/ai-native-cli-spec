@@ -946,6 +946,8 @@ def _scope_object(v: _V, p: str, x: Any) -> None:
         _effects(v, p + ".effects", x["effects"], False)
     if "dangerous" in x and not isinstance(x["dangerous"], bool):
         v.add(p + ".dangerous", "must be a boolean")
+    if "targets" in x and not isinstance(x["targets"], list):
+        v.add(p + ".targets", "must be an array")
     for i, t in enumerate(x.get("targets", []) if isinstance(x.get("targets"), list) else []):
         tp = _j(p + ".targets", i)
         if _exact(v, tp, t, ["key"], ["match"]):
@@ -960,10 +962,22 @@ def _scope_object(v: _V, p: str, x: Any) -> None:
         mo = x["limits"].get("max_operations")
         if "max_operations" in x["limits"] and not (_is_int(mo) and mo >= 1):
             v.add(p + ".limits.max_operations", "must be a positive integer")
+    if "revoked" in x and not isinstance(x["revoked"], bool):
+        v.add(p + ".revoked", "must be a boolean")
+    if "notes" in x and not isinstance(x["notes"], str):
+        v.add(p + ".notes", "must be a string")
     if isinstance(x.get("expires_at"), str) and isinstance(x.get("granted_at"), str):
         a, b = parse_time(x["granted_at"]), parse_time(x["expires_at"])
         if a is not None and b is not None and b <= a:
             v.add(p + ".expires_at", "a scope expires after it was granted (SEC-011)")
+    for k in ("outputs", "roots"):
+        for i, path in enumerate(x[k] if isinstance(x.get(k), list) else []):
+            if isinstance(path, str) and not _is_absolute(path):
+                v.add(
+                    _j(f"{p}.{k}", i),
+                    "outputs and roots are absolute directories, checked after symlink "
+                    "resolution (SEC-012)",
+                )
 
 
 def _scope_refusal(v: _V, p: str, x: Any) -> None:
@@ -1002,7 +1016,7 @@ def _scope_refusal(v: _V, p: str, x: Any) -> None:
                 v.add(p + ".missing.dangerous", "must be a boolean")
             if "target" in mi and not _text(mi["target"]):
                 v.add(p + ".missing.target", "must be a non-empty string")
-            for k in ("destinations", "outputs"):
+            for k in ("destinations", "outputs", "roots"):
                 if k in mi and not (isinstance(mi[k], list) and all(_text(d) for d in mi[k])):
                     v.add(f"{p}.missing.{k}", "must be an array of non-empty strings")
     if "grant_example" in x:
@@ -1012,8 +1026,24 @@ def _scope_refusal(v: _V, p: str, x: Any) -> None:
 # ---------------------------------------------------------------- errors
 
 
-def _update_failure(v: _V, p: str, d: dict[str, Any]) -> None:
+def _skill_sync_command(v: _V, p: str, d: dict[str, Any], partial: bool) -> None:
+    """F10 (P16): skill_sync_command comes only when the Skill sync could not finish
+    (skill_sync_status failed, or the E_PARTIAL at skill_sync, partial), and then
+    always; never with skipped, not_needed or synced."""
+    status = d.get("skill_sync_status")
+    if status in ("skipped", "not_needed", "synced") and "skill_sync_command" in d:
+        v.add(
+            p + ".skill_sync_command",
+            "comes only when the Skill sync could not finish, not with skill_sync_status "
+            f"{status} (F10)",
+        )
+    if (status == "failed" or partial) and "skill_sync_command" not in d:
+        v.add(p, 'missing key "skill_sync_command": the Skill sync could not finish (F10)')
+
+
+def _update_failure(v: _V, p: str, d: dict[str, Any], code: str = "") -> None:
     _need(v, p, d, ["stage", "current_version", "binary_replaced", "skill_sync_status"])
+    _skill_sync_command(v, p, d, code == "E_PARTIAL" and d.get("stage") == "skill_sync")
     stages = (
         "discover",
         "download",
@@ -1035,7 +1065,7 @@ def _update_failure(v: _V, p: str, d: dict[str, Any]) -> None:
     ):
         v.add(p + ".skill_sync_status", "must be a Skill sync status")
     if d.get("binary_replaced") is True:
-        _need(v, p, d, ["target_version", "skill_sync_command"])
+        _need(v, p, d, ["target_version"])
         if d.get("stage") not in ("replace", "skill_sync"):
             v.add(p + ".stage", "is replace or skill_sync once the binary is replaced")
         if d.get("skill_sync_status") not in ("failed", "skipped"):
@@ -1145,7 +1175,7 @@ def _details(v: _V, p: str, code: str, d: dict[str, Any]) -> None:
     if "retry_after_ms" in d and not (_is_int(d["retry_after_ms"]) and d["retry_after_ms"] >= 0):
         v.add(p + ".retry_after_ms", "must be a non-negative integer")
     if "stage" in d and "binary_replaced" in d:
-        _update_failure(v, p, d)
+        _update_failure(v, p, d, code)
     # dispatched means a write's request reached the upstream, so the error says
     # what happened to it (error-details schema); the listed codes have their own rule
     if (
@@ -1188,7 +1218,8 @@ def _details(v: _V, p: str, code: str, d: dict[str, Any]) -> None:
             )
         if conflict == "token_mismatch" and "parameter" not in d:
             v.add(p, 'missing key "parameter"')
-        if conflict in ("unresolved_operation", "lock_held") and "active_operation" not in d:
+        # lock_held names the running operation only when the lock's owner is known (P15).
+        if conflict == "unresolved_operation" and "active_operation" not in d:
             v.add(p, 'missing key "active_operation"')
     elif code == "E_FORBIDDEN":
         if (
@@ -1889,7 +1920,10 @@ def _semver_key(s: str) -> Any:
     return (ver.major, ver.minor, ver.patch, 1 if pre is None else 0, pre or [])
 
 
-def _tree(v: _V, p: str, paths: list[str], aliases: list[str]) -> None:
+def _tree(v: _V, p: str, paths: list[str], aliases: dict[str, list[str]] | None) -> None:
+    """The command tree (CLI-021): paths are unique, a path is a command or a group
+    but not both, and no alias collides with a path or another alias. aliases maps
+    a command path to its aliases."""
     repeated = sorted({x for x in paths if paths.count(x) > 1})
     if repeated:
         v.add(p, "command paths are unique (CLI-021); repeated: " + ", ".join(repeated))
@@ -1898,11 +1932,33 @@ def _tree(v: _V, p: str, paths: list[str], aliases: list[str]) -> None:
             v.add(
                 p, f"'{path}' is both a command and a group; a path is one or the other (CLI-021)"
             )
-    seen = set(paths)
-    for alias in aliases:
-        if alias in seen:
-            v.add(p, f"alias '{alias}' collides with a command path or another alias (CLI-021)")
-        seen.add(alias)
+    # Aliases are per parent (P1): `label create` and `milestone create` may both have
+    # the alias add. An alias collides only with the name of a sibling (a command or a
+    # group under the same parent) or another sibling's alias, and a root alias also
+    # with a built-in name.
+    children: dict[str, set[str]] = {}
+    for path in paths:
+        words = path.split()
+        for i in range(len(words)):
+            children.setdefault(" ".join(words[:i]), set()).add(words[i])
+    taken: set[str] = set()
+    for path in sorted(aliases or {}):
+        words = path.split()
+        if not words:
+            continue
+        parent = " ".join(words[:-1])
+        for alias in (aliases or {})[path]:
+            qualified = (parent + " " + alias).strip()
+            if (
+                alias in children.get(parent, set())
+                or qualified in taken
+                or (parent == "" and alias in RESERVED_ROOTS)
+            ):
+                v.add(
+                    p,
+                    f"alias '{qualified}' collides with a command path or another alias (CLI-021)",
+                )
+            taken.add(qualified)
 
 
 def _value_matches(type_: str, value: Any) -> bool:
@@ -2205,12 +2261,10 @@ def _reference(v: _V, p: str, d: Any) -> None:
     if v.problems:
         return
     by_path = {c["path"]: c for c in commands}
-    _tree(
-        v,
-        p + ".commands",
-        [c["path"] for c in commands],
-        [a for c in commands for a in c["aliases"]],
-    )
+    aliases: dict[str, list[str]] = {}
+    for c in commands:
+        aliases.setdefault(c["path"], []).extend(c["aliases"])
+    _tree(v, p + ".commands", [c["path"] for c in commands], aliases)
     for i, c in enumerate(commands):
         root = c["path"].split(" ", 1)[0]
         if root in RESERVED_ROOTS and c["path"] not in [*LIBRARY_BUILTINS, SELF_UPDATE]:
@@ -2317,7 +2371,7 @@ def _reference_index(v: _V, p: str, d: Any) -> None:
             if not _text(c.get("summary")):
                 v.add(cp + ".summary", "must be a non-empty string")
         if not v.problems:
-            _tree(v, p + ".commands", [c["path"] for c in commands], [])
+            _tree(v, p + ".commands", [c["path"] for c in commands], None)
     size = _compact_size(d)
     if size > INDEX_BUDGET_CHARS:
         v.add(
@@ -2551,6 +2605,17 @@ def _changelog(v: _V, p: str, d: Any) -> None:
             v.add(f"{p}.{k}", "must be a semantic version")
     if "count" in d and not (_is_int(d["count"]) and d["count"] >= 0):
         v.add(p + ".count", "must be a non-negative integer")
+    # A changelog cut to the size budget says so (CLI-041, CLI-042).
+    if "truncated" in d and d["truncated"] is not True:
+        v.add(p + ".truncated", "is true when present")
+    if d.get("truncated") is True:
+        if not _text(d.get("truncated_reason")):
+            v.add(p + ".truncated_reason", "a truncated changelog says why (CLI-041)")
+        omitted = d.get("omitted")
+        if not (_is_int(omitted) and omitted >= 1):
+            v.add(p + ".omitted", "counts the entries left out, a positive integer")
+    elif "truncated_reason" in d or "omitted" in d:
+        v.add(p, "truncated_reason and omitted come with truncated: true")
     entries = d.get("entries")
     if not isinstance(entries, list):
         v.add(p + ".entries", "must be an array")
@@ -2624,6 +2689,7 @@ def _update(v: _V, p: str, d: Any) -> None:
         v.add(p + ".stage", "must be an update stage")
     if "skill_sync_command" in d and not _text(d["skill_sync_command"]):
         v.add(p + ".skill_sync_command", "must be a non-empty string")
+    _skill_sync_command(v, p, d, False)
     if "command" in d:
         c = d["command"]
         if not (_text(c) or (isinstance(c, list) and c and all(_text(x) for x in c))):

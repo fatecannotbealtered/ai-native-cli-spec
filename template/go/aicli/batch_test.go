@@ -289,8 +289,9 @@ func TestLargeBatchErrorListsFailuresFirst(t *testing.T) {
 	}
 }
 
-// Each batch item gets its own upstream idempotency key, <user key>/<item operation
-// id>, while the user's key stays bound into the batch token (decision 31).
+// Each batch item gets its own upstream idempotency key, <user key>/<first 16 hex of
+// SHA-256(target key)>, while the user's key stays bound into the batch token
+// (decision 31, A5): distinct per target and the same on every dry-run.
 func TestBatchItemsGetTheirOwnIdempotencyKey(t *testing.T) {
 	var mu sync.Mutex
 	var keys, opIDs []string
@@ -331,8 +332,9 @@ func TestBatchItemsGetTheirOwnIdempotencyKey(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	for i, k := range keys {
-		if k != "K1/"+opIDs[i] || seen[k] {
-			t.Fatalf("item %d: key %q, want K1/%s and distinct keys", i, k, opIDs[i])
+		want := "K1/" + sha256Hex([]byte("notes/" + []string{"1", "2", "3"}[i]))[:16]
+		if k != want || seen[k] {
+			t.Fatalf("item %d: key %q, want %s and distinct keys", i, k, want)
 		}
 		seen[k] = true
 	}
@@ -475,7 +477,7 @@ func TestLargeBatchOperationShowListsAttentionFirst(t *testing.T) {
 		scope := page.data()["scope"].(map[string]any)
 		total, _ := intOf(page.data()["total"])
 		if page.exit != 0 || len(got) == 0 || len([]rune(strings.TrimSpace(page.stdout))) > successBudgetChars || page.data()["sort"] != "input_order" ||
-			scope["batch"] != batch || scope["status"] != "every item of the batch" || scope["journal"] == nil || total != 300 {
+			scope["batch"] != batch || scope["state"] != "every item of the batch" || scope["journal"] == nil || total != 300 {
 			t.Fatalf("page at %d: exit %d, %d rows, sort %v, scope %v, total %v", offset, page.exit, len(got), page.data()["sort"], scope, page.data()["total"])
 		}
 		rows = append(rows, got...)
@@ -503,17 +505,17 @@ func TestLargeBatchOperationShowListsAttentionFirst(t *testing.T) {
 	if m := rows[20].(map[string]any); m["operation_id"] != lost || m["status"] != "unknown" {
 		t.Fatalf("the row of the item whose record is missing: %v", m)
 	}
-	// --status filters the rows, and total counts the filtered list.
-	unknown := h.run("operation", "list", "--batch", batch, "--status", "unknown")
+	// --state filters the rows, and total counts the filtered list.
+	unknown := h.run("operation", "list", "--batch", batch, "--state", "unknown")
 	got := unknown.data()["items"].([]any)
 	total, _ := intOf(unknown.data()["total"])
 	if len(got) != 3 || keyOf(got[0].(map[string]any)) != "notes/"+ids[7] || got[1].(map[string]any)["operation_id"] != lost ||
-		keyOf(got[2].(map[string]any)) != "notes/"+ids[299] || total != 3 || unknown.data()["scope"].(map[string]any)["status"] != "unknown" {
-		t.Fatalf("--status unknown: %s", unknown)
+		keyOf(got[2].(map[string]any)) != "notes/"+ids[299] || total != 3 || unknown.data()["scope"].(map[string]any)["state"] != "unknown" {
+		t.Fatalf("--state unknown: %s", unknown)
 	}
 	// A batch is resolved through its items: resolve points at the unknown ones.
 	res := h.run("operation", "resolve", "--id", batch, "--outcome", "applied", "--evidence", "checked the notes")
-	if res.code() != "E_VALIDATION" || res.details()["next_action"] != "Run `notes operation list --batch "+batch+" --status unknown` to see the items to resolve." {
+	if res.code() != "E_VALIDATION" || res.details()["next_action"] != "Run `notes operation list --batch "+batch+" --state unknown` to see the items to resolve." {
 		t.Fatalf("resolve of a batch: %s", res)
 	}
 }
@@ -546,7 +548,7 @@ func TestSmallBatchOperationShowListsEveryItemInInputOrder(t *testing.T) {
 // operation list --batch takes a batch id only: an item id, a confirm token or a
 // malformed id is E_USAGE, an unknown batch E_NOT_FOUND and an unreadable batch record
 // E_IO. An item record that cannot be read is a row with status unknown and a null
-// target; without --status a planned batch lists its planned items.
+// target; without --state a planned batch lists its planned items.
 func TestOperationListBatchRefusalsAndUnreadableItems(t *testing.T) {
 	h := newHarness(t)
 	dry := h.run("note", "bulk-tag", "--ids", "1,2,3", "--tag", "x", "--dry-run")
@@ -579,8 +581,8 @@ func TestOperationListBatchRefusalsAndUnreadableItems(t *testing.T) {
 	if row["operation_id"] != item || row["status"] != "unknown" || row["target"] != nil || row["batch_id"] != batch || row["command"] != "note bulk-tag" {
 		t.Fatalf("an unreadable item: %v", row)
 	}
-	if r := h.run("operation", "list", "--batch", batch, "--status", "planned"); len(r.data()["items"].([]any)) != 2 || r.data()["total"] != json.Number("2") {
-		t.Fatalf("--status planned: %s", r)
+	if r := h.run("operation", "list", "--batch", batch, "--state", "planned"); len(r.data()["items"].([]any)) != 2 || r.data()["total"] != json.Number("2") {
+		t.Fatalf("--state planned: %s", r)
 	}
 	mustWrite(t, filepath.Join(h.state, "operations", batch+".json"), []byte("{not json"))
 	r = h.run("operation", "list", "--batch", batch)

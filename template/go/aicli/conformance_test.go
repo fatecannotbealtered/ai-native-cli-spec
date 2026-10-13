@@ -59,7 +59,8 @@ var testSamples = map[string][]string{
 	"note comment add": {"1", "--text", "Looks good"},
 }
 
-// exportDir holds the conformance sample's --output file (inside the scope's outputs).
+// exportDir holds the conformance sample's --output file: inside the scope's outputs
+// (a new file) and roots (once G04 wrote it, the later checks overwrite it, C1).
 var exportDir = func() string {
 	dir, err := os.MkdirTemp("", "aicli-conformance-export-")
 	if err != nil {
@@ -81,7 +82,7 @@ func testHarness(build func(*upstream) *App) (Harness, *upstream) {
 		Samples: samples,
 		Scope: map[string]any{"scope_id": "scp_conformance", "tool": "notes", "granted_by": "test",
 			"granted_at": "2026-01-01T00:00:00Z", "expires_at": nil, "effects": []string{"change", "deliver", "artifact", "persist"},
-			"dangerous": true, "destinations": []string{"bob@example.com"}, "outputs": []string{exportDir}},
+			"dangerous": true, "destinations": []string{"bob@example.com"}, "outputs": []string{exportDir}, "roots": []string{exportDir}},
 	}, u
 }
 

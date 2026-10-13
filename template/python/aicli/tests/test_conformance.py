@@ -37,7 +37,8 @@ TEST_SAMPLES = {
 }
 
 
-# holds the conformance sample's --output file (inside the scope's outputs)
+# holds the conformance sample's --output file: inside the scope's outputs (G04
+# creates it) and roots (the later stages plan to overwrite it, C1)
 EXPORT_DIR = tempfile.mkdtemp(prefix="aicli-conformance-export-")
 
 
@@ -66,6 +67,7 @@ def harness_for(build: Callable[[Upstream], App] = notes_app) -> tuple[Harness, 
                 "dangerous": True,
                 "destinations": ["bob@example.com"],
                 "outputs": [EXPORT_DIR],
+                "roots": [EXPORT_DIR],
             },
         ),
         u,

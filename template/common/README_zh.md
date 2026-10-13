@@ -106,7 +106,6 @@ PowerShell 用 `$env:NAME = "value"` 设置同样的变量。运行第一个任�
 | `{{ENV_PREFIX}}_CA_FILE` | 私有 CA 证书的 PEM 文件；TLS 始终校验（CLI-110） |
 | `{{ENV_PREFIX}}_DEBUG` | 设为 `1` 时向 stderr 写出 `debug:` 行，机密已脱敏；供人排查问题，不用于 Agent 会话（CLI-102） |
 | `HTTPS_PROXY`、`HTTP_PROXY`、`NO_PROXY` | 所有请求使用的代理（CLI-110） |
-| `NO_COLOR` | `--format text` 不使用颜色 |
 
 `~/.{{TOOL_NAME}}/settings.json` 存放命名的配置档，每个账户或主机一个，不存机密（CLI-101）：
 
@@ -125,7 +124,8 @@ PowerShell 用 `$env:NAME = "value"` 设置同样的变量。运行第一个任�
 ```bash
 # Sign out first, once per profile, so the credential leaves the OS keyring.
 {{TOOL_NAME}} auth logout
-# Remove the CLI (npm); for a standalone binary, delete the binary instead.
+# Remove the CLI (npm); for a standalone binary, delete the binary, its skills/{{TOOL_NAME}} folder
+# beside it and, on Windows, any {{TOOL_NAME}}.exe.old* files there instead.
 npm uninstall -g {{NPM_PKG}}
 # Remove the state directory: confirm key, operation journal, scope file, settings file, update-check cache.
 rm -rf ~/.{{TOOL_NAME}}

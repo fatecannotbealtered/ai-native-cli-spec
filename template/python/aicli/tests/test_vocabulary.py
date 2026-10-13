@@ -67,7 +67,10 @@ def test_deprecated_command_and_flag(h: THarness) -> None:
     )
 
 
-def test_deprecation_text_is_trimmed_and_needs_no_semver(h: THarness) -> None:
+def test_deprecation_text_is_trimmed_on_a_development_build(h: THarness) -> None:
+    """A development build runs as the next patch after the newest changelog
+    release (P14): 1.2.4-dev, so the removal is in 2.0.0."""
+
     def build(u: Upstream) -> App:
         a = deprecated_app(u)
         a.version = "dev"
@@ -78,8 +81,7 @@ def test_deprecation_text_is_trimmed_and_needs_no_semver(h: THarness) -> None:
     h.build = build
     r = h.run("note", "get", "1")
     assert r.env["meta"]["notices"][0]["message"] == (
-        "`note get` is deprecated: use `note view`. It will be removed in the next major version "
-        "of notes."
+        "`note get` is deprecated: use `note view`. It will be removed in notes 2.0.0."
     ), r
     assert h.run("note", "get", "--help").stdout.startswith(
         "Deprecated: use `note view`. Show one note\n"

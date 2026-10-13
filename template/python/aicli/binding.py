@@ -64,7 +64,13 @@ class Binding:
     def add(self, name: str, value: str, shown: Any, label: str) -> None:
         self.values[name] = value
         self.digests[name] = "sha256:" + sha256_hex(value.encode("utf-8"))
-        self.display[snake(name)] = shown
+        head, dot, rest = name.partition(".")
+        if dot:  # setting.<name> is shown as inputs.setting.<name> (keys stay snake_case)
+            nested = self.display.setdefault(snake(head), {})
+            if isinstance(nested, dict):
+                nested[rest] = shown
+        else:
+            self.display[snake(name)] = shown
         self.labels[name] = label
 
 
@@ -98,11 +104,20 @@ def flag_value(f: Flag) -> str:
     return claim_string(f.string())
 
 
+def is_id_name(name: str) -> bool:
+    """A name CLI-007 reserves for ids: id, iid, or one ending in _id."""
+    return name in ("id", "iid") or name.endswith("_id")
+
+
 def display_flag(f: Flag) -> Any:
-    """A flag's value as shown in preview.inputs."""
+    """A flag's value as shown in preview.inputs. An input named id, iid or *_id
+    shows as a string whatever the flag's type, since ids are strings (CLI-007,
+    P2): --iid 5 shows "iid":"5"."""
     if f.multiple:
         return [display_string(s) for s in f.slice_strings()]
     s = f.string()
+    if is_id_name(snake(f.name)):
+        return display_string(s)
     typ, _ = flag_type(f)
     if typ == "boolean":
         try:
@@ -244,7 +259,10 @@ class BindingMixin:
 
     def bind_invocation(self: App, st: RunState, c: Node, m: Meta, key: bytes) -> Binding:
         """The normalised invocation of the running command. key keys the digests of
-        secret values (HMAC), so no unsalted hash of a secret is ever stored."""
+        secret values (HMAC), so no unsalted hash of a secret is ever stored. When
+        the tool declares settings, the active profile's name (whatever chose it) is
+        bound as the input profile and every setting's resolved value as
+        setting.<name> (CLI-054, CLI-101)."""
         b = Binding(command=c.path)
         bound_from_file: dict[str, str] = {}
         for file in sorted(m.file_inputs):
@@ -252,6 +270,8 @@ class BindingMixin:
         for f in c.sorted_flags():
             if not f.changed or f.name in EXCLUDED_FROM_BINDING:
                 continue
+            if self.settings is not None and f.name == "profile" and f.param is None:
+                continue  # aicli's root --profile: bound below as the active profile
             if f.name in m.file_inputs:
                 bound = m.file_inputs[f.name]
                 fi = self._file_input(st, c, f.name)
@@ -288,9 +308,30 @@ class BindingMixin:
         if not st.positional_consumed and st.positionals:
             enc = canonical_json(claim_strings(st.positionals)).decode("utf-8")
             b.add("args", enc, [display_string(s) for s in st.positionals], "args")
+        if self.settings is not None:
+            self._bind_settings(b, key)
         try:
             body = canonical_json(b.digests)
         except (TypeError, ValueError):
             raise internal_error("The invocation could not be encoded.") from None
         b.inv = "sha256:" + sha256_hex(body)
         return b
+
+    def _bind_settings(self: App, b: Binding, key: bytes) -> None:
+        """The active profile as input profile ("" when none is active; the
+        requested one a Meta.new_profile command creates, P6) and each declared
+        setting's resolved value as setting.<name>, or its error reason when it
+        cannot be resolved: a secret one by keyed digest (shown as ***)."""
+        ps = self._profile_state()
+        name = ps.name or ps.unknown or ""
+        b.add("profile", claim_string(name), display_string(name), "profile")
+        for s in self.settings or []:
+            bound = "setting." + s.name
+            try:
+                value, _ = self.setting(s.name)
+            except Error as e:
+                value = "error: " + e.message
+            if s.secret:
+                b.add(bound, secret_digest(key, bound, raw_bytes(value)), "***", bound)
+            else:
+                b.add(bound, claim_string(value), display_string(value), bound)

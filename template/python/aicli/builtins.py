@@ -65,16 +65,16 @@ class Check:
 
 
 def redact_host(h: str) -> str:
-    """A host URL without user info, query and fragment."""
+    """A host URL without user info, query and fragment; user info goes also
+    without a scheme (user:token@host)."""
     h = (h or "").strip()
     i = h.find("://")
-    if i >= 0:
-        rest = h[i + 3 :]
-        authority = rest.split("/", 1)[0]
-        at = authority.rfind("@")
-        if at >= 0:
-            rest = rest[at + 1 :]
-        h = h[: i + 3] + rest
+    scheme, rest = (h[: i + 3], h[i + 3 :]) if i >= 0 else ("", h)
+    authority = rest.split("/", 1)[0]
+    at = authority.rfind("@")
+    if at >= 0:
+        rest = rest[at + 1 :]
+    h = scheme + rest
     for j, ch in enumerate(h):
         if ch in "?#":
             h = h[:j]
@@ -166,6 +166,62 @@ def parse_changelog(text: str) -> list[ChangelogEntry]:
     if cur is not None:
         out.append(cur)
     return out
+
+
+def dev_version(changelog: str) -> str:
+    """A development build's version (P14): the next patch after the highest version
+    heading of the changelog, with the prerelease dev ("1.2.17" gives "1.2.18-dev";
+    no released version gives "0.0.0-dev")."""
+    from .selfupdate import compare_versions, parse_version
+
+    newest = None
+    for e in parse_changelog(changelog or ""):
+        try:
+            v = parse_version(e.version)
+        except ValueError:
+            continue
+        if newest is None or compare_versions(v, newest) > 0:
+            newest = v
+    if newest is None:
+        return "0.0.0-dev"
+    return f"{newest.major}.{newest.minor}.{newest.patch + 1}-dev"
+
+
+# The truncated_reason of a changelog cut to the budget (P3).
+CHANGELOG_TRUNCATED = (
+    "Only the newest entries fit the size budget; run changelog --since <version> for the "
+    "changes after a version."
+)
+
+
+def fit_changelog(data: dict[str, Any], entries: list[Any]) -> dict[str, Any]:
+    """Keep changelog data without --since within the success budget (CLI-042, P3):
+    the newest entries that fit (at least one), with truncated, truncated_reason and
+    omitted (the number left out) when some are left out. The envelope is measured
+    compact with empty meta, keeping 500 characters for meta."""
+
+    def cut(n: int) -> dict[str, Any]:
+        out = dict(data)
+        out["entries"], out["count"] = entries[:n], n
+        if n < len(entries):
+            out["truncated"] = True
+            out["truncated_reason"] = CHANGELOG_TRUNCATED
+            out["omitted"] = len(entries) - n
+        return out
+
+    def fits(n: int) -> bool:
+        return success_size(cut(n), Ordered(duration_ms=0)) <= SUCCESS_BUDGET_CHARS - 500
+
+    if len(entries) <= 1 or fits(len(entries)):
+        return data
+    keep, over = 1, len(entries)
+    while keep + 1 < over:
+        mid = (keep + over) // 2
+        if fits(mid):
+            keep = mid
+        else:
+            over = mid
+    return cut(keep)
 
 
 # ---------------------------------------------------------------- Skill frontmatter
@@ -335,8 +391,8 @@ class BuiltinsMixin:
             callback=cb(self._run_operation_list),
             params=[
                 click.Option(
-                    ["--status"],
-                    help="Only operations with this status (all: every record, planned and expired "
+                    ["--state"],
+                    help="Only operations in this state (all: every record, planned and expired "
                     "too)",
                 ),
                 click.Option(
@@ -414,8 +470,8 @@ class BuiltinsMixin:
                 summary=lst.short_help,
                 output="aicli_operations",
                 error_codes=["E_NOT_FOUND", "E_IO"],
-                params={"status": ParamDoc(enum=[*OPERATION_STATUS_VALUES, "all"])},
-                examples=[tool + " operation list --status unknown"],
+                params={"state": ParamDoc(enum=[*OPERATION_STATUS_VALUES, "all"])},
+                examples=[tool + " operation list --state unknown"],
             ),
         )
         self.register(
@@ -540,6 +596,19 @@ class BuiltinsMixin:
     def _run_context(self: App) -> None:
         self.ok(self._running().cmd, self.context_data())
 
+    def context_fields(self: App) -> list[str]:
+        """Every top-level key context returns, which --fields accepts (P13): the
+        required keys, profile when settings are declared, and the keys of
+        App.context_extra."""
+        fields = list(CONTEXT_REQUIRED_KEYS)
+        if self.settings is not None:
+            fields.append("profile")
+        if self.context_extra is not None:
+            for k in sorted(self.context_extra() or {}):
+                if k not in fields:
+                    fields.append(k)
+        return fields
+
     def context_data(self: App) -> dict[str, Any]:
         """The context built-in's data (CLI-035): local reads only."""
         d, available, problem = self.inspect_state_dir()
@@ -584,7 +653,7 @@ class BuiltinsMixin:
             state["reason"] = problem
         data: dict[str, Any] = {
             "tool": self.tool_name(),
-            "version": self.version,
+            "version": self._version(),
             "spec_version": SPEC_VERSION,
             "account": account,
             "host": host,
@@ -601,13 +670,13 @@ class BuiltinsMixin:
         return data
 
     def _budget_spent(self: App, sc: ScopeState, state_dir: str) -> bool:
-        """Whether a granted scope has used up limits.max_operations (read-only:
-        it never creates the journal)."""
+        """Whether a granted scope has used up limits.max_operations, by the durable
+        counter (read-only: it never creates the journal)."""
         if sc.status != "granted" or sc.file is None or sc.file.max_operations is None:
             return False
         try:
             j = self.open_journal(state_dir, False)
-            used = j.count_dispatched(sc.file.scope_id)
+            used = self.scope_used(j, sc.file.scope_id)
         except Error:
             return False
         return used >= sc.file.max_operations
@@ -640,8 +709,12 @@ class BuiltinsMixin:
             v, mv = skill_versions(text)
             found.append((p, v, mv))
         try:
-            cur = parse_version(self.version)
+            cur = parse_version(self._version())
         except ValueError:
+            cur = None
+        # A development build (P14) reports its derived version but is not compared:
+        # update, the usual fix, refuses such a build.
+        if self._dev_build():
             cur = None
         if not found:
             if self.min_skill_version and cur is not None:
@@ -653,16 +726,16 @@ class BuiltinsMixin:
                     return Check(
                         "version",
                         "fail",
-                        f"The Skill needs {tool} {self.min_skill_version} or newer; {self.version} "
-                        "is installed.",
+                        f"The Skill needs {tool} {self.min_skill_version} or newer; "
+                        f"{self._version()} is installed.",
                         f"Run `{tool} update`.",
                     )
             return Check(
                 "version",
                 "warn",
                 f"The {tool} Skill is not installed, so agents work without it.",
-                f"Install the Skill shipped with {tool} (`{tool} update` syncs it from the "
-                "installed package).",
+                "Install the Skill with the install command in the tool's README; update does "
+                "not install a missing Skill.",
             )
         worst: Check | None = None
         rank = {"pass": 0, "warn": 1, "fail": 2}
@@ -680,7 +753,7 @@ class BuiltinsMixin:
             return Check(
                 "version",
                 "warn",
-                f"{tool} {self.version} is a development build; the Skill at {path} cannot be "
+                f"{tool} {self._version()} is a development build; the Skill at {path} cannot be "
                 "compared.",
             )
         sync = f"Run `{tool} update` to sync the Skill from the installed package."
@@ -705,20 +778,20 @@ class BuiltinsMixin:
             return Check(
                 "version",
                 "fail",
-                f"The Skill at {path} needs {tool} {mv} or newer; {self.version} is installed.",
+                f"The Skill at {path} needs {tool} {mv} or newer; {self._version()} is installed.",
                 f"Run `{tool} update`.",
             )
         if skill_v is None or compare_versions(skill_v, cur) < 0:
             return Check(
                 "version",
                 "warn",
-                f"The Skill at {path} is older than {tool} {self.version}.",
+                f"The Skill at {path} is older than {tool} {self._version()}.",
                 f"Run `{tool} update` to sync the Skill from the installed package.",
             )
         return Check(
             "version",
             "pass",
-            f"{tool} {self.version} matches the Skill at {path} (min_version {mv or 'unset'}).",
+            f"{tool} {self._version()} matches the Skill at {path} (min_version {mv or 'unset'}).",
         )
 
     def doctor_data(self: App) -> list[dict[str, Any]]:
@@ -897,12 +970,14 @@ class BuiltinsMixin:
             }
             entries.append({"version": e.version, "date": e.date or None, "changes": changes})
         data: dict[str, Any] = {
-            "current_version": self.version,
+            "current_version": self._version(),
             "entries": entries,
             "count": len(entries),
         }
         if since_v is not None:
             data["since"] = since
+        else:
+            data = fit_changelog(data, entries)
         self.ok(node.cmd, data)
 
     # ---------------------------------------------------------------- operation
@@ -1053,11 +1128,11 @@ class BuiltinsMixin:
     def _run_operation_list(self: App) -> None:
         """Recorded operations, newest first (CLI-061). By default what an agent
         looks for after a write: dispatched operations, a batch as one row with its
-        item count. --status <status> (or all) also shows planned and expired records
+        item count. --state <state> (or all) also shows planned and expired records
         and the items of batches; --items lists batch items without a filter; --batch
         lists the items of one batch (_list_batch_items)."""
         node = self._running()
-        status = node.flag("status").string()
+        status = node.flag("state").string()
         limit = node.flag("limit").value
         offset = node.flag("offset").value
         with_items = bool(node.flag("items").value)
@@ -1114,12 +1189,12 @@ class BuiltinsMixin:
         rows.sort(key=lambda r: r[0], reverse=True)
         scope: dict[str, Any] = {
             "journal": os.path.join(d, "operations"),
-            "status": "dispatched operations (planned and expired are left out; --status all shows "
+            "state": "dispatched operations (planned and expired are left out; --state all shows "
             "them)",
             "batch_items": "counted in their batch's row (--items lists them)",
         }
         if status:
-            scope["status"] = status
+            scope["state"] = status
         if with_items:
             scope["batch_items"] = "listed"
         self._operation_page(node, [r[1] for r in rows], offset, limit, scope, "created_at_desc")
@@ -1193,7 +1268,7 @@ class BuiltinsMixin:
         batch record, in input order, with the keys of a list row. An item whose
         record is missing or cannot be read is a row with status unknown and a null
         target, as in operation show's items; its other keys are the batch's.
-        --status filters the rows; without it (or with all) every item is listed,
+        --state filters the rows; without it (or with all) every item is listed,
         planned and expired too. A batch record that could not be read, or the record
         operation resolve put in its place, names no items: that is E_IO, not an empty
         list."""
@@ -1244,10 +1319,10 @@ class BuiltinsMixin:
         scope: dict[str, Any] = {
             "journal": os.path.join(d, "operations"),
             "batch": batch_id,
-            "status": "every item of the batch",
+            "state": "every item of the batch",
         }
         if status:
-            scope["status"] = status
+            scope["state"] = status
         self._operation_page(node, rows, offset, limit, scope, "input_order")
 
     def _run_operation_resolve(self: App) -> None:
@@ -1267,7 +1342,7 @@ class BuiltinsMixin:
         if not exists:
             raise not_found(
                 "No operation with that id is recorded by this tool.",
-                f"Run `{self.tool_name()} operation list --status unknown`.",
+                f"Run `{self.tool_name()} operation list --state unknown`.",
             )
         mod = j.mod_time(op_id)
         now = self._now()
@@ -1281,7 +1356,7 @@ class BuiltinsMixin:
                     "unknown.",
                 )
                 e.details["next_action"] = (
-                    f"Run `{self.tool_name()} operation list --batch {op_id} --status unknown` to "
+                    f"Run `{self.tool_name()} operation list --batch {op_id} --state unknown` to "
                     "see the items to resolve."
                 )
                 raise e

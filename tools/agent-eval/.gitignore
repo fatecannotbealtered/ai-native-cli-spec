@@ -6,3 +6,4 @@
 /harness/recorder/recorder
 /harness/recorder/recorder.exe
 __pycache__/
+/.pytest_cache/

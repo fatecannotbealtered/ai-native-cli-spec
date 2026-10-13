@@ -344,12 +344,14 @@ def test_bulk_tag_reports_each_item(scoped: Env) -> None:
 def test_idempotent_create_returns_the_first_result(scoped: Env) -> None:
     args = ["note", "create", "--title", "Once", "--idempotency-key", "create-once-1"]
     first = scoped.run(*args, "--confirm", scoped.dry_run(*args))
-    second = scoped.run(*args, "--confirm", scoped.dry_run(*args))
+    # a repeat with the same key is answered with the replay, even at dry-run (P4)
+    second = scoped.run(*args, "--dry-run")
     assert first.exit == 0 and second.exit == 0 and scoped.store.writes() == 1, (
         first.out,
         second.out,
     )
     assert second.data()["receipt"]["replayed"] is True, second.out
+    assert second.data()["operation_id"] == first.data()["operation_id"], second.out
 
 
 def test_agent_guesses_are_accepted_or_answered(scoped: Env) -> None:

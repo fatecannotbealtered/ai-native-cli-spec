@@ -13,6 +13,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/http"
@@ -87,8 +88,15 @@ func newUpdateFixture(t *testing.T) *updateFixture {
 	f.roots = []string{filepath.Join(f.dir, "agents"), filepath.Join(f.dir, "claude")}
 	f.exe = filepath.Join(f.dir, "bin", binName())
 	f.writeFile(f.exe, "old notes 1.3.0")
-	f.server = httptest.NewServer(http.HandlerFunc(f.serve))
+	// Release assets and redirects must be https (E13): the fake GitHub serves TLS,
+	// trusted through NOTES_CA_FILE like a private CA (CLI-110).
+	f.server = httptest.NewTLSServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.server.Close)
+	ca := filepath.Join(f.dir, "fake-github-ca.pem")
+	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: f.server.Certificate().Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.h.env["NOTES_CA_FILE"] = ca
 	f.h.build = func(u *upstream) *App {
 		a := testApp(u)
 		a.Version = "1.3.0"
@@ -530,7 +538,7 @@ func TestUpdateNetworkFailureInDiscover(t *testing.T) {
 	f.method = "binary"
 	f.server.Close() // nothing listens there now
 	r := f.h.run("update", "--check")
-	host := strings.TrimPrefix(f.server.URL, "http://")
+	host := strings.TrimPrefix(f.server.URL, "https://")
 	if r.exit != 7 || r.code() != "E_NETWORK" || r.message() != "Could not reach "+host+" to check for releases." {
 		t.Fatalf("network failure: %s", r)
 	}
@@ -587,7 +595,8 @@ func TestUpdatePackageManagerFailure(t *testing.T) {
 	// so this data is checked with ValidateEnvelope (run) but not validateUpdateData.
 	f.managerErr, f.managerInstalls = errors.New("exit status 1"), "1.3.1"
 	r = f.h.run("update")
-	if d := r.data(); r.exit != 0 || d["status"] != "updated" || d["skill_sync_status"] != "skipped" || d["skill_sync_command"] != "notes update" {
+	// skill_sync_command appears only when a sync could not finish (F10).
+	if d := r.data(); r.exit != 0 || d["status"] != "updated" || d["skill_sync_status"] != "skipped" || hasKey(d, "skill_sync_command") {
 		t.Fatalf("installed despite the manager's error: %s", r)
 	}
 	// not on PATH, and no package name
@@ -636,7 +645,7 @@ func TestUpdateUpToDateSyncsSkills(t *testing.T) {
 		map[string]any{"tag_name": "not-a-version", "draft": true, "assets": []any{}})
 	f.writeFile(filepath.Join(filepath.Dir(f.exe), "skills", "notes", "SKILL.md"), skillMD("1.3.0"))
 	r := f.h.run("update")
-	mustJSON(t, "no Skill installed", updateData(t, r), `{"status":"up_to_date","current_version":"1.3.0","target_version":"1.3.0","update_available":false,"install_method":"binary","signature_status":"not_checked","skill_sync_status":"skipped","binary_replaced":false,"skill_sync_command":"notes update"}`)
+	mustJSON(t, "no Skill installed", updateData(t, r), `{"status":"up_to_date","current_version":"1.3.0","target_version":"1.3.0","update_available":false,"install_method":"binary","signature_status":"not_checked","skill_sync_status":"skipped","binary_replaced":false}`)
 	f.installSkill(f.roots[0], "1.2.0")
 	r = f.h.run("update")
 	mustJSON(t, "sync", updateData(t, r), `{"status":"up_to_date","current_version":"1.3.0","target_version":"1.3.0","update_available":false,"install_method":"binary","signature_status":"not_checked","skill_sync_status":"synced","binary_replaced":false}`)

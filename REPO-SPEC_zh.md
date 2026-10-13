@@ -84,7 +84,7 @@
 - README 是一张地图。flag、Schema 和错误码表放在 `reference` 和 `--help` 中；README 不得复制它们。
 - 示例使用可运行的形式、ISO 8601 UTC 时间和占位 ID（`<merge-request-ref>`）。
 - README 告诉用户怎样授予授权范围。它不得让 Agent 创建或编辑授权范围文件（SKL-006）。
-- Uninstall 一节必须覆盖工具留下的一切：包或二进制；状态目录（`~/.<tool>`，或 `<PREFIX>_STATE_DIR`）及其中的密钥、操作记录、授权范围文件和设置文件；操作系统钥匙串中的凭证（对每个配置档运行 `<tool> auth logout`，或使用钥匙串自己的管理工具）；放在别处的设置文件或授权范围文件（`<PREFIX>_SETTINGS_FILE`、`<PREFIX>_SCOPE_FILE`）；以及已安装的 Skill 目录（`~/.agents/skills/<name>`、`~/.claude/skills/<name>`）。
+- Uninstall 一节必须覆盖工具留下的一切：包或二进制；状态目录（`~/.<tool>`，或 `<PREFIX>_STATE_DIR`）及其中的密钥、操作记录、授权范围文件和设置文件；操作系统钥匙串中的凭证（对每个配置档运行 `<tool> auth logout`，或使用钥匙串自己的管理工具）；放在别处的设置文件或授权范围文件（`<PREFIX>_SETTINGS_FILE`、`<PREFIX>_SCOPE_FILE`）；已安装的 Skill 目录（`~/.agents/skills/<name>`、`~/.claude/skills/<name>`）；对独立二进制而言，还有它旁边的 Skill（`<exe dir>/skills/<name>`，`update` 会刷新它们），以及在 Windows 上更新可能留下的 `<exe>.old*` 文件。
 
 原因：复制过来的 flag 列表会过时；让 Agent 自己写授权范围的 README，会让 SEC-010 失效；卸载后若把凭证留在钥匙串里、把 Skill 留在 Agent 的目录里，一个已经不在的工具就留下了访问权限和指令。
 检查：评审。

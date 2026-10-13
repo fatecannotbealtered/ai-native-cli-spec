@@ -118,6 +118,7 @@ class RunState:
     stream: Any = None  # an NDJSON stream (stream.Stream) once the command starts one
     debugged: set[str] = field(default_factory=set)  # library debug lines written this run
     profile: Any = None  # the resolved config profile (settings.ProfileState), once read
+    parsed: Node | None = None  # the command the arguments name, once found
 
 
 def prefix_paths(prefix: str, paths: list[str]) -> list[str]:
@@ -329,7 +330,7 @@ class EnvelopeMixin:
         if res.err is None:
             untrusted = clean_paths(res.untrusted)
             if st.format == "text":
-                self._write(stdout, write_text(res.data).encode("utf-8"))
+                self._write(stdout, write_text(res.data).encode("utf-8", "replace"))
                 self._text_notices(st, stderr)
                 return 0
             if st.format == "raw":
@@ -337,7 +338,7 @@ class EnvelopeMixin:
                     self._write(stdout, bytes(res.raw))
                     return 0
                 if isinstance(res.raw, str):
-                    self._write(stdout, res.raw.encode("utf-8"))
+                    self._write(stdout, res.raw.encode("utf-8", "replace"))
                     return 0
                 try:
                     self._write(stdout, (go_json(res.data) + "\n").encode("utf-8"))
@@ -368,7 +369,7 @@ class EnvelopeMixin:
         meta = self._meta(st, untrusted)
         obj = fit_error_budget(obj, meta, self.tool_name())
         if st.format == "text":
-            self._write(stderr, write_text_error(obj).encode("utf-8"))
+            self._write(stderr, write_text_error(obj).encode("utf-8", "replace"))
             self._text_notices(st, stderr)
             return code
         env = Ordered(ok=False, schema_version=SCHEMA_VERSION, error=obj, meta=meta)
@@ -399,7 +400,7 @@ class EnvelopeMixin:
         if st.quiet:
             return
         for n in st.notices:
-            self._write(stream, f"notice ({n.severity}): {n.message}\n".encode())
+            self._write(stream, f"notice ({n.severity}): {n.message}\n".encode("utf-8", "replace"))
 
 
 # ---------------------------------------------------------------- error budget

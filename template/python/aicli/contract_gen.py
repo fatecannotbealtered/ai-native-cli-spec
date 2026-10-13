@@ -414,6 +414,7 @@ CONFLICT_VALUES: tuple[str, ...] = (
     "lock_held",
     "upstream_conflict",
     "idempotency_mismatch",
+    "idempotency_resolved",
 )
 
 # GATE_CONFLICT_VALUES: Conflicts the gate finds before anything is sent (always not_started).
@@ -425,6 +426,7 @@ GATE_CONFLICT_VALUES: tuple[str, ...] = (
     "scope_changed",
     "unresolved_operation",
     "lock_held",
+    "idempotency_resolved",
 )
 
 # HUMAN_ACTION_VALUES: Values of details.action for E_HUMAN_REQUIRED (CLI-065).
@@ -1092,6 +1094,9 @@ CHANGELOG_REQUIRED_KEYS: tuple[str, ...] = (
 CHANGELOG_OPTIONAL_KEYS: tuple[str, ...] = (
     "since",
     "count",
+    "truncated",
+    "truncated_reason",
+    "omitted",
 )
 
 # CHANGELOG_ENTRY_KEYS: Keys of a changelog entry.

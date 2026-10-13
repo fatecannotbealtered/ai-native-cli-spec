@@ -109,6 +109,12 @@
           "items": {"$ref": "urn:ai-native-cli-spec:common:2.0#/$defs/text"}
         },
         "outputs": {
+          "description": "New files whose directory is not under the scope's outputs.",
+          "type": "array",
+          "items": {"$ref": "urn:ai-native-cli-spec:common:2.0#/$defs/text"}
+        },
+        "roots": {
+          "description": "Existing files the command would overwrite, not under the scope's roots.",
           "type": "array",
           "items": {"$ref": "urn:ai-native-cli-spec:common:2.0#/$defs/text"}
         }
