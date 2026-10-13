@@ -1,0 +1,22 @@
+{
+  "tool": "gitlab-cli",
+  "version": "1.3.0",
+  "groups": [
+    {"path": "mr", "summary": "Merge requests: list, get, update, merge", "command_count": 4},
+    {"path": "issue", "summary": "Issues: list, create, close, comment", "command_count": 4},
+    {"path": "branch", "summary": "Branches: delete", "command_count": 1},
+    {"path": "hook", "summary": "Project webhooks: test", "command_count": 1},
+    {"path": "job", "summary": "CI jobs: artifacts download", "command_count": 1},
+    {"path": "variable", "summary": "CI/CD variables: create", "command_count": 1},
+    {
+      "path": "operation",
+      "summary": "Operation records: show, list, resolve",
+      "command_count": 3
+    },
+    {"path": "reference", "summary": "Describe the commands", "command_count": 1},
+    {"path": "context", "summary": "Account, host, state store and scope", "command_count": 1},
+    {"path": "doctor", "summary": "Environment checks", "command_count": 1},
+    {"path": "changelog", "summary": "What changed between versions", "command_count": 1},
+    {"path": "update", "summary": "Update the tool and its Skills", "command_count": 1}
+  ]
+}

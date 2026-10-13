@@ -1,0 +1,10 @@
+{
+  "tool": "gitlab-cli",
+  "version": "1.3.0",
+  "spec_version": "2.0.0",
+  "account": "eval-bot",
+  "host": "gitlab.acme.test",
+  "credentials": {"configured": true, "source": "keyring", "expires_at": "2026-12-31T00:00:00Z"},
+  "state": {"dir": "C:\\Users\\me\\.gitlab-cli", "available": true, "protection": "windows-profile-acl"},
+  "default_project": "acme/web"
+}

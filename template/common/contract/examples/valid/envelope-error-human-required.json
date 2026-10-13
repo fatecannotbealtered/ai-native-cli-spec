@@ -1,0 +1,16 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_HUMAN_REQUIRED",
+    "message": "The group requires an active single sign-on session; a person must sign in in a browser first.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "not_started",
+      "next_action": "Ask the user to sign in at https://gitlab.acme.test/groups/acme/-/saml/sso, then run the resume command.",
+      "action": "sign_in",
+      "resume": "gitlab-cli mr list --project acme/web"
+    }
+  },
+  "meta": {"duration_ms": 402}
+}

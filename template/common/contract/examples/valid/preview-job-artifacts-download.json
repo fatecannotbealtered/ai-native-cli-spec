@@ -1,0 +1,17 @@
+{
+  "operation_id": "op_kzliq5bvlzredhllachtbrx454",
+  "command": "job artifacts download",
+  "action": "Download the job's artifacts to a new local file",
+  "target": {"key": "acme/web:job/88231", "kind": "job", "label": "job 88231 (test:unit)"},
+  "effects": ["artifact"],
+  "dangerous": false,
+  "changes": [{"field": "path", "after": "C:\\work\\triage\\artifacts-88231.zip"}],
+  "inputs": {
+    "job": "acme/web:job/88231",
+    "output": "C:\\work\\triage\\artifacts-88231.zip",
+    "token_file": {"sha256": "5f1c2a9be0d34c27a6e1f8a0b7d93e4c51f6a2b8c0d1e2f3a4b5c6d7e8f90a1b", "bytes": 26}
+  },
+  "outputs": ["C:\\work\\triage\\artifacts-88231.zip"],
+  "can_apply": true,
+  "blocked_by": []
+}

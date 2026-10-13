@@ -1,0 +1,38 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_CONFIRMATION_REQUIRED",
+    "message": "This command changes a merge request and needs confirmation; nothing was changed.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "not_started",
+      "next_action": "Check the preview, then run the same command again with --confirm ct2_nwchg2eb6xieuppujil4jsmnii_07191987c0051893b2052932a0172e70.",
+      "problem": "confirmation_required",
+      "preview": {
+        "operation_id": "op_nwchg2eb6xieuppujil4jsmnii",
+        "command": "mr update",
+        "action": "Update merge request",
+        "target": {
+          "key": "acme/web!5",
+          "kind": "merge_request",
+          "label": "!5 Add retry to webhook sender"
+        },
+        "effects": ["change"],
+        "dangerous": false,
+        "changes": [
+          {"field": "assignees", "before": ["bob"], "after": ["carol"]},
+          {"field": "labels", "add": ["needs-review"]}
+        ],
+        "inputs": {"mr": "acme/web!5", "assignee": "carol", "add_labels": ["needs-review"]},
+        "base": {"version": "2026-10-11T18:30:24Z", "source": "updated_at"},
+        "can_apply": true,
+        "blocked_by": []
+      },
+      "confirm_token": "ct2_nwchg2eb6xieuppujil4jsmnii_07191987c0051893b2052932a0172e70",
+      "expires_at": "2026-10-12T09:29:03Z",
+      "operation_id": "op_nwchg2eb6xieuppujil4jsmnii"
+    }
+  },
+  "meta": {"duration_ms": 402, "untrusted": ["error.details.preview.target.label"]}
+}

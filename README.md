@@ -1,98 +1,83 @@
-<h1 align="center">ai-native-cli-spec</h1>
+# ai-native-cli-spec
 
-<p align="center">
-  <strong>The copy-paste seed for agent-native command-line tools</strong>
-</p>
+[English](README.md) · [中文](README_zh.md) · [MIT licence](LICENSE)
 
-<p align="center">
-  <a href="README.md">English</a> &middot; <a href="README_zh.md">中文</a>
-</p>
+One core specification for command-line tools whose main caller is an AI agent, plus the template and the shared libraries that implement it. A conforming tool answers in one JSON envelope, says in every error whether anything was sent and what to do next, refuses writes until a person has granted a scope, and reports only what it observed.
 
-<p align="center">
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge"></a>
-</p>
+Version 2.0.0 is not released yet; see [CHANGELOG.md](CHANGELOG.md).
 
-<p align="center">
-  <img alt="Agent native" src="https://img.shields.io/badge/agent-native-111827?style=for-the-badge">
-  <img alt="AI-native CLI spec" src="https://img.shields.io/badge/spec-AI--native%20CLI-0891B2?style=for-the-badge">
-  <img alt="Copy-paste seed" src="https://img.shields.io/badge/seed-copy--paste%20ready-F59E0B?style=for-the-badge">
-</p>
+## What is in 2.0
 
-A spec suite **and a copy-paste seed** for building **AI-native CLI tools** — command-line tools designed to be driven reliably by AI agents, not just humans.
+| Part | Where | What it gives a tool |
+|---|---|---|
+| Five specs | `template/common/.agent/` | `AGENT.md` (playbook), `CLI-SPEC.md` (machine contract, `CLI-xxx`), `SEC-SPEC.md` (security, `SEC-xxx`), `SKILL-SPEC.md` (Agent Skills, `SKL-xxx`), `VERIFY-SPEC.md` (verification and agent eval, `VER-xxx`). Every normative rule has a stable ID and a `Check:` line. |
+| Contract and schemas | `template/common/contract/` | `contract.json` (error codes, exit codes, enums, key sets, receipt rules), JSON Schemas (draft 2020-12) for every shape, and a corpus of valid and invalid examples. |
+| aicli libraries | `template/go/aicli/` (Go, cobra), `template/python/aicli/` (Python ≥ 3.10, click) | The envelope, errors and HTTP mapping; `--help`, `reference` and the Skill command map generated from one registry; agent UX (root shortcuts, accepted guesses, whole-tree suggestions); the write gate (binding, keyed single-use tokens, operation journal, scope checks, receipts, batches); the built-ins `reference`, `context`, `doctor`, `changelog`, `operation` and `update`, the whole self-update with signature verification and the Skill sync; settings and profiles. |
+| Conformance suite | inside each library (`RunConformance`, `run_conformance`) | Checks every write command against the gate (`G00`–`G10`) and the whole tool against the contract (`R01`–`R05`). `R06` (every registry command ran in the tool's own tests) runs separately, through `CheckCoverage` (`check_coverage`) once those tests finish. Every tool runs both in CI. |
+| Example tools | `template/go/example/`, `template/python/example/` | A small "notes" CLI built on the library, with its conformance test. The reference implementation until a fleet tool ships on 2.0. |
+| Repo standard | [`REPO-SPEC.md`](REPO-SPEC.md) | Files, layout, versioning, distribution, vendoring and CI for a tool repository (`REPO-xxx`). |
+| Migration guide | [`MIGRATION-2.0.md`](MIGRATION-2.0.md) | Step-by-step move of a 1.6.x tool to 2.0. |
 
-Pull the `.agent/` seed into a new project, point your AI at it, and let it build a tool that already conforms to a stable agent contract.
+Tools vendor the specs, the contract, the schemas and the library by copy, pinned to one spec tag and checked for drift in CI. The library is not published as a package.
 
-The template is split into a language-agnostic **`common/`** layer plus a thin per-language overlay (**`go/`**, **`python/`**, ...). Pull `common/`, then overlay exactly one language:
+Out of scope for 2.0: the driver layer for desktop applications and devices (sessions, physical effects, unsaved state), which stays in tool-driver-cli-spec on top of this core, and MCP server generation (future work).
+
+## Why 2.0
+
+2.0 rests on two measurements made in October 2026. In an agent eval of gitlab-cli (720 trials, three Claude models, Skill on and off), the 2.0 design used 31% fewer CLI calls, 87% fewer invalid calls and 24% less wall time than gitlab-cli 1.2.17 run in the same batch, at the same task success. A read-only audit of the fleet found that confirm tokens did not bind the whole request in any of the 10 tools with a confirm gate, and could be forged in 9 of them; so in 2.0 the write gate is shared code with a conformance suite instead of a rule each tool implements. The method is in `VERIFY-SPEC.md`: VER-006 (agent eval) and VER-007 (gate audit).
+
+## Quick start: a new tool
 
 ```bash
-# In a new (or existing) project directory:
-#   1. the language-agnostic common layer
-npx degit fatecannotbealtered/ai-native-cli-spec/template/common .
-#   2. exactly one language overlay (go OR python)
-npx degit fatecannotbealtered/ai-native-cli-spec/template/go .
-
-# Then follow template/INSTANTIATE.md to fill placeholders, and tell your AI:
-#   "Read AGENTS.md, then build this tool following the .agent/ specs."
+# A checkout of the spec at the release you will pin.
+git clone --depth 1 --branch v2.0.0 https://github.com/fatecannotbealtered/ai-native-cli-spec spec
+mkdir my-cli && cd my-cli
+# The common layer, then only the CI and build files of one overlay (never its aicli/ or example/).
+cp -R ../spec/template/common/. .
+cp -R ../spec/template/go/.github ../spec/template/go/.golangci.yml ../spec/template/go/.goreleaser.yml ../spec/template/go/Makefile .
+cat ../spec/template/go/.gitignore >> .gitignore
+# Python instead: cp -R ../spec/template/python/.github ../spec/template/python/ruff.toml . && cat ../spec/template/python/.gitignore >> .gitignore
+# Files that belong to the spec repository only.
+rm -f scripts/gen-contract.js scripts/build-manifest.js scripts/check-contract.py && rm -rf contract/examples
 ```
 
-See [`template/INSTANTIATE.md`](template/INSTANTIATE.md) for the full copy-paste guide (placeholder dictionary, `.gitignore` concatenation, Skill template rename, `test-prompts.json` setup, the `NOTICE.md` drop-if-not-wrapping rule).
+These are step 1 of [`template/INSTANTIATE.md`](template/INSTANTIATE.md); follow the rest of it: fill the placeholders, vendor the library with `scripts/sync-spec.js` (it writes `internal/aicli/` or `<pkg>/_aicli/`; never copy `aicli/` by hand), and tell your agent "Read AGENTS.md, then build this tool following workflow A in .agent/AGENT.md". The example tools in the spec repo (`template/go/example/`, `template/python/example/`) show the finished shape; read them there.
 
-That drops a single coherent skeleton into your repo. From `common/`:
+## Quick start: migrating a 1.6.x tool
 
+Pin `v2.0.0` in `.agent/SPEC_VERSION`, vendor the 2.0 files with the 2.0 copy of `scripts/sync-spec.js`, and work through [`MIGRATION-2.0.md`](MIGRATION-2.0.md) in order. The conformance suite tells you when the write paths are done.
+
+## Repository layout
+
+```text
+README.md, MIGRATION-2.0.md, REPO-SPEC.md   (+ _zh translations)
+CHANGELOG.md                                (English only)
+template/
+├── INSTANTIATE.md          how to create a tool repo from the template (+ _zh)
+├── common/                 copied into every tool
+│   ├── .agent/             AGENT, CLI-SPEC, SEC-SPEC, SKILL-SPEC, VERIFY-SPEC (+ _zh)
+│   ├── contract/           contract.json, schemas/, examples/{valid,invalid}/
+│   ├── scripts/            sync-spec, check-spec, spec-files, gen-contract, build-manifest, check-contract.py, version tooling, npm launcher
+│   ├── skills/             SKILL.md and test-prompts.json templates
+│   └── README, SECURITY, CONTRIBUTING, AGENTS.md (+ _zh), package.json, .github/ ...
+├── go/                     Go overlay: CI, release, Makefile, linters
+│   ├── aicli/              the Go library, its tests and MANIFEST.json
+│   └── example/            example tool with a conformance test
+└── python/                 Python overlay: CI, release, ruff config
+    ├── aicli/              the Python library, its tests and MANIFEST.json
+    └── example/            example tool with a conformance test
+tools/                         agent-eval/ (VER-006 harness), gate-audit/ (VER-007 workflows); not vendored
+skills/review-ai-native-cli/   Skill that reviews a tool repo against this spec
+.github/workflows/             this repo's CI: library tests, examples, contract check, tools
 ```
-AGENTS.md          # entry hook every agent reads first
-.agent/
-├── AGENT.md       # the playbook: navigation + greenfield/extend workflows
-├── CLI-SPEC.md    # CLI machine contract — how the tool "speaks"
-├── SKILL-SPEC.md  # Skill authoring — how the agent "listens"
-└── SEC-SPEC.md    # security baseline — how not to get burned
-README / LICENSE / CHANGELOG / CONTRIBUTING / SECURITY / CODE_OF_CONDUCT / NOTICE
-.github/ (PR + issue templates, dependabot)  ·  package.json + scripts/{run,prepare-npm-platform-packages}.js
-docs/OPEN_SOURCE_CHECKLIST.md  ·  skills/{SKILL.md.tmpl,test-prompts.json.tmpl}  ·  .gitignore
-```
 
-Plus, from the one language overlay you pick (`go/` or `python/`): the CI / release workflows, formatter & linter config, build plumbing, and a language `.gitignore` to append. The repo skeleton standard itself lives at [`REPO-SPEC.md`](REPO-SPEC.md), the standard's meta-doc.
+## Versioning
 
-## Why
+- Releases are git tags `vMAJOR.MINOR.PATCH`. One tag versions everything in the table above; a tool pins one tag in `.agent/SPEC_VERSION` and gets specs, contract, schemas and library that were tested together.
+- `contract.json` carries `spec_version` (`2.0.0`) and `contract_version` (`2.0`). The envelope's `schema_version` is `"2.0"` and changes major only when the envelope breaks (CLI-080).
+- A change that breaks conforming tools or their agents bumps MAJOR. Rule IDs never change meaning and are never reused.
+- History: [CHANGELOG.md](CHANGELOG.md). English is the source text; `*_zh.md` files are translations of it.
 
-LLM agents call CLIs constantly, but most CLIs are built for interactive terminals: prose output, ad-hoc exit codes, interactive prompts that hang in automation. This suite encodes one coherent, opinionated standard so that **every tool you build behaves the same way an agent expects** — and so an AI can build a new one from day one without re-deriving the rules.
+## Licence
 
-It is intentionally **layered, not heavy**:
-
-- **One entry** (`AGENT.md`) → four focused specs. Read only what the task needs.
-- **Risk-tiered & optional patterns.** A read-only tool stays light; a tool that executes SQL or holds expiring tokens opts into more. The spec scales with the tool.
-
-## What it standardizes
-
-- **Agent-safe output contract** — single JSON document on stdout, uniform `ok` / `schema_version` / `data` / `meta` envelope, logs on stderr.
-- **Structured errors** — stable `E_*` codes ↔ exit codes ↔ `retryable`, so agents can decide retry vs. fix vs. ask a human.
-- **Write safety** — `--dry-run` → `--confirm <token>` flow with operation-bound tokens.
-- **Self-description** — `reference` / `context` / `doctor` / `changelog` so agents discover capabilities and learn what changed after a self-update.
-- **Skills** — Anthropic-aligned `SKILL.md` authoring, progressive disclosure, version negotiation.
-- **Security** — untrusted-content/injection handling, least privilege, credential-at-rest, supply chain.
-- **Release quality gate** — Functional Contract Coverage = 100% for public README / Skill / reference / help / context / doctor / changelog / update behavior; numeric line coverage is secondary.
-- **Repo & distribution** — required docs, bilingual README convention, single-source CHANGELOG, npm-wrapper distribution.
-
-## How to use it
-
-- **Add to an existing repo:** pull `template/common` then exactly one `template/<lang>`:
-  ```bash
-  npx degit fatecannotbealtered/ai-native-cli-spec/template/common .
-  npx degit fatecannotbealtered/ai-native-cli-spec/template/go .   # or template/python
-  ```
-- **Pin a version:** append `#v1.5.0` to each path, e.g. `.../template/common#v1.5.0 .`
-- **Start a brand-new repo:** click **Use this template** on GitHub, then keep only the one `template/<lang>` you need.
-
-Then walk [`template/INSTANTIATE.md`](template/INSTANTIATE.md) to fill placeholders, customize the `## 本项目` (This project) section at the bottom of `AGENTS.md`, and let the agent follow **Workflow A (greenfield)** in `.agent/AGENT.md`.
-
-## Reference implementation
-
-[**outlook-cli**](https://github.com/fatecannotbealtered/outlook-cli) — an Outlook/Exchange CLI built to this spec. Use it as the worked example for the envelope, dry-run/confirm flow, self-description commands, and the `changelog` mechanism.
-
-## Languages
-
-Every doc is bilingual: English is the primary `X.md`, Chinese is `X_zh.md`, and the two link to each other at the top. This applies to the READMEs, `AGENTS.md`, and all four `.agent/` specs.
-
-## License
-
-[MIT](LICENSE)
+[MIT](LICENSE). Copyright (c) 2026 Sean Guo.

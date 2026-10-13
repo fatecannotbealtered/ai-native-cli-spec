@@ -1,0 +1,15 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_PARTIAL",
+    "message": "The assignee was set but adding the label failed, so the merge request is only partly updated.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "dispatched",
+      "next_action": "Do not resend the whole update; add the missing label with `gitlab-cli mr update acme/web!5 --add-labels needs-review --dry-run`.",
+      "operation_id": "op_xy3chcanngfiu2ezkqrpqvrvyu"
+    }
+  },
+  "meta": {"duration_ms": 2210}
+}

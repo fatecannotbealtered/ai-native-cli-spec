@@ -1,0 +1,17 @@
+{
+  "tool": "gitlab-cli",
+  "version": "1.3.0",
+  "spec_version": "2.0.0",
+  "account": "eval-bot",
+  "host": "gitlab.acme.test",
+  "credentials": {"configured": true, "source": "env"},
+  "state": {"dir": "/home/me/.gitlab-cli", "available": true, "protection": "posix-0700"},
+  "authorization": {
+    "status": "missing",
+    "scope_id": null,
+    "path": "/home/me/.gitlab-cli/scope.json",
+    "effects": [],
+    "dangerous": false,
+    "expires_at": null
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "items": [],
+  "count": 0,
+  "has_more": false,
+  "scope": {
+    "project": "acme/payments-service",
+    "membership": "direct members only",
+    "not_listed": "members inherited from the acme group; pass --all-levels to include them"
+  },
+  "sort": "access_level_desc"
+}

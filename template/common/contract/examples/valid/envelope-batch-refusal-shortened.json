@@ -1,0 +1,36 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_CONFIRMATION_REQUIRED",
+    "message": "Closing 26 issues needs confirmation; nothing was changed.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "not_started",
+      "next_action": "Check details.preview (it shows 3 of the 26 issues; --dry-run shows all), then run the same command again with --confirm ct2_qyoy6umfvqw5oii5t6kyxegvbq_2b8bc2c8ab46542af112a2619d8b804e.",
+      "problem": "confirmation_required",
+      "preview": {
+        "operation_id": "opb_qyoy6umfvqw5oii5t6kyxegvbq",
+        "command": "issue close",
+        "action": "Close 26 issues",
+        "targets": [{"key": "acme/web#14", "kind": "issue"}, {"key": "acme/web#15", "kind": "issue"}, {"key": "acme/web#16", "kind": "issue"}],
+        "total": 26,
+        "items": [
+          {"target": {"key": "acme/web#14", "kind": "issue"}, "operation_id": "op_jtktwiy74hgdbfrmnhtnru72ri", "changes": [{"field": "state", "before": "opened", "after": "closed"}], "can_apply": true, "blocked_by": []},
+          {"target": {"key": "acme/web#15", "kind": "issue"}, "operation_id": "op_mvpq7yjfuiwov6cdsg6azq3jfi", "changes": [{"field": "state", "before": "opened", "after": "closed"}], "can_apply": true, "blocked_by": []},
+          {"target": {"key": "acme/web#16", "kind": "issue"}, "operation_id": "op_dzcs7la4i4tb2xjo3rj345mlju", "changes": [{"field": "state", "before": "opened", "after": "closed"}], "can_apply": true, "blocked_by": []}
+        ],
+        "omitted": 23,
+        "effects": ["change"],
+        "dangerous": false,
+        "inputs": {"project": "acme/web", "ids": ["14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39"]},
+        "can_apply": true,
+        "blocked_by": []
+      },
+      "confirm_token": "ct2_qyoy6umfvqw5oii5t6kyxegvbq_2b8bc2c8ab46542af112a2619d8b804e",
+      "expires_at": "2026-10-12T11:15:00Z",
+      "operation_id": "opb_qyoy6umfvqw5oii5t6kyxegvbq"
+    }
+  },
+  "meta": {"duration_ms": 1204}
+}

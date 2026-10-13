@@ -1,0 +1,19 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_INTEGRITY",
+    "message": "The release signature did not verify, so the update was refused and the installed version is unchanged.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "not_started",
+      "next_action": "Do not retry; tell the user the release failed signature verification.",
+      "current_version": "1.3.0",
+      "target_version": "1.3.1",
+      "binary_replaced": false,
+      "skill_sync_status": "skipped",
+      "install_method": "binary"
+    }
+  },
+  "meta": {"duration_ms": 2410}
+}

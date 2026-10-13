@@ -1,0 +1,14 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_2FA_REQUIRED",
+    "message": "The SQL console asks for a second factor; the user must enter the code from their authenticator.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "not_started",
+      "next_action": "Ask the user for the current 6-digit code, then run the same command again with --otp <code>."
+    }
+  },
+  "meta": {"duration_ms": 211}
+}

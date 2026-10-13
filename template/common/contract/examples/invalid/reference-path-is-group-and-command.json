@@ -1,0 +1,1210 @@
+{
+  "tool": "gitlab-cli",
+  "version": "1.3.0",
+  "spec_version": "2.0.0",
+  "schema_version": "2.0",
+  "risk_tier": "T2",
+  "global_flags": [
+    {
+      "name": "format",
+      "kind": "flag",
+      "type": "enum",
+      "required": false,
+      "enum": ["json", "text", "raw"],
+      "default": "json",
+      "description": "Output format; json is the contract"
+    },
+    {
+      "name": "json",
+      "kind": "flag",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "Alias of --format json"
+    },
+    {
+      "name": "pretty",
+      "kind": "flag",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "Indent the JSON"
+    },
+    {
+      "name": "compact",
+      "kind": "flag",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "Accepted no-op; compact is the default"
+    },
+    {
+      "name": "fields",
+      "kind": "flag",
+      "type": "string",
+      "required": false,
+      "multiple": true,
+      "description": "a,b replaces the default fields; +a adds; all returns everything"
+    },
+    {
+      "name": "quiet",
+      "kind": "flag",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "Suppress non-error stderr"
+    },
+    {
+      "name": "dry-run",
+      "kind": "flag",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "Return the preview and a confirm token; change nothing"
+    },
+    {
+      "name": "confirm",
+      "kind": "flag",
+      "type": "string",
+      "required": false,
+      "description": "Execute the previewed write with its token"
+    },
+    {
+      "name": "dangerous",
+      "kind": "flag",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "Required in both steps for dangerous commands"
+    }
+  ],
+  "commands": [
+    {
+      "path": "mr list",
+      "aliases": ["mrs"],
+      "summary": "List merge requests of a project with the fields tasks ask about",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "evidence": ["simulated:cmd/mr_test.go", "live:docs/evidence/2026-10-12-gitlab-18.8.json#mr-list", "eval:evals/2026-10-12-gitlab-cli/report.md#t02"],
+      "params": [
+        {
+          "name": "project",
+          "kind": "flag",
+          "type": "string",
+          "required": true,
+          "description": "Project path or web URL"
+        },
+        {
+          "name": "state",
+          "kind": "flag",
+          "type": "enum",
+          "required": false,
+          "enum": ["opened", "closed", "merged", "all"],
+          "default": "opened"
+        },
+        {
+          "name": "pipeline-status",
+          "kind": "flag",
+          "type": "enum",
+          "required": false,
+          "enum": ["success", "failed", "running", "pending", "canceled"],
+          "description": "Filter on the head pipeline, computed in the tool"
+        },
+        {"name": "assignee", "kind": "flag", "type": "string", "required": false},
+        {
+          "name": "labels",
+          "kind": "flag",
+          "type": "string",
+          "required": false,
+          "multiple": true
+        },
+        {
+          "name": "limit",
+          "kind": "flag",
+          "type": "integer",
+          "required": false,
+          "default": 20,
+          "unit": "items"
+        },
+        {"name": "cursor", "kind": "flag", "type": "string", "required": false}
+      ],
+      "output": "mr_list",
+      "error_codes": [
+        "E_USAGE",
+        "E_AUTH",
+        "E_FORBIDDEN",
+        "E_NOT_FOUND",
+        "E_NETWORK",
+        "E_RATE_LIMITED",
+        "E_SERVER",
+        "E_TIMEOUT"
+      ],
+      "examples": ["gitlab-cli mr list --project acme/web --pipeline-status failed"]
+    },
+    {
+      "path": "mr get",
+      "aliases": ["mr view", "mr show"],
+      "summary": "Show one merge request",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "evidence": ["simulated:cmd/mr_test.go", "live:docs/evidence/2026-10-12-gitlab-18.8.json#mr-get", "eval:evals/2026-10-12-gitlab-cli/report.md#t07"],
+      "params": [
+        {
+          "name": "mr",
+          "kind": "positional",
+          "type": "string",
+          "required": true,
+          "description": "Merge request ref (acme/web!5) or web URL"
+        }
+      ],
+      "output": "mr",
+      "error_codes": [
+        "E_USAGE",
+        "E_AUTH",
+        "E_FORBIDDEN",
+        "E_NOT_FOUND",
+        "E_NETWORK",
+        "E_RATE_LIMITED",
+        "E_SERVER",
+        "E_TIMEOUT"
+      ],
+      "examples": ["gitlab-cli mr get acme/web!5"]
+    },
+    {
+      "path": "mr update",
+      "aliases": [],
+      "summary": "Change a merge request's title, description, assignee or labels",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "verified",
+      "evidence": ["simulated:cmd/mr_test.go", "live:docs/evidence/2026-10-12-gitlab-18.8.json#mr-update"],
+      "params": [
+        {
+          "name": "mr",
+          "kind": "positional",
+          "type": "string",
+          "required": true,
+          "description": "Merge request ref (acme/web!5) or web URL"
+        },
+        {"name": "title", "kind": "flag", "type": "string", "required": false},
+        {
+          "name": "description-file",
+          "kind": "flag",
+          "type": "path",
+          "required": false,
+          "file_input": true,
+          "description": "Read the description from a file, or - for stdin"
+        },
+        {
+          "name": "assignee",
+          "kind": "flag",
+          "type": "string",
+          "required": false,
+          "description": "Username, @ref or name"
+        },
+        {
+          "name": "add-labels",
+          "kind": "flag",
+          "type": "string",
+          "required": false,
+          "multiple": true
+        },
+        {
+          "name": "remove-labels",
+          "kind": "flag",
+          "type": "string",
+          "required": false,
+          "multiple": true
+        }
+      ],
+      "output": "write_result",
+      "error_codes": [
+        "E_USAGE",
+        "E_VALIDATION",
+        "E_AMBIGUOUS",
+        "E_AUTH",
+        "E_FORBIDDEN",
+        "E_NOT_FOUND",
+        "E_CONFIRMATION_REQUIRED",
+        "E_CONFLICT",
+        "E_OUTCOME_UNKNOWN",
+        "E_VERIFY_FAILED",
+        "E_NETWORK",
+        "E_RATE_LIMITED",
+        "E_SERVER",
+        "E_TIMEOUT",
+        "E_IO",
+        "E_PARTIAL"
+      ],
+      "examples": [
+        "gitlab-cli mr update acme/web!5 --assignee carol --add-labels needs-review --dry-run",
+        "gitlab-cli mr update acme/web!5 --assignee carol --add-labels needs-review --confirm <token>"
+      ]
+    },
+    {
+      "path": "mr merge",
+      "aliases": [],
+      "summary": "Merge a merge request",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "evidence": ["simulated:cmd/mr_test.go"],
+      "params": [
+        {
+          "name": "mr",
+          "kind": "positional",
+          "type": "string",
+          "required": true,
+          "description": "Merge request ref (acme/web!5) or web URL"
+        }
+      ],
+      "output": "write_result",
+      "error_codes": [
+        "E_USAGE",
+        "E_VALIDATION",
+        "E_AMBIGUOUS",
+        "E_AUTH",
+        "E_FORBIDDEN",
+        "E_NOT_FOUND",
+        "E_CONFIRMATION_REQUIRED",
+        "E_CONFLICT",
+        "E_OUTCOME_UNKNOWN",
+        "E_VERIFY_FAILED",
+        "E_NETWORK",
+        "E_RATE_LIMITED",
+        "E_SERVER",
+        "E_TIMEOUT",
+        "E_IO"
+      ],
+      "examples": [
+        "gitlab-cli mr merge acme/web!5 --dangerous --dry-run",
+        "gitlab-cli mr merge acme/web!5 --dangerous --confirm <token>"
+      ]
+    },
+    {
+      "path": "mr",
+      "aliases": [],
+      "summary": "Show one merge request (shortcut)",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "evidence": ["eval:evals/2026-10-12-gitlab-cli/report.md#t07"],
+      "params": [
+        {
+          "name": "mr",
+          "kind": "positional",
+          "type": "string",
+          "required": true,
+          "description": "Merge request ref (acme/web!5) or web URL"
+        }
+      ],
+      "output": "mr",
+      "error_codes": [
+        "E_USAGE",
+        "E_AUTH",
+        "E_FORBIDDEN",
+        "E_NOT_FOUND",
+        "E_NETWORK",
+        "E_RATE_LIMITED",
+        "E_SERVER",
+        "E_TIMEOUT"
+      ],
+      "examples": ["gitlab-cli mr get acme/web!5"]
+    },
+    {
+      "path": "issue list",
+      "aliases": ["issues"],
+      "summary": "List issues of a project",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "evidence": ["simulated:cmd/issue_test.go", "live:docs/evidence/2026-10-12-gitlab-18.8.json#issue-list", "eval:evals/2026-10-12-gitlab-cli/report.md#t04"],
+      "params": [
+        {"name": "project", "kind": "flag", "type": "string", "required": true},
+        {
+          "name": "state",
+          "kind": "flag",
+          "type": "enum",
+          "required": false,
+          "enum": ["opened", "closed", "all"],
+          "default": "opened"
+        },
+        {
+          "name": "labels",
+          "kind": "flag",
+          "type": "string",
+          "required": false,
+          "multiple": true
+        },
+        {"name": "search", "kind": "flag", "type": "string", "required": false},
+        {
+          "name": "limit",
+          "kind": "flag",
+          "type": "integer",
+          "required": false,
+          "default": 20,
+          "unit": "items"
+        },
+        {"name": "cursor", "kind": "flag", "type": "string", "required": false}
+      ],
+      "output": "issue_list",
+      "error_codes": [
+        "E_USAGE",
+        "E_AUTH",
+        "E_FORBIDDEN",
+        "E_NOT_FOUND",
+        "E_NETWORK",
+        "E_RATE_LIMITED",
+        "E_SERVER",
+        "E_TIMEOUT"
+      ],
+      "examples": ["gitlab-cli issue list --project acme/web --labels bug"]
+    },
+    {
+      "path": "issue create",
+      "aliases": [],
+      "summary": "Create an issue",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "verified",
+      "evidence": ["simulated:cmd/issue_test.go", "live:docs/evidence/2026-10-12-gitlab-18.8.json#issue-create"],
+      "params": [
+        {"name": "project", "kind": "flag", "type": "string", "required": true},
+        {"name": "title", "kind": "flag", "type": "string", "required": true},
+        {
+          "name": "description-file",
+          "kind": "flag",
+          "type": "path",
+          "required": false,
+          "file_input": true
+        },
+        {
+          "name": "labels",
+          "kind": "flag",
+          "type": "string",
+          "required": false,
+          "multiple": true
+        },
+        {"name": "milestone", "kind": "flag", "type": "string", "required": false},
+        {"name": "idempotency-key", "kind": "flag", "type": "string", "required": false}
+      ],
+      "output": "write_result",
+      "error_codes": [
+        "E_USAGE",
+        "E_VALIDATION",
+        "E_AMBIGUOUS",
+        "E_AUTH",
+        "E_FORBIDDEN",
+        "E_NOT_FOUND",
+        "E_CONFIRMATION_REQUIRED",
+        "E_CONFLICT",
+        "E_OUTCOME_UNKNOWN",
+        "E_VERIFY_FAILED",
+        "E_NETWORK",
+        "E_RATE_LIMITED",
+        "E_SERVER",
+        "E_TIMEOUT",
+        "E_IO"
+      ],
+      "examples": [
+        "gitlab-cli issue create --project acme/web --title \"Checkout fails on Safari 18\" --dry-run",
+        "gitlab-cli issue create --project acme/web --title \"Checkout fails on Safari 18\" --confirm <token>"
+      ]
+    },
+    {
+      "path": "issue close",
+      "aliases": [],
+      "summary": "Close one or more issues",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "evidence": ["simulated:cmd/issue_test.go"],
+      "params": [
+        {"name": "project", "kind": "flag", "type": "string", "required": true},
+        {
+          "name": "ids",
+          "kind": "flag",
+          "type": "string",
+          "required": true,
+          "multiple": true,
+          "description": "Issue numbers, comma-separated or repeated"
+        }
+      ],
+      "output": "batch_result",
+      "error_codes": [
+        "E_USAGE",
+        "E_VALIDATION",
+        "E_AMBIGUOUS",
+        "E_AUTH",
+        "E_FORBIDDEN",
+        "E_NOT_FOUND",
+        "E_CONFIRMATION_REQUIRED",
+        "E_CONFLICT",
+        "E_OUTCOME_UNKNOWN",
+        "E_VERIFY_FAILED",
+        "E_NETWORK",
+        "E_RATE_LIMITED",
+        "E_SERVER",
+        "E_TIMEOUT",
+        "E_IO",
+        "E_PARTIAL"
+      ],
+      "examples": [
+        "gitlab-cli issue close --project acme/web --ids 14,15,16 --dry-run",
+        "gitlab-cli issue close --project acme/web --ids 14,15,16 --confirm <token>"
+      ]
+    },
+    {
+      "path": "issue comment",
+      "aliases": [],
+      "summary": "Add a comment to an issue",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "verified",
+      "evidence": ["simulated:cmd/issue_test.go", "live:docs/evidence/2026-10-12-gitlab-18.8.json#issue-comment"],
+      "params": [
+        {
+          "name": "issue",
+          "kind": "positional",
+          "type": "string",
+          "required": true,
+          "description": "Issue ref (acme/web#12) or web URL"
+        },
+        {"name": "body", "kind": "flag", "type": "string", "required": false},
+        {
+          "name": "body-file",
+          "kind": "flag",
+          "type": "path",
+          "required": false,
+          "file_input": true,
+          "description": "Read the comment from a file, or - for stdin"
+        }
+      ],
+      "output": "write_result",
+      "error_codes": [
+        "E_USAGE",
+        "E_VALIDATION",
+        "E_AMBIGUOUS",
+        "E_AUTH",
+        "E_FORBIDDEN",
+        "E_NOT_FOUND",
+        "E_CONFIRMATION_REQUIRED",
+        "E_CONFLICT",
+        "E_OUTCOME_UNKNOWN",
+        "E_VERIFY_FAILED",
+        "E_NETWORK",
+        "E_RATE_LIMITED",
+        "E_SERVER",
+        "E_TIMEOUT",
+        "E_IO"
+      ],
+      "examples": [
+        "gitlab-cli issue comment acme/web#12 --body-file reply.md --dry-run",
+        "gitlab-cli issue comment acme/web#12 --body-file reply.md --confirm <token>"
+      ]
+    },
+    {
+      "path": "branch delete",
+      "aliases": [],
+      "summary": "Delete a branch",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "verified",
+      "evidence": ["simulated:cmd/branch_test.go", "live:docs/evidence/2026-10-12-gitlab-18.8.json#branch-delete"],
+      "params": [
+        {"name": "name", "kind": "positional", "type": "string", "required": true},
+        {"name": "project", "kind": "flag", "type": "string", "required": true}
+      ],
+      "output": "write_result",
+      "error_codes": [
+        "E_USAGE",
+        "E_VALIDATION",
+        "E_AMBIGUOUS",
+        "E_AUTH",
+        "E_FORBIDDEN",
+        "E_NOT_FOUND",
+        "E_CONFIRMATION_REQUIRED",
+        "E_CONFLICT",
+        "E_OUTCOME_UNKNOWN",
+        "E_VERIFY_FAILED",
+        "E_NETWORK",
+        "E_RATE_LIMITED",
+        "E_SERVER",
+        "E_TIMEOUT",
+        "E_IO"
+      ],
+      "examples": [
+        "gitlab-cli branch delete old-experiment --project acme/web --dangerous --dry-run",
+        "gitlab-cli branch delete old-experiment --project acme/web --dangerous --confirm <token>"
+      ]
+    },
+    {
+      "path": "hook test",
+      "aliases": [],
+      "summary": "Send a test event to a project webhook",
+      "type": "write",
+      "effects": ["deliver"],
+      "dangerous": true,
+      "maturity": "draft",
+      "evidence": [],
+      "params": [
+        {"name": "project", "kind": "flag", "type": "string", "required": true},
+        {"name": "hook", "kind": "flag", "type": "string", "required": true},
+        {
+          "name": "trigger",
+          "kind": "flag",
+          "type": "enum",
+          "required": false,
+          "enum": ["push_events", "merge_requests_events"],
+          "default": "push_events"
+        }
+      ],
+      "output": "write_result",
+      "error_codes": [
+        "E_USAGE",
+        "E_VALIDATION",
+        "E_AMBIGUOUS",
+        "E_AUTH",
+        "E_FORBIDDEN",
+        "E_NOT_FOUND",
+        "E_CONFIRMATION_REQUIRED",
+        "E_CONFLICT",
+        "E_OUTCOME_UNKNOWN",
+        "E_VERIFY_FAILED",
+        "E_NETWORK",
+        "E_RATE_LIMITED",
+        "E_SERVER",
+        "E_TIMEOUT",
+        "E_IO"
+      ],
+      "examples": [
+        "gitlab-cli hook test --project acme/web --hook 3 --dangerous --dry-run",
+        "gitlab-cli hook test --project acme/web --hook 3 --dangerous --confirm <token>"
+      ]
+    },
+    {
+      "path": "job artifacts download",
+      "aliases": [],
+      "summary": "Download a job's artifacts archive to a new local file",
+      "type": "write",
+      "effects": ["artifact"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "evidence": ["simulated:cmd/job_test.go"],
+      "params": [
+        {"name": "job", "kind": "positional", "type": "string", "required": true},
+        {"name": "output", "kind": "flag", "type": "path", "required": true}
+      ],
+      "output": "write_result",
+      "error_codes": [
+        "E_USAGE",
+        "E_VALIDATION",
+        "E_AMBIGUOUS",
+        "E_AUTH",
+        "E_FORBIDDEN",
+        "E_NOT_FOUND",
+        "E_CONFIRMATION_REQUIRED",
+        "E_CONFLICT",
+        "E_OUTCOME_UNKNOWN",
+        "E_VERIFY_FAILED",
+        "E_NETWORK",
+        "E_RATE_LIMITED",
+        "E_SERVER",
+        "E_TIMEOUT",
+        "E_IO"
+      ],
+      "examples": [
+        "gitlab-cli job artifacts download acme/web:job/88231 --output artifacts.zip --dry-run",
+        "gitlab-cli job artifacts download acme/web:job/88231 --output artifacts.zip --confirm <token>"
+      ]
+    },
+    {
+      "path": "variable create",
+      "aliases": [],
+      "summary": "Create a CI/CD variable",
+      "type": "write",
+      "effects": ["configure"],
+      "dangerous": true,
+      "maturity": "verified",
+      "evidence": ["simulated:cmd/variable_test.go", "live:docs/evidence/2026-10-12-gitlab-18.8.json#variable-create"],
+      "params": [
+        {"name": "project", "kind": "flag", "type": "string", "required": true},
+        {"name": "key", "kind": "flag", "type": "string", "required": true},
+        {
+          "name": "value",
+          "kind": "flag",
+          "type": "string",
+          "required": true,
+          "secret": true,
+          "description": "Variable value; never echoed, logged or stored."
+        },
+        {
+          "name": "protected",
+          "kind": "flag",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        }
+      ],
+      "output": "write_result",
+      "error_codes": [
+        "E_USAGE",
+        "E_VALIDATION",
+        "E_AMBIGUOUS",
+        "E_AUTH",
+        "E_FORBIDDEN",
+        "E_NOT_FOUND",
+        "E_CONFIRMATION_REQUIRED",
+        "E_CONFLICT",
+        "E_OUTCOME_UNKNOWN",
+        "E_VERIFY_FAILED",
+        "E_NETWORK",
+        "E_RATE_LIMITED",
+        "E_SERVER",
+        "E_TIMEOUT",
+        "E_IO"
+      ],
+      "examples": [
+        "gitlab-cli variable create --project legacy/payments --key DEPLOY_ENV --value staging --dangerous --dry-run",
+        "gitlab-cli variable create --project legacy/payments --key DEPLOY_ENV --value staging --dangerous --confirm <token>"
+      ]
+    },
+    {
+      "path": "reference",
+      "aliases": [],
+      "summary": "Describe the commands: full, --index [group] or --command <path>",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "evidence": ["simulated:cmd/zz_conformance_test.go#R01", "live:docs/evidence/2026-10-12-gitlab-18.8.json#reference", "eval:evals/2026-10-12-gitlab-cli/report.md"],
+      "params": [
+        {
+          "name": "index",
+          "kind": "flag",
+          "type": "string",
+          "required": false,
+          "description": "Return the compact index; give a group path to index one group"
+        },
+        {"name": "command", "kind": "flag", "type": "string", "required": false}
+      ],
+      "output": "reference",
+      "error_codes": ["E_USAGE"],
+      "examples": ["gitlab-cli reference --index", "gitlab-cli reference --command \"mr update\""]
+    },
+    {
+      "path": "context",
+      "aliases": [],
+      "summary": "Show account, host, credentials source, state store and scope",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "evidence": ["simulated:cmd/zz_conformance_test.go#R05", "live:docs/evidence/2026-10-12-gitlab-18.8.json#context", "eval:evals/2026-10-12-gitlab-cli/report.md"],
+      "params": [],
+      "output": "context",
+      "error_codes": ["E_IO"],
+      "examples": ["gitlab-cli context"]
+    },
+    {
+      "path": "doctor",
+      "aliases": [],
+      "summary": "Check credentials, connectivity, state store, scope and versions",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "evidence": ["simulated:cmd/zz_conformance_test.go#R05", "live:docs/evidence/2026-10-12-gitlab-18.8.json#doctor", "eval:evals/2026-10-12-gitlab-cli/report.md"],
+      "params": [],
+      "output": "doctor",
+      "error_codes": ["E_IO"],
+      "examples": ["gitlab-cli doctor"]
+    },
+    {
+      "path": "changelog",
+      "aliases": [],
+      "summary": "Show what changed, optionally since a version",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "evidence": ["simulated:cmd/zz_conformance_test.go", "live:docs/evidence/2026-10-12-gitlab-18.8.json#changelog", "eval:evals/2026-10-12-gitlab-cli/report.md"],
+      "params": [{"name": "since", "kind": "flag", "type": "string", "required": false}],
+      "output": "changelog",
+      "error_codes": ["E_USAGE"],
+      "examples": ["gitlab-cli changelog --since 1.2.17"]
+    },
+    {
+      "path": "operation show",
+      "aliases": [],
+      "summary": "Show one operation record",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "evidence": ["simulated:cmd/zz_conformance_test.go#R05", "live:docs/evidence/2026-10-12-gitlab-18.8.json#operation-show", "eval:evals/2026-10-12-gitlab-cli/report.md"],
+      "params": [{"name": "id", "kind": "flag", "type": "string", "required": true}],
+      "output": "operation",
+      "error_codes": ["E_USAGE", "E_NOT_FOUND", "E_IO"],
+      "examples": ["gitlab-cli operation show --id op_pwbsbpupht3f3c4bjchdjpd5ra"]
+    },
+    {
+      "path": "operation list",
+      "aliases": [],
+      "summary": "List operation records",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "evidence": ["simulated:cmd/zz_conformance_test.go#R05", "live:docs/evidence/2026-10-12-gitlab-18.8.json#operation-list", "eval:evals/2026-10-12-gitlab-cli/report.md"],
+      "params": [
+        {
+          "name": "status",
+          "kind": "flag",
+          "type": "enum",
+          "required": false,
+          "enum": [
+            "planned",
+            "expired",
+            "dispatching",
+            "unknown",
+            "applied",
+            "not_applied",
+            "partial",
+            "failed",
+            "resolved"
+          ]
+        },
+        {
+          "name": "limit",
+          "kind": "flag",
+          "type": "integer",
+          "required": false,
+          "default": 20,
+          "unit": "items"
+        }
+      ],
+      "output": "operation_list",
+      "error_codes": ["E_USAGE", "E_IO"],
+      "examples": ["gitlab-cli operation list --status unknown"]
+    },
+    {
+      "path": "operation resolve",
+      "aliases": [],
+      "summary": "Record the outcome of an unknown operation with evidence",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "evidence": ["simulated:cmd/zz_conformance_test.go", "live:docs/evidence/2026-10-12-gitlab-18.8.json#operation-resolve", "eval:evals/2026-10-12-gitlab-cli/report.md"],
+      "params": [
+        {"name": "id", "kind": "flag", "type": "string", "required": true},
+        {
+          "name": "outcome",
+          "kind": "flag",
+          "type": "enum",
+          "required": true,
+          "enum": ["applied", "not_applied", "partial"]
+        },
+        {"name": "evidence", "kind": "flag", "type": "string", "required": true}
+      ],
+      "output": "operation",
+      "error_codes": ["E_USAGE", "E_NOT_FOUND", "E_FORBIDDEN", "E_CONFLICT", "E_IO"],
+      "examples": [
+        "gitlab-cli operation resolve --id op_pwbsbpupht3f3c4bjchdjpd5ra --outcome applied --evidence \"mr get shows merged\""
+      ]
+    },
+    {
+      "path": "update",
+      "aliases": [],
+      "summary": "Update gitlab-cli and its Skills to the latest or a given version",
+      "type": "write",
+      "effects": ["persist"],
+      "dangerous": false,
+      "maturity": "verified",
+      "evidence": ["simulated:cmd/update_test.go", "live:docs/evidence/2026-10-12-gitlab-18.8.json#update"],
+      "params": [
+        {
+          "name": "target-version",
+          "kind": "flag",
+          "type": "string",
+          "required": false,
+          "description": "Strict semver, optional leading v"
+        },
+        {
+          "name": "allow-downgrade",
+          "kind": "flag",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        },
+        {
+          "name": "check",
+          "kind": "flag",
+          "type": "boolean",
+          "required": false,
+          "default": false,
+          "description": "Only report whether an update is available"
+        }
+      ],
+      "output": "update",
+      "error_codes": [
+        "E_USAGE",
+        "E_NETWORK",
+        "E_TIMEOUT",
+        "E_RATE_LIMITED",
+        "E_INTEGRITY",
+        "E_IO",
+        "E_PARTIAL",
+        "E_INTERRUPTED"
+      ],
+      "examples": [
+        "gitlab-cli update --check",
+        "gitlab-cli update",
+        "gitlab-cli update --target-version 1.3.1"
+      ]
+    }
+  ],
+  "schemas": {
+    "mr_list": {
+      "shape": "page",
+      "fields": [
+        "ref",
+        "title",
+        "state",
+        "author",
+        "assignees",
+        "labels",
+        "pipeline_status",
+        "draft",
+        "source_branch",
+        "target_branch",
+        "created_at",
+        "updated_at",
+        "web_url"
+      ],
+      "default_fields": [
+        "ref",
+        "title",
+        "state",
+        "author",
+        "assignees",
+        "labels",
+        "pipeline_status",
+        "updated_at",
+        "web_url"
+      ],
+      "untrusted_fields": ["title"]
+    },
+    "mr": {
+      "shape": "object",
+      "fields": [
+        "ref",
+        "title",
+        "state",
+        "author",
+        "assignees",
+        "labels",
+        "pipeline_status",
+        "source_branch",
+        "target_branch",
+        "description",
+        "updated_at",
+        "web_url"
+      ],
+      "default_fields": [
+        "ref",
+        "title",
+        "state",
+        "author",
+        "assignees",
+        "labels",
+        "pipeline_status",
+        "source_branch",
+        "target_branch",
+        "description",
+        "updated_at",
+        "web_url"
+      ],
+      "untrusted_fields": ["title", "description"]
+    },
+    "issue_list": {
+      "shape": "page",
+      "fields": [
+        "ref",
+        "title",
+        "state",
+        "author",
+        "assignees",
+        "labels",
+        "milestone",
+        "updated_at",
+        "web_url"
+      ],
+      "default_fields": ["ref", "title", "state", "assignees", "labels", "updated_at", "web_url"],
+      "untrusted_fields": ["title"]
+    },
+    "write_result": {
+      "shape": "object",
+      "fields": ["operation_id", "receipt", "result"],
+      "default_fields": ["operation_id", "receipt", "result"],
+      "untrusted_fields": ["result.title"]
+    },
+    "batch_result": {
+      "shape": "object",
+      "fields": ["operation_id", "items", "summary"],
+      "default_fields": ["operation_id", "items", "summary"],
+      "untrusted_fields": []
+    },
+    "reference": {
+      "shape": "object",
+      "fields": [
+        "tool",
+        "version",
+        "spec_version",
+        "schema_version",
+        "risk_tier",
+        "global_flags",
+        "commands",
+        "schemas",
+        "error_codes",
+        "exit_codes",
+        "groups",
+        "command"
+      ],
+      "default_fields": ["tool", "version", "commands"],
+      "untrusted_fields": []
+    },
+    "context": {
+      "shape": "object",
+      "fields": [
+        "tool",
+        "version",
+        "spec_version",
+        "account",
+        "host",
+        "credentials",
+        "state",
+        "authorization"
+      ],
+      "default_fields": [
+        "tool",
+        "version",
+        "spec_version",
+        "account",
+        "host",
+        "credentials",
+        "state",
+        "authorization"
+      ],
+      "untrusted_fields": []
+    },
+    "doctor": {
+      "shape": "object",
+      "fields": ["checks"],
+      "default_fields": ["checks"],
+      "untrusted_fields": []
+    },
+    "changelog": {
+      "shape": "object",
+      "fields": ["current_version", "since", "count", "entries"],
+      "default_fields": ["current_version", "since", "count", "entries"],
+      "untrusted_fields": []
+    },
+    "operation": {
+      "shape": "object",
+      "fields": [
+        "operation_id",
+        "command",
+        "status",
+        "target",
+        "effects",
+        "scope_id",
+        "created_at",
+        "expires_at",
+        "dispatched_at",
+        "finished_at",
+        "preview",
+        "receipt",
+        "resolution",
+        "batch_id",
+        "items"
+      ],
+      "default_fields": [
+        "operation_id",
+        "command",
+        "status",
+        "target",
+        "effects",
+        "scope_id",
+        "created_at",
+        "expires_at",
+        "dispatched_at",
+        "finished_at",
+        "preview",
+        "receipt",
+        "resolution",
+        "batch_id",
+        "items"
+      ],
+      "untrusted_fields": ["target.label", "preview.target.label"]
+    },
+    "operation_list": {
+      "shape": "page",
+      "fields": ["operation_id", "command", "status", "target", "created_at", "finished_at"],
+      "default_fields": ["operation_id", "command", "status", "target", "created_at"],
+      "untrusted_fields": ["target.label"]
+    },
+    "update": {
+      "shape": "object",
+      "fields": [
+        "status",
+        "current_version",
+        "target_version",
+        "update_available",
+        "install_method",
+        "signature_status",
+        "skill_sync_status",
+        "previous_version",
+        "command",
+        "binary_replaced",
+        "signature_verified",
+        "checksum_verified",
+        "skill_sync_command",
+        "stage"
+      ],
+      "default_fields": [
+        "status",
+        "current_version",
+        "target_version",
+        "update_available",
+        "install_method",
+        "signature_status",
+        "skill_sync_status"
+      ],
+      "untrusted_fields": []
+    }
+  },
+  "error_codes": {
+    "E_USAGE": {
+      "exit": 2,
+      "retryable": false,
+      "meaning": "The command line is wrong: unknown command or flag, unexpected argument, missing or invalid parameter."
+    },
+    "E_VALIDATION": {
+      "exit": 2,
+      "retryable": false,
+      "meaning": "The request is well-formed but the upstream or the tool rejected its content."
+    },
+    "E_AMBIGUOUS": {
+      "exit": 2,
+      "retryable": false,
+      "meaning": "A name matched more than one resource; pick one of details.candidates."
+    },
+    "E_UNSUPPORTED": {
+      "exit": 2,
+      "retryable": false,
+      "meaning": "A valid request this build, upstream version or mode cannot carry out."
+    },
+    "E_NOT_FOUND": {
+      "exit": 3,
+      "retryable": false,
+      "meaning": "The resource does not exist or is not visible to this account."
+    },
+    "E_AUTH": {"exit": 4, "retryable": false, "meaning": "Credentials are missing, invalid or expired."},
+    "E_FORBIDDEN": {
+      "exit": 4,
+      "retryable": false,
+      "meaning": "Not allowed: no granted scope (details.scope) or the upstream refused the account (details.required)."
+    },
+    "E_CONFIG": {"exit": 4, "retryable": false, "meaning": "Local configuration is missing or invalid."},
+    "E_CONFIRMATION_REQUIRED": {
+      "exit": 5,
+      "retryable": false,
+      "meaning": "A write needs --dry-run then --confirm <token>, or --dangerous; nothing was changed."
+    },
+    "E_CONFLICT": {
+      "exit": 6,
+      "retryable": false,
+      "meaning": "A precondition failed (details.conflict): token mismatch, expired or used token, state drift, changed scope, unresolved operation."
+    },
+    "E_OUTCOME_UNKNOWN": {
+      "exit": 6,
+      "retryable": false,
+      "meaning": "The change may have been applied; look it up with details.lookup before doing anything else."
+    },
+    "E_NETWORK": {
+      "exit": 7,
+      "retryable": true,
+      "meaning": "The upstream could not be reached; nothing was sent."
+    },
+    "E_RATE_LIMITED": {
+      "exit": 7,
+      "retryable": true,
+      "meaning": "The upstream rate limit was hit; wait details.retry_after_ms."
+    },
+    "E_SERVER": {"exit": 7, "retryable": true, "meaning": "The upstream failed while serving a read."},
+    "E_TIMEOUT": {"exit": 8, "retryable": true, "meaning": "A read timed out."},
+    "E_HUMAN_REQUIRED": {
+      "exit": 9,
+      "retryable": false,
+      "meaning": "A person must act first (details.action), then run details.resume."
+    },
+    "E_PARTIAL": {
+      "exit": 1,
+      "retryable": false,
+      "meaning": "Some of the change took effect; read the receipt or items; never resend the whole request."
+    },
+    "E_VERIFY_FAILED": {
+      "exit": 1,
+      "retryable": false,
+      "meaning": "The change was applied but the read-back disagrees with the request."
+    },
+    "E_VERIFY_INCOMPLETE": {
+      "exit": 1,
+      "retryable": false,
+      "meaning": "The change was applied but the required read-back could not be completed."
+    },
+    "E_INTEGRITY": {
+      "exit": 1,
+      "retryable": false,
+      "meaning": "A release signature or checksum failed; do not retry."
+    },
+    "E_IO": {
+      "exit": 1,
+      "retryable": false,
+      "meaning": "A local file or the tool's state store failed; nothing was sent."
+    },
+    "E_INTERRUPTED": {
+      "exit": 130,
+      "retryable": true,
+      "meaning": "Interrupted by a signal before anything lasting happened."
+    },
+    "E_UNKNOWN": {"exit": 1, "retryable": false, "meaning": "An internal error; read message and details."}
+  },
+  "exit_codes": {
+    "0": "success",
+    "1": "failure that needs reading: partial, verify, integrity, io, unknown",
+    "2": "usage, validation, ambiguous, unsupported (fix the request, do not retry)",
+    "3": "not found (do not retry)",
+    "4": "auth, forbidden, config (credentials, permission or scope)",
+    "5": "confirmation required (use the preview and token, or add --dangerous)",
+    "6": "conflict or outcome unknown (re-read state or look the operation up)",
+    "7": "retryable transient (network, rate limit, server)",
+    "8": "timeout (back off, retry)",
+    "9": "human action required",
+    "130": "interrupted by signal"
+  }
+}

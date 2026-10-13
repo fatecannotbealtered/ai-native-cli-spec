@@ -1,0 +1,30 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_OUTCOME_UNKNOWN",
+    "message": "One issue was closed and the reply for the other was lost, so its outcome is unknown.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "dispatched",
+      "next_action": "Run `gitlab-cli operation show --id opb_44alddsn4no66m3yzyblxd6ly4` before closing anything again.",
+      "operation_id": "opb_44alddsn4no66m3yzyblxd6ly4",
+      "lookup": "gitlab-cli operation show --id opb_44alddsn4no66m3yzyblxd6ly4",
+      "items": [
+        {"target": "acme/web#14", "operation_id": "op_kgb6xhtmp3abomcohmfiyjsl6m", "ok": true},
+        {
+          "target": "acme/web#15",
+          "operation_id": "op_6dzn2bcq2kalgxyhwsnlylmuwm",
+          "ok": false,
+          "error": {
+            "code": "E_OUTCOME_UNKNOWN",
+            "retryable": false,
+            "message": "The reply was lost after the request was sent."
+          }
+        }
+      ],
+      "summary": {"total": 2, "succeeded": 1, "failed": 0, "unknown": 1, "skipped": 0}
+    }
+  },
+  "meta": {"duration_ms": 30411}
+}

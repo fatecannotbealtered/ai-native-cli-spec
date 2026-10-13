@@ -1,0 +1,41 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_FORBIDDEN",
+    "message": "No scope file grants this tool any write, so nothing was sent.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "not_started",
+      "next_action": "Ask the user to grant this scope by creating C:\\Users\\me\\.gitlab-cli\\scope.json with the grant_example content (adjusted); do not create it yourself.",
+      "scope": {
+        "status": "missing",
+        "scope_id": null,
+        "missing": {"effects": ["change"], "dangerous": false, "target": "acme/web!5"},
+        "grant_example": {
+          "scope_id": "scp_2026-10-12_web",
+          "tool": "gitlab-cli",
+          "granted_by": "<your name>",
+          "granted_at": "2026-10-12T09:14:03Z",
+          "expires_at": "2026-10-19T09:14:03Z",
+          "effects": ["change"],
+          "dangerous": false,
+          "targets": [{"key": "acme/web"}]
+        }
+      },
+      "preview": {
+        "operation_id": "op_dm54fkdsx4ezy4p2w3asn6dwoq",
+        "command": "mr update",
+        "action": "Update merge request",
+        "target": {"key": "acme/web!5", "kind": "merge_request"},
+        "effects": ["change"],
+        "dangerous": false,
+        "changes": [{"field": "assignees", "before": ["bob"], "after": ["carol"]}],
+        "inputs": {"mr": "acme/web!5", "assignee": "carol"},
+        "can_apply": true,
+        "blocked_by": []
+      }
+    }
+  },
+  "meta": {"duration_ms": 29}
+}

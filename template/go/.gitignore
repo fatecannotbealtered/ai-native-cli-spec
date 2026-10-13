@@ -1,10 +1,14 @@
 # Go-specific — append to common/.gitignore
+#
+# Never ignore internal/aicli/: it is the vendored ai-native-cli-spec library
+# (scripts/sync-spec.js writes it, scripts/check-spec.js verifies it) and is
+# committed like the rest of the source.
 
 # Build output
 bin/
 dist/
 
-# Windows executables
+# Windows executables (includes go test's *.test.exe)
 *.exe
 
 # Go test cache / coverage

@@ -1,0 +1,8 @@
+# Local settings, eval data and build output never go into the repository (README.md, Configuration).
+/eval.config.json
+/arms.json
+/work/
+/runs/
+/harness/recorder/recorder
+/harness/recorder/recorder.exe
+__pycache__/

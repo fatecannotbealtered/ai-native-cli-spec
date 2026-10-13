@@ -1,0 +1,19 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_VALIDATION",
+    "message": "GitLab rejected the search term as too short.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "not_started",
+      "next_action": "Search with at least 3 characters, or drop --search and filter with --labels.",
+      "problem": "invalid_value",
+      "parameter": "search",
+      "expected": "at least 3 characters",
+      "http_status": 400,
+      "upstream_message": "400 Bad request - search must be at least 3 characters"
+    }
+  },
+  "meta": {"duration_ms": 97, "untrusted": ["error.message"]}
+}

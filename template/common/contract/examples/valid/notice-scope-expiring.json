@@ -1,0 +1,7 @@
+{
+  "type": "scope_expiring",
+  "severity": "warning",
+  "message": "The scope expires in 2 hours.",
+  "scope_id": "scp_2026-10-12_triage",
+  "expires_at": "2026-10-19T08:00:00Z"
+}

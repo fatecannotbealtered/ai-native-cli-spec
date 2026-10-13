@@ -1,0 +1,17 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_CONFLICT",
+    "message": "The confirm token was issued for a different assignee, so nothing was sent.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "not_started",
+      "next_action": "Run the dry-run again with the inputs you want to apply and confirm with its new token.",
+      "conflict": "stale_token",
+      "parameter": "assignee",
+      "operation_id": "op_xcpuredojmpavbqenyk725drhi"
+    }
+  },
+  "meta": {"duration_ms": 41}
+}

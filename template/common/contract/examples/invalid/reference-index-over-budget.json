@@ -1,0 +1,806 @@
+{
+  "tool": "gitlab-cli",
+  "version": "1.3.0",
+  "commands": [
+    {
+      "path": "project list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "List projects of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "project get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Get projects of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "project create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Create projects of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "project update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Update projects of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "project delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Delete projects of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "group list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "List groups of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "group get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Get groups of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "group create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Create groups of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "group update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Update groups of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "group delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Delete groups of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "mr list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "List mrs of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "mr get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Get mrs of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "mr create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Create mrs of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "mr update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Update mrs of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "mr delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Delete mrs of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "issue list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "List issues of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "issue get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Get issues of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "issue create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Create issues of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "issue update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Update issues of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "issue delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Delete issues of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "branch list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "List branchs of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "branch get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Get branchs of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "branch create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Create branchs of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "branch update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Update branchs of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "branch delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Delete branchs of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "tag list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "List tags of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "tag get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Get tags of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "tag create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Create tags of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "tag update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Update tags of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "tag delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Delete tags of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "release list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "List releases of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "release get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Get releases of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "release create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Create releases of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "release update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Update releases of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "release delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Delete releases of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "pipeline list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "List pipelines of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "pipeline get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Get pipelines of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "pipeline create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Create pipelines of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "pipeline update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Update pipelines of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "pipeline delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Delete pipelines of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "job list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "List jobs of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "job get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Get jobs of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "job create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Create jobs of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "job update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Update jobs of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "job delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Delete jobs of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "variable list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "List variables of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "variable get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Get variables of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "variable create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Create variables of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "variable update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Update variables of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "variable delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Delete variables of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "label list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "List labels of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "label get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Get labels of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "label create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Create labels of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "label update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Update labels of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "label delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Delete labels of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "milestone list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "List milestones of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "milestone get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Get milestones of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "milestone create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Create milestones of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "milestone update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Update milestones of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "milestone delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Delete milestones of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "user list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "List users of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "user get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Get users of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "user create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Create users of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "user update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Update users of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "user delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Delete users of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "member list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "List members of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "member get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Get members of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "member create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Create members of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "member update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Update members of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "member delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Delete members of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "hook list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "List hooks of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "hook get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Get hooks of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "hook create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Create hooks of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "hook update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Update hooks of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "hook delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Delete hooks of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "snippet list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "List snippets of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "snippet get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Get snippets of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "snippet create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Create snippets of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "snippet update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Update snippets of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "snippet delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Delete snippets of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "wiki list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "List wikis of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "wiki get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Get wikis of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "wiki create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Create wikis of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "wiki update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Update wikis of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "wiki delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Delete wikis of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "deploy-key list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "List deploy-keys of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "deploy-key get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Get deploy-keys of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "deploy-key create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Create deploy-keys of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "deploy-key update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Update deploy-keys of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "deploy-key delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Delete deploy-keys of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "environment list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "List environments of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "environment get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Get environments of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "environment create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Create environments of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "environment update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Update environments of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "environment delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Delete environments of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "runner list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "List runners of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "runner get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Get runners of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "runner create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Create runners of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "runner update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Update runners of a project, with the fields and filters tasks ask about"
+    },
+    {
+      "path": "runner delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Delete runners of a project, with the fields and filters tasks ask about"
+    }
+  ]
+}

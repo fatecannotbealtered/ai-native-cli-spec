@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "schema_version": "2.0",
+  "data": {
+    "preview": {
+      "operation_id": "op_fqy6545k6fonks5cvt5sb2gufu",
+      "command": "mr merge",
+      "action": "Merge merge request",
+      "target": {"key": "acme/web!9", "kind": "merge_request", "label": "!9 Fix flaky login test"},
+      "effects": ["change"],
+      "dangerous": true,
+      "changes": [{"field": "state", "before": "opened", "after": "merged"}],
+      "inputs": {"mr": "acme/web!9"},
+      "base": {"version": "2026-10-12T07:52:10Z", "source": "updated_at"},
+      "can_apply": false,
+      "blocked_by": [
+        {
+          "kind": "pipeline_failed",
+          "message": "The head pipeline failed; GitLab merges only after it passes."
+        }
+      ]
+    },
+    "confirm_token": null,
+    "expires_at": null,
+    "operation_id": "op_fqy6545k6fonks5cvt5sb2gufu"
+  },
+  "meta": {"duration_ms": 512, "untrusted": ["data.preview.target.label"]}
+}

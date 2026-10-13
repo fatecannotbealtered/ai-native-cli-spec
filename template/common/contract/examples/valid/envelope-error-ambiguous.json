@@ -1,0 +1,19 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_AMBIGUOUS",
+    "message": "The assignee name matches more than one user, so nothing was sent.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "not_started",
+      "next_action": "Ask the user which Carol they mean, then pass that user's ref, e.g. --assignee @carol.",
+      "parameter": "assignee",
+      "candidates": [
+        {"ref": "@carol", "label": "Carol Wang (carol)"},
+        {"ref": "@carolm", "label": "Carol Martin (carolm)"}
+      ]
+    }
+  },
+  "meta": {"duration_ms": 316, "untrusted": ["error.details.candidates[].label"]}
+}

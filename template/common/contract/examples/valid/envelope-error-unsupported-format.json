@@ -1,0 +1,17 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_USAGE",
+    "message": "This command only writes JSON or text; raw output is for commands that return files, logs or diffs.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "not_started",
+      "next_action": "Drop --format raw and read the JSON output.",
+      "problem": "unsupported_format",
+      "parameter": "--format",
+      "expected": ["json", "text"]
+    }
+  },
+  "meta": {"duration_ms": 2}
+}

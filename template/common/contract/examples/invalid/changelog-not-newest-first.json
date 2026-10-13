@@ -1,0 +1,24 @@
+{
+  "current_version": "1.3.0",
+  "since": "1.2.17",
+  "count": 2,
+  "entries": [
+    {
+      "version": "1.2.18",
+      "date": "2026-10-05",
+      "changes": {"fixed": ["project members states that it lists direct members only."]}
+    },
+    {
+      "version": "1.3.0",
+      "date": "2026-10-12",
+      "changes": {
+        "added": [
+          "Write gate from aicli: dry-run, confirm and receipts on every write.",
+          "mr list --pipeline-status filter."
+        ],
+        "changed": ["JSON output is compact by default."],
+        "security": ["Confirm tokens bind every input and fail closed when the key or journal is unusable."]
+      }
+    }
+  ]
+}

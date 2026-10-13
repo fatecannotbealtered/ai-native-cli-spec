@@ -1,6 +1,17 @@
 # Keep repository text files LF-normalized on every platform.
 * text=auto eol=lf
 
+# Vendored from ai-native-cli-spec: always text, always LF, whatever core.autocrlf
+# says, so the library matches its MANIFEST.json hashes and every vendored file
+# matches the pinned tag byte for byte (scripts/check-spec.js).
+.agent/** text eol=lf
+contract/** text eol=lf
+internal/aicli/** text eol=lf
+**/_aicli/** text eol=lf
+scripts/spec-files.js text eol=lf
+scripts/sync-spec.js text eol=lf
+scripts/check-spec.js text eol=lf
+
 # Windows command scripts are intentionally CRLF.
 *.bat text eol=crlf
 *.cmd text eol=crlf

@@ -1,0 +1,166 @@
+{
+  "tool": "gitlab-cli",
+  "version": "1.3.0",
+  "commands": [
+    {
+      "path": "mr list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "summary": "List merge requests of a project with the fields tasks ask about"
+    },
+    {
+      "path": "mr get",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "summary": "Show one merge request"
+    },
+    {
+      "path": "mr update",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "verified",
+      "summary": "Change a merge request's title, description, assignee or labels"
+    },
+    {
+      "path": "mr merge",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "experimental",
+      "summary": "Merge a merge request"
+    },
+    {
+      "path": "issue list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "summary": "List issues of a project"
+    },
+    {
+      "path": "issue create",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "verified",
+      "summary": "Create an issue"
+    },
+    {
+      "path": "issue close",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Close one or more issues"
+    },
+    {
+      "path": "issue comment",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": false,
+      "maturity": "verified",
+      "summary": "Add a comment to an issue"
+    },
+    {
+      "path": "branch delete",
+      "type": "write",
+      "effects": ["change"],
+      "dangerous": true,
+      "maturity": "verified",
+      "summary": "Delete a branch"
+    },
+    {
+      "path": "hook test",
+      "type": "write",
+      "effects": ["deliver"],
+      "dangerous": true,
+      "maturity": "draft",
+      "summary": "Send a test event to a project webhook"
+    },
+    {
+      "path": "job artifacts download",
+      "type": "write",
+      "effects": ["artifact"],
+      "dangerous": false,
+      "maturity": "experimental",
+      "summary": "Download a job's artifacts archive to a new local file"
+    },
+    {
+      "path": "variable create",
+      "type": "write",
+      "effects": ["configure"],
+      "dangerous": true,
+      "maturity": "verified",
+      "summary": "Create a CI/CD variable"
+    },
+    {
+      "path": "reference",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "summary": "Describe the commands: full, --index [group] or --command <path>"
+    },
+    {
+      "path": "context",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "summary": "Show account, host, credentials source, state store and scope"
+    },
+    {
+      "path": "doctor",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "summary": "Check credentials, connectivity, state store, scope and versions"
+    },
+    {
+      "path": "changelog",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "summary": "Show what changed, optionally since a version"
+    },
+    {
+      "path": "operation show",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "summary": "Show one operation record"
+    },
+    {
+      "path": "operation list",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "summary": "List operation records"
+    },
+    {
+      "path": "operation resolve",
+      "type": "read",
+      "effects": ["observe"],
+      "dangerous": false,
+      "maturity": "stable",
+      "summary": "Record the outcome of an unknown operation with evidence"
+    },
+    {
+      "path": "update",
+      "type": "write",
+      "effects": ["persist"],
+      "dangerous": false,
+      "maturity": "verified",
+      "summary": "Update gitlab-cli and its Skills to the latest or a given version"
+    }
+  ]
+}

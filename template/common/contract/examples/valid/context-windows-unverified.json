@@ -1,0 +1,17 @@
+{
+  "tool": "gitlab-cli",
+  "version": "1.3.0",
+  "spec_version": "2.0.0",
+  "account": "release-bot",
+  "host": "gitlab.acme.test",
+  "credentials": {"configured": true, "source": "env"},
+  "state": {"dir": "D:\\ci\\gitlab-cli-state", "available": true, "protection": "windows-unverified"},
+  "authorization": {
+    "status": "granted",
+    "scope_id": "scp_2026-10-12_release",
+    "path": "D:\\ci\\gitlab-cli-state\\scope.json",
+    "effects": ["change", "deliver", "artifact"],
+    "dangerous": true,
+    "expires_at": null
+  }
+}

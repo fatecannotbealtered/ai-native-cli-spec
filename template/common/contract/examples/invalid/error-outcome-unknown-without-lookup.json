@@ -1,0 +1,30 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_OUTCOME_UNKNOWN",
+    "message": "The connection dropped after the merge request was sent, so whether it merged is unknown; look the operation up before anything else.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "unknown",
+      "next_action": "Run `gitlab-cli operation show --id op_pwbsbpupht3f3c4bjchdjpd5ra` and read the merge request before any retry.",
+      "operation_id": "op_pwbsbpupht3f3c4bjchdjpd5ra",
+      "receipt": {
+        "operation_id": "op_pwbsbpupht3f3c4bjchdjpd5ra",
+        "command": "mr merge",
+        "target": {"key": "acme/web!5", "kind": "merge_request"},
+        "effects": ["change"],
+        "outcome": {
+          "execution": "unknown",
+          "change": "unknown",
+          "delivery": "not_applicable",
+          "persistence": "not_applicable",
+          "verification": "not_run"
+        },
+        "observed": {},
+        "replayed": false
+      }
+    }
+  },
+  "meta": {"duration_ms": 30212}
+}

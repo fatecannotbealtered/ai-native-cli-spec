@@ -1,0 +1,31 @@
+{
+  "spec_version": "2.0.0",
+  "files": {
+    "LICENSE": "dab3273f23d666e12a42e59bd9e377b9f1be3888bd4fd0b70ec627a6b80d13fc",
+    "app.go": "9f1a728b28a28f517eaefc21bd26ddf89c5a1127a8925ecf2ea3fff1825a8b1b",
+    "binding.go": "65deb634c5bce6fcb33f9ef64f4a6808181d9a939d74f0bc7abb989d53549b36",
+    "builtins.go": "fdde77478fda5c5ef495927a31f19191e1d61de3bd7d4d49e0b7bddcbb75b52d",
+    "conformance.go": "6479c7d49e51ea5bcbddb49e47add47555af93a94f44a5089ee789e9e37786d8",
+    "contract_gen.go": "f05b837f87e2660cab1bc2aeb20eb04a38265fd0f8141b3c8e24b86a7465b9fa",
+    "debug.go": "f206b0d864f10375ac9a514efee348b1a640c686fc9cf61d00b71e9e248ab854",
+    "envelope.go": "13504e755b5c5827c2865e4f2c855313c59467db024e5f577a17d7bd00091fef",
+    "errors.go": "be03bb641b1a662fc4afbb0812a93c269a41ea2991eec4231565dd1e25fac584",
+    "gate.go": "5dc37bcddcb9e58462c74221e1302241805cd90c47a775f3467fb77eebc0b0dc",
+    "journal.go": "25afe498c5ea653c74b9042488a30ba714623aca5948537233872ad2093c3625",
+    "keystore.go": "af9c6e09def053076ec4fd5c8ad3ecd653621fd427c0f3c07b65f34bd5d99dc2",
+    "query.go": "a3e0cc742cd214ccba4e7e9a6079ef67d1c625c4e298397f6916bf1d86dcdc54",
+    "receipt.go": "056e5891be229da8e852c6e379efebd31d1151e49c8edce0b701da2c379c2f02",
+    "registry.go": "81e849742af152eff6bf7d59ba9321b45e1565826399a7bc97f0f01f304cdf53",
+    "scope.go": "7b4ae4c9aa3d463ce68acf7678c21b5390b842671c3a72bfbead2f337f3e22b5",
+    "selfupdate.go": "2b6d711f4ede7fd7eb460d226a0143335651a0cd0c1ff0db02f68bcea6b8d53d",
+    "settings.go": "fbba96c460fbb401fcbb86773fce45c2edc8954c52a3012983fae11677529780",
+    "sigstore.go": "e5930fa4c878a3752d70501d5a81ad9ebff9952c1fbf40849b36702849cb4e7f",
+    "stream.go": "ec1c64452ee96c0ae70befbc9f2405f914b11573b822eeb0a1b0b9977b54ce6f",
+    "token.go": "891f725aa8d0bd98c001a9d3720071d4f80079a8e605de92d364729178949ba9",
+    "update.go": "9767c092f2f9b1e5a7d1732dc45c230d64a2d4f67b7b07ae067099fa1efc0c79",
+    "update_install.go": "49ce6b1e5eebb11e58ac5dfd51605827886747b46bfed401984756adab3bf286",
+    "update_release.go": "82194afd5025157a2157401855f6bf73afeb73bb13f782d9e378e8fd75dbb118",
+    "ux.go": "49b02c1f0acb59d0c7bdfb55a25da82c0f521cd3a3b82d1863be432797b7648c",
+    "validate.go": "49654fed4f5d211b9f73471b9aa3dc6ca7df2fd4cca23e51857215347bdc0dac"
+  }
+}

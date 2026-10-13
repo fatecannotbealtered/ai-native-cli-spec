@@ -1,0 +1,26 @@
+{
+  "ok": true,
+  "schema_version": "2.0",
+  "data": {
+    "preview": {
+      "operation_id": "op_xcpuredojmpavbqenyk725drhi",
+      "command": "mr update",
+      "action": "Update merge request",
+      "target": {"key": "acme/web!5", "kind": "merge_request", "label": "!5 Add retry to webhook sender"},
+      "effects": ["change"],
+      "dangerous": false,
+      "changes": [
+        {"field": "assignees", "before": ["bob"], "after": ["carol"]},
+        {"field": "labels", "add": ["needs-review"]}
+      ],
+      "inputs": {"mr": "acme/web!5", "assignee": "carol", "add_labels": ["needs-review"]},
+      "base": {"version": "2026-10-11T18:30:24Z", "source": "updated_at"},
+      "can_apply": true,
+      "blocked_by": []
+    },
+    "confirm_token": "ct2_XCPUREDOJMPAVBQENYK725DRHI_80e23f02535d9ddb0e18e121434a7305",
+    "expires_at": "2026-10-12T09:29:03Z",
+    "operation_id": "op_xcpuredojmpavbqenyk725drhi"
+  },
+  "meta": {"duration_ms": 388, "untrusted": ["data.preview.target.label"]}
+}

@@ -1,0 +1,32 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_VERIFY_FAILED",
+    "message": "The update was accepted but the read-back shows no assignee, so the requested assignee was not set.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "dispatched",
+      "next_action": "Check that the user can be assigned with `gitlab-cli project members acme/web --all-levels` before trying again.",
+      "operation_id": "op_xqz4quaalotefdxq4raeu3wfgi",
+      "receipt": {
+        "operation_id": "op_xqz4quaalotefdxq4raeu3wfgi",
+        "command": "mr update",
+        "target": {"key": "acme/web!5", "kind": "merge_request"},
+        "effects": ["change"],
+        "outcome": {
+          "execution": "completed",
+          "change": "applied",
+          "delivery": "not_applicable",
+          "persistence": "not_applicable",
+          "verification": "failed"
+        },
+        "observed": {"assignees": []},
+        "mismatched": ["assignees"],
+        "failed_stage": "verify",
+        "replayed": false
+      }
+    }
+  },
+  "meta": {"duration_ms": 1873}
+}

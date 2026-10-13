@@ -1,0 +1,27 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_PARTIAL",
+    "message": "Three of the four issues were closed; one does not exist.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "dispatched",
+      "next_action": "Do not resend the batch; check the missing issue with `gitlab-cli issue get acme/web#99`.",
+      "operation_id": "opb_4sc42eqjpzve3deeqbcsxvjnuu",
+      "items": [
+        {"target": "acme/web#14", "operation_id": "op_56fuuz26w7o47yzbcaomtvdjfq", "ok": true},
+        {"target": "acme/web#15", "operation_id": "op_gxisfqerjnooxecoxjj4jcjjhy", "ok": true},
+        {"target": "acme/web#16", "operation_id": "op_va3mcrinyqw7xtbdzgaxxuu4nq", "ok": true},
+        {
+          "target": "acme/web#99",
+          "operation_id": "op_vl7u5ljmrgpruvsnjcvukex35y",
+          "ok": false,
+          "error": {"code": "E_NOT_FOUND", "retryable": false, "message": "The issue does not exist."}
+        }
+      ],
+      "summary": {"total": 4, "succeeded": 3, "failed": 1, "unknown": 0, "skipped": 0}
+    }
+  },
+  "meta": {"duration_ms": 3120}
+}

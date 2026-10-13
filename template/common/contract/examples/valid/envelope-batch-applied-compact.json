@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "schema_version": "2.0",
+  "data": {
+    "operation_id": "opb_4r47di2s2zqi7ry35dzgywofxa",
+    "items": [
+      {"target": "acme/web#80", "operation_id": "op_zabvyrk7xae2szk2egwcdqz5qa", "ok": true, "result": {"ref": "acme/web#80", "state": "closed"}},
+      {"target": "acme/web#81", "operation_id": "op_grmz54676bo5xbey6gjka532jq", "ok": true, "result": {"ref": "acme/web#81", "state": "closed"}},
+      {"target": "acme/web#82", "operation_id": "op_c7x7m5djut66kdo4izpicj24qi", "ok": true, "result": {"ref": "acme/web#82", "state": "closed"}},
+      {"target": "acme/web#83", "operation_id": "op_rwn4zwmb34zowtk534kksefyga", "ok": true, "result": {"ref": "acme/web#83", "state": "closed"}},
+      {"target": "acme/web#84", "operation_id": "op_gui5taiykf5rxedfs5hortlf7a", "ok": true, "result": {"ref": "acme/web#84", "state": "closed"}}
+    ],
+    "summary": {"total": 5, "succeeded": 5, "failed": 0, "unknown": 0, "skipped": 0}
+  },
+  "meta": {"duration_ms": 2716}
+}

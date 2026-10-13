@@ -1,0 +1,108 @@
+{
+  "tool": "gitlab-cli",
+  "version": "1.3.0",
+  "command": {
+    "path": "mr update",
+    "aliases": [],
+    "summary": "Change a merge request's title, description, assignee or labels",
+    "type": "write",
+    "effects": ["change"],
+    "dangerous": false,
+    "maturity": "verified",
+    "evidence": ["simulated:cmd/mr_test.go", "live:docs/evidence/2026-10-12-gitlab-18.8.json#mr-update"],
+    "params": [
+      {
+        "name": "mr",
+        "kind": "positional",
+        "type": "string",
+        "required": true,
+        "description": "Merge request ref (acme/web!5) or web URL"
+      },
+      {"name": "title", "kind": "flag", "type": "string", "required": false},
+      {
+        "name": "description-file",
+        "kind": "flag",
+        "type": "path",
+        "required": false,
+        "file_input": true,
+        "description": "Read the description from a file, or - for stdin"
+      },
+      {
+        "name": "assignee",
+        "kind": "flag",
+        "type": "string",
+        "required": false,
+        "description": "Username, @ref or name"
+      },
+      {
+        "name": "add-labels",
+        "kind": "flag",
+        "type": "string",
+        "required": false,
+        "multiple": true
+      },
+      {
+        "name": "remove-labels",
+        "kind": "flag",
+        "type": "string",
+        "required": false,
+        "multiple": true
+      }
+    ],
+    "output": "write_result",
+    "error_codes": [
+      "E_USAGE",
+      "E_VALIDATION",
+      "E_AMBIGUOUS",
+      "E_AUTH",
+      "E_FORBIDDEN",
+      "E_NOT_FOUND",
+      "E_CONFIRMATION_REQUIRED",
+      "E_CONFLICT",
+      "E_OUTCOME_UNKNOWN",
+      "E_VERIFY_FAILED",
+      "E_NETWORK",
+      "E_RATE_LIMITED",
+      "E_SERVER",
+      "E_TIMEOUT",
+      "E_IO",
+      "E_PARTIAL"
+    ],
+    "examples": [
+      "gitlab-cli mr update acme/web!5 --assignee carol --add-labels needs-review --dry-run",
+      "gitlab-cli mr update acme/web!5 --assignee carol --add-labels needs-review --confirm <token>"
+    ]
+  },
+  "schemas": {
+    "write_result": {
+      "shape": "object",
+      "fields": ["operation_id", "receipt", "result"],
+      "default_fields": ["operation_id", "receipt", "result"],
+      "untrusted_fields": ["result.title"]
+    },
+    "mr": {
+      "shape": "object",
+      "fields": ["ref", "title"],
+      "default_fields": ["ref", "title"],
+      "untrusted_fields": ["title"]
+    }
+  },
+  "error_codes": {
+    "E_USAGE": {"exit": 2, "retryable": false},
+    "E_VALIDATION": {"exit": 2, "retryable": false},
+    "E_AMBIGUOUS": {"exit": 2, "retryable": false},
+    "E_AUTH": {"exit": 4, "retryable": false},
+    "E_FORBIDDEN": {"exit": 4, "retryable": false},
+    "E_NOT_FOUND": {"exit": 3, "retryable": false},
+    "E_CONFIRMATION_REQUIRED": {"exit": 5, "retryable": false},
+    "E_CONFLICT": {"exit": 6, "retryable": false},
+    "E_OUTCOME_UNKNOWN": {"exit": 6, "retryable": false},
+    "E_VERIFY_FAILED": {"exit": 1, "retryable": false},
+    "E_NETWORK": {"exit": 7, "retryable": true},
+    "E_RATE_LIMITED": {"exit": 7, "retryable": true},
+    "E_SERVER": {"exit": 7, "retryable": true},
+    "E_TIMEOUT": {"exit": 8, "retryable": true},
+    "E_IO": {"exit": 1, "retryable": false},
+    "E_PARTIAL": {"exit": 1, "retryable": false}
+  }
+}

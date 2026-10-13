@@ -1,0 +1,16 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_CONFLICT",
+    "message": "An earlier write to this merge request has an unknown outcome, so new writes to it are blocked until it is resolved.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "not_started",
+      "next_action": "Run `gitlab-cli operation show --id op_pwbsbpupht3f3c4bjchdjpd5ra`, check the merge request, then record the outcome with `gitlab-cli operation resolve`.",
+      "conflict": "unresolved_operation",
+      "active_operation": "op_pwbsbpupht3f3c4bjchdjpd5ra"
+    }
+  },
+  "meta": {"duration_ms": 37}
+}

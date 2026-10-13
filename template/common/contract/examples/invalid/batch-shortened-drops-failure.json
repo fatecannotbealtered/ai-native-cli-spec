@@ -1,0 +1,11 @@
+{
+  "operation_id": "opb_ktarc6ztzj4vr3hpbs266m5tqq",
+  "items": [
+    {"target": "acme/web:branch/old-5", "operation_id": "op_syngggpjgzuwncc3hzl2gqwxru", "ok": false, "error": {"code": "E_FORBIDDEN", "retryable": false, "message": "The branch is protected."}},
+    {"target": "acme/web:branch/old-1", "operation_id": "op_fvhweplo2spzxseeckkbhe3whm", "ok": true},
+    {"target": "acme/web:branch/old-2", "operation_id": "op_soyaoz6dg6o2pkhb2jxqjqgv5y", "ok": true},
+    {"target": "acme/web:branch/old-3", "operation_id": "op_2znecdsvxrhyh5nrauqlyyum6m", "ok": true}
+  ],
+  "summary": {"total": 6, "succeeded": 4, "failed": 2, "unknown": 0, "skipped": 0},
+  "omitted": 2
+}

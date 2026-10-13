@@ -1,0 +1,15 @@
+{
+  "scope_id": "scp_2026-10-12_triage",
+  "tool": "gitlab-cli",
+  "granted_by": "Sean",
+  "granted_at": "2026-10-12T08:00:00Z",
+  "expires_at": "2026-10-19T08:00:00Z",
+  "effects": ["change"],
+  "dangerous": false,
+  "targets": [{"key": "acme/", "match": "prefix"}, {"key": "legacy/payments", "match": "exact"}],
+  "destinations": [],
+  "outputs": [],
+  "limits": {"max_operations": 100},
+  "revoked": false,
+  "notes": "Triage week"
+}

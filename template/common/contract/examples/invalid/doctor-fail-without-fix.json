@@ -1,0 +1,40 @@
+{
+  "checks": [
+    {
+      "check": "credentials",
+      "status": "pass",
+      "message": "A token for gitlab.acme.test is in the OS keyring.",
+      "fix": null
+    },
+    {
+      "check": "connectivity",
+      "status": "fail",
+      "message": "gitlab.acme.test did not answer within 5 s.",
+      "fix": null
+    },
+    {
+      "check": "state_store",
+      "status": "pass",
+      "message": "The state directory is usable and protected by the profile ACL.",
+      "fix": null
+    },
+    {
+      "check": "authorization",
+      "status": "warn",
+      "message": "The scope expires in 2 days.",
+      "fix": "Ask the user to extend expires_at in the scope file if the work continues."
+    },
+    {
+      "check": "version",
+      "status": "pass",
+      "message": "The gitlab-cli Skill needs 1.3.0 or later; 1.3.0 is installed.",
+      "fix": null
+    },
+    {
+      "check": "token_expiry",
+      "status": "warn",
+      "message": "The access token expires in 5 days.",
+      "fix": "Ask the user to create a new token and store it with gitlab-cli auth login."
+    }
+  ]
+}

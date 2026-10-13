@@ -1,0 +1,43 @@
+{
+  "operation_id": "opb_pcucwijpa7farbcfpcboxcugpm",
+  "items": [
+    {
+      "target": "acme/web:branch/old-1",
+      "operation_id": "op_otwf3v76z26ifzuax4mrblbxi4",
+      "ok": true,
+      "receipt": {
+        "operation_id": "op_otwf3v76z26ifzuax4mrblbxi4",
+        "command": "branch delete",
+        "target": {"key": "acme/web:branch/old-1", "kind": "branch"},
+        "effects": ["change"],
+        "outcome": {
+          "execution": "completed",
+          "change": "applied",
+          "delivery": "not_applicable",
+          "persistence": "not_applicable",
+          "verification": "passed"
+        },
+        "observed": {"exists": false},
+        "mismatched": [],
+        "replayed": false
+      }
+    },
+    {
+      "target": "acme/web:branch/old-2",
+      "operation_id": "op_njqzbm76ry7yrl4rqnxribaeci",
+      "ok": false,
+      "error": {"code": "E_FORBIDDEN", "retryable": false, "message": "The branch is protected."}
+    },
+    {
+      "target": "acme/web:branch/old-3",
+      "operation_id": "op_asrj646ph5wre42lvhomzyvrmy",
+      "ok": false
+    },
+    {
+      "target": "acme/web:branch/old-4",
+      "operation_id": "op_ssbojs4j56aqaoxmlumkg7sn7q",
+      "ok": false
+    }
+  ],
+  "summary": {"total": 4, "succeeded": 1, "failed": 1, "unknown": 0, "skipped": 2}
+}

@@ -1,0 +1,12 @@
+{
+  "_readme": "Copy to eval.config.json (git ignores it) and edit. README.md documents every setting; an empty value means the default.",
+  "work_dir": "../../../agent-eval-work",
+  "upstream_url": "http://localhost:8929",
+  "admin_token_file": "/path/to/admin-token.env",
+  "admin_token_key": "GITLAB_CLI_TOKEN",
+  "workspaces_dir": "",
+  "python": "python",
+  "claude_bin": "claude",
+  "git_bash": "",
+  "expected_cwd": ""
+}

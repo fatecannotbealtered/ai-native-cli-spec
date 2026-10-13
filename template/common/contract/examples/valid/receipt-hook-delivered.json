@@ -1,0 +1,15 @@
+{
+  "operation_id": "op_jhbory2vj3l4iovhrascrxonie",
+  "command": "hook test",
+  "target": {"key": "acme/web:hook/3", "kind": "project_hook"},
+  "effects": ["deliver"],
+  "outcome": {
+    "execution": "completed",
+    "change": "not_applicable",
+    "delivery": "delivered",
+    "persistence": "not_applicable",
+    "verification": "not_applicable"
+  },
+  "observed": {"response_status": 200},
+  "replayed": false
+}

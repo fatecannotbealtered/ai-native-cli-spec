@@ -1,0 +1,30 @@
+{
+  "ok": true,
+  "schema_version": "2.0",
+  "data": {
+    "operation_id": "op_qvrbkvp7iphrc7sqrpjaadq6wm",
+    "receipt": {
+      "operation_id": "op_qvrbkvp7iphrc7sqrpjaadq6wm",
+      "command": "issue create",
+      "target": {"key": "acme/web", "kind": "project"},
+      "effects": ["change"],
+      "outcome": {
+        "execution": "completed",
+        "change": "applied",
+        "delivery": "not_applicable",
+        "persistence": "not_applicable",
+        "verification": "passed"
+      },
+      "observed": {"ref": "acme/web#21", "title": "Checkout fails on Safari 18"},
+      "mismatched": [],
+      "replayed": true
+    },
+    "result": {
+      "ref": "acme/web#21",
+      "title": "Checkout fails on Safari 18",
+      "state": "opened",
+      "web_url": "https://gitlab.acme.test/acme/web/-/issues/21"
+    }
+  },
+  "meta": {"duration_ms": 95, "untrusted": ["data.receipt.observed.title", "data.result.title"]}
+}

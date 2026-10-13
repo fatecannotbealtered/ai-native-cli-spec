@@ -1,0 +1,18 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_USAGE",
+    "message": "This command has no flag by that name.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "not_started",
+      "next_action": "There is no --all: pass --limit 100 and follow next_cursor while has_more is true.",
+      "problem": "unknown_flag",
+      "parameter": "--all",
+      "did_you_mean": ["--limit"],
+      "usage": "gitlab-cli pipeline list --project <project> [--status <status>] [--branch <name>] [--limit <1-100>] [--cursor <cursor>]"
+    }
+  },
+  "meta": {"duration_ms": 2}
+}

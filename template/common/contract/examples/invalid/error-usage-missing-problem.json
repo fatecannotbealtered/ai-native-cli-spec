@@ -1,0 +1,17 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_USAGE",
+    "message": "The mr group has no command by that name; use one of the available commands.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "not_started",
+      "next_action": "Run `gitlab-cli mr diff acme/web!5` to read the changes.",
+      "did_you_mean": ["mr diff"],
+      "usage": "gitlab-cli mr <command> [flags]",
+      "available": ["mr list", "mr get", "mr create", "mr update", "mr merge", "mr diff", "mr comment"]
+    }
+  },
+  "meta": {"duration_ms": 3}
+}

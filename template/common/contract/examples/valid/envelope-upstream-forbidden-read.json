@@ -1,0 +1,17 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_FORBIDDEN",
+    "message": "GitLab refused to list the CI/CD variables because the account lacks the required role in the project.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "not_started",
+      "next_action": "Tell the user that reading CI/CD variables in legacy/payments needs the Maintainer role, and stop.",
+      "http_status": 403,
+      "required": "maintainer",
+      "upstream_message": "403 Forbidden"
+    }
+  },
+  "meta": {"duration_ms": 214, "untrusted": ["error.details.upstream_message"]}
+}
