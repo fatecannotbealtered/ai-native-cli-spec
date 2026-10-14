@@ -1151,7 +1151,7 @@ aicli 只在两处访问发布源：`update`（包括 `--check`），以及设�
 
 有登录类命令的工具，必须这样命名它们：
 
-- `auth login` 保存凭证：机密放进操作系统钥匙串，配置档的其他设置放进设置文件（SEC-040）。它声明 `configure`（CLI-025）和 `Meta.AllowUnknownProfile`，所以能在文件中还没有的配置档下运行；它用 `App.SetProfileSettings`（Python 为 `app.set_profile_settings`）写入设置，这个函数像读取时一样校验设置，以原子方式写入，出错时什么都不写，所以 `Apply` 把这个错误作为 `NotDispatched` 返回；文件中没有 `default_profile` 时，它把这个配置档设为默认。对这样的命令，`App.Profile()` 返回所要求的配置档及其来源。需要人来操作时（浏览器登录、一次性验证码），它返回带 `action: sign_in` 的 `E_HUMAN_REQUIRED`（CLI-065）。
+- `auth login` 保存凭证：机密放进操作系统钥匙串，配置档的其他设置放进设置文件（SEC-040）。它声明 `configure`（CLI-025）和 `Meta.AllowUnknownProfile`，所以能在文件中还没有的配置档下运行；它用 `App.SetProfileSettings`（Python 为 `app.set_profile_settings`）写入设置，这个函数像读取时一样校验设置，以原子方式写入，出错时什么都不写，所以 `Apply` 把这个错误作为 `NotDispatched` 返回；它建立文件中的第一个配置档时，也把这个配置档设为默认，但绝不在已有的配置档中替人选默认。对这样的命令，`App.Profile()` 返回所要求的配置档及其来源。需要人来操作时（浏览器登录、一次性验证码），它返回带 `action: sign_in` 的 `E_HUMAN_REQUIRED`（CLI-065）。
 - `auth status` 是读命令：它向上游核验凭证，报告账户、主机和凭证的过期时间，绝不包含机密。
 - `auth logout` 从钥匙串中删除凭证。它声明 `configure`，也声明 `Meta.AllowUnknownProfile`，这样配置档从设置文件中删掉之后，它仍能清理残留的凭证。
 

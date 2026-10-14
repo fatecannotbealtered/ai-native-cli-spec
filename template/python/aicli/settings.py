@@ -373,15 +373,18 @@ class SettingsMixin:
         match ^[a-z0-9][a-z0-9_-]{0,63}$ and every key must be a declared setting
         that is not secret (secrets go in the OS keyring, SEC-040). The current file
         is read with the same strict parser, and an invalid file is E_CONFIG and
-        never overwritten. The profile is created when missing; every other key,
-        profile and default_profile is kept, and a file without default_profile gets
-        this profile as its default (Q3). The file keeps its order: default_profile
-        first, then the profiles in file order (a new one last), each with its keys
-        in file order (new keys last, sorted), indented by two spaces. It is written
-        atomically (a temporary file in the same directory, fsync, rename) with mode
-        0600; the state directory is created 0700 when the file lives there. A
-        failure to write is E_IO. Raises the Error; nothing was written then, so
-        apply raises it wrapped in not_dispatched."""
+        never overwritten. The profile is created when missing; every other key and
+        profile is kept. default_profile is set only when this write creates the
+        file's first profile (no file, or a file without profiles): it then names
+        this profile (Q3, RC2-1). Otherwise it stays as it was, a name, null or
+        absent; profiles without a default are a person's choice, never filled in.
+        The file keeps its order: default_profile first (when present), then the
+        profiles in file order (a new one last), each with its keys in file order
+        (new keys last, sorted), indented by two spaces. It is written atomically (a
+        temporary file in the same directory, fsync, rename) with mode 0600; the
+        state directory is created 0700 when the file lives there. A failure to
+        write is E_IO. Raises the Error; nothing was written then, so apply raises
+        it wrapped in not_dispatched."""
         from ._util import decode_generic, go_json, go_quote
         from .errors import io_error, validation
         from .journal import write_file_atomic
@@ -435,6 +438,7 @@ class SettingsMixin:
         profiles = _ordered(top.get("profiles"))
         if not isinstance(profiles, Ordered):
             profiles = Ordered()
+        first = not profiles  # this write creates the file's first profile
         entry = profiles.get(profile)
         if not isinstance(entry, Ordered):
             entry = Ordered()
@@ -442,9 +446,14 @@ class SettingsMixin:
             entry[k] = str(values[k])
         profiles[profile] = entry
         out = Ordered()
-        dp = top.get("default_profile")
-        # the first profile written becomes the default (Q3)
-        out["default_profile"] = profile if dp is None else _ordered(dp)
+        # The file's first profile becomes its default (Q3, RC2-1). Profiles without a
+        # default are a person's choice: default_profile stays as it was, null or absent.
+        has = "default_profile" in top
+        dp = _ordered(top.get("default_profile"))
+        if first and dp is None:
+            dp, has = profile, True
+        if has:
+            out["default_profile"] = dp
         out["profiles"] = profiles
         data = (go_json(out, pretty=True) + "\n").encode("utf-8")
         d = os.path.dirname(path)

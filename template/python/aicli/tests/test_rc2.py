@@ -313,8 +313,8 @@ def test_q2_proxy_comes_from_app_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_q3_default_profile_and_profiles(h: THarness) -> None:
-    """set_profile_settings makes the profile it writes the default when the file has
-    none and keeps the file's order; profiles() lists them in file order."""
+    """set_profile_settings makes the file's first profile its default and keeps the
+    file's order; profiles() lists them in file order."""
     h.build = settings_app
     a = h.app()
     path = os.path.join(h.state, "settings.json")
@@ -329,21 +329,67 @@ def test_q3_default_profile_and_profiles(h: THarness) -> None:
     with open(path, "rb") as fh:
         assert fh.read().decode("utf-8") == want
     assert a.profiles() == ["default", "work"]
-    # a file written by hand keeps its order; a profile without a default gets one
+    # a file written by hand keeps its order, and its profiles without a default stay
+    # without one (RC2-1)
     settings_file(
         h, '{"profiles": {"zeta": {"page_size": 5}, "alpha": {"host": "https://al.example"}}}', path
     )
     assert a.profiles() == ["zeta", "alpha"]
     a.set_profile_settings("alpha", {"page_size": "7"})
     want = (
-        '{\n  "default_profile": "alpha",\n  "profiles": {\n    "zeta": {\n'
-        '      "page_size": 5\n    },\n    "alpha": {\n      "host": "https://al.example",\n'
-        '      "page_size": "7"\n    }\n  }\n}\n'
+        '{\n  "profiles": {\n    "zeta": {\n      "page_size": 5\n    },\n'
+        '    "alpha": {\n      "host": "https://al.example",\n      "page_size": "7"\n    }\n'
+        "  }\n}\n"
     )
     with open(path, "rb") as fh:
         assert fh.read().decode("utf-8") == want
     settings_file(h, '{"profiles": {"Bad Name": {}}}', path)
     assert a.profiles() == []
+
+
+def test_rc21_default_profile_only_for_the_first_profile(h: THarness) -> None:
+    """default_profile is set only when set_profile_settings creates the file's first
+    profile (no file, or a file without profiles); profiles that exist without a
+    default stay without one, the key null or absent as it was (RC2-1)."""
+    h.build = settings_app
+    a = h.app()
+    path = os.path.join(h.state, "settings.json")
+    lab = '    "lab": {\n      "host": "https://lab.example"\n    }\n  }\n}\n'
+    first = '{\n  "default_profile": "lab",\n  "profiles": {\n' + lab
+    for before, want in (
+        # no file: the first profile is the default
+        ("", first),
+        # a file without profiles: the same
+        ('{"profiles": {}}', first),
+        ('{"default_profile": null, "profiles": null}', first),
+        # profiles without a default: none is picked
+        ('{"profiles": {"work": {}}}', '{\n  "profiles": {\n    "work": {},\n' + lab),
+        (
+            '{"profiles": {"work": {}}, "default_profile": null}',
+            '{\n  "default_profile": null,\n  "profiles": {\n    "work": {},\n' + lab,
+        ),
+        # a default is kept, also when the written profile is new
+        (
+            '{"default_profile": "work", "profiles": {"work": {}}}',
+            '{\n  "default_profile": "work",\n  "profiles": {\n    "work": {},\n' + lab,
+        ),
+    ):
+        if os.path.exists(path):
+            os.remove(path)
+        if before:
+            settings_file(h, before, path)
+        a.set_profile_settings("lab", {"host": "https://lab.example"})
+        with open(path, "rb") as fh:
+            assert fh.read().decode("utf-8") == want, before
+    # a second profile leaves the first one's default as it is
+    a.set_profile_settings("other", {"host": "https://o.example"})
+    with open(path, "rb") as fh:
+        assert fh.read().decode("utf-8").startswith('{\n  "default_profile": "work",')
+    # with profiles and no default, no profile is active
+    settings_file(h, '{"profiles": {"work": {}, "lab": {}}}', path)
+    a.set_profile_settings("lab", {"host": "https://lab.example"})
+    r = h.run("context")
+    assert r.exit == 0 and r.data()["profile"]["name"] is None, r
 
 
 # ---------------------------------------------------------------- Q4 allow_unknown_profile

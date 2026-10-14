@@ -188,8 +188,8 @@ func TestQ2ProxyComesFromAppEnv(t *testing.T) {
 
 // ---------------------------------------------------------------- Q3 profiles
 
-// Q3: SetProfileSettings makes the profile it writes the default when the file has
-// none, keeps the file's order, and App.Profiles lists the profiles in file order.
+// Q3: SetProfileSettings makes the file's first profile its default, keeps the
+// file's order, and App.Profiles lists the profiles in file order.
 func TestQ3DefaultProfileAndProfiles(t *testing.T) {
 	h := settingsHarness(t)
 	a := h.app()
@@ -211,7 +211,8 @@ func TestQ3DefaultProfileAndProfiles(t *testing.T) {
 	if got := a.Profiles(); strings.Join(got, ",") != "default,work" {
 		t.Fatalf("Profiles: %v", got)
 	}
-	// A file written by hand keeps its order; a profile without a default gets one.
+	// A file written by hand keeps its order, and its profiles without a default
+	// stay without one (RC2-1).
 	writeSettings(t, h, `{"profiles": {"zeta": {"page_size": 5}, "alpha": {"host": "https://al.example"}}}`)
 	if got := a.Profiles(); strings.Join(got, ",") != "zeta,alpha" {
 		t.Fatalf("file order: %v", got)
@@ -219,7 +220,7 @@ func TestQ3DefaultProfileAndProfiles(t *testing.T) {
 	if e := a.SetProfileSettings("alpha", map[string]string{"page_size": "7"}); e != nil {
 		t.Fatal(e)
 	}
-	want = "{\n  \"default_profile\": \"alpha\",\n  \"profiles\": {\n    \"zeta\": {\n      \"page_size\": 5\n    },\n" +
+	want = "{\n  \"profiles\": {\n    \"zeta\": {\n      \"page_size\": 5\n    },\n" +
 		"    \"alpha\": {\n      \"host\": \"https://al.example\",\n      \"page_size\": \"7\"\n    }\n  }\n}\n"
 	if b, _ := os.ReadFile(path); string(b) != want {
 		t.Fatalf("a rewritten file:\n%s\nwant:\n%s", b, want)
@@ -227,6 +228,47 @@ func TestQ3DefaultProfileAndProfiles(t *testing.T) {
 	writeSettings(t, h, `{"profiles": {"Bad Name": {}}}`)
 	if got := a.Profiles(); got == nil || len(got) != 0 {
 		t.Fatalf("an invalid file: %#v", got)
+	}
+}
+
+// RC2-1: default_profile is set only when SetProfileSettings creates the file's
+// first profile (no file, or a file without profiles); profiles that exist without a
+// default stay without one, the key null or absent as it was.
+func TestRC21DefaultProfileOnlyForTheFirstProfile(t *testing.T) {
+	h := settingsHarness(t)
+	a := h.app()
+	path := filepath.Join(h.state, "settings.json")
+	for _, c := range []struct{ before, want string }{
+		// no file: the first profile is the default
+		{"", "{\n  \"default_profile\": \"lab\",\n  \"profiles\": {\n    \"lab\": {\n      \"host\": \"https://lab.example\"\n    }\n  }\n}\n"},
+		// a file without profiles: the same
+		{`{"profiles": {}}`, "{\n  \"default_profile\": \"lab\",\n  \"profiles\": {\n    \"lab\": {\n      \"host\": \"https://lab.example\"\n    }\n  }\n}\n"},
+		{`{"default_profile": null, "profiles": null}`, "{\n  \"default_profile\": \"lab\",\n  \"profiles\": {\n    \"lab\": {\n      \"host\": \"https://lab.example\"\n    }\n  }\n}\n"},
+		// profiles without a default: none is picked
+		{`{"profiles": {"work": {}}}`, "{\n  \"profiles\": {\n    \"work\": {},\n    \"lab\": {\n      \"host\": \"https://lab.example\"\n    }\n  }\n}\n"},
+		{`{"profiles": {"work": {}}, "default_profile": null}`,
+			"{\n  \"default_profile\": null,\n  \"profiles\": {\n    \"work\": {},\n    \"lab\": {\n      \"host\": \"https://lab.example\"\n    }\n  }\n}\n"},
+		// a default is kept, also when the written profile is new
+		{`{"default_profile": "work", "profiles": {"work": {}}}`,
+			"{\n  \"default_profile\": \"work\",\n  \"profiles\": {\n    \"work\": {},\n    \"lab\": {\n      \"host\": \"https://lab.example\"\n    }\n  }\n}\n"},
+	} {
+		_ = os.Remove(path)
+		if c.before != "" {
+			writeSettings(t, h, c.before)
+		}
+		if e := a.SetProfileSettings("lab", map[string]string{"host": "https://lab.example"}); e != nil {
+			t.Fatalf("%s: %v", c.before, e)
+		}
+		if b, _ := os.ReadFile(path); string(b) != c.want {
+			t.Fatalf("%s:\n%s\nwant:\n%s", c.before, b, c.want)
+		}
+	}
+	// A second profile leaves the first one's default as it is.
+	if e := a.SetProfileSettings("other", map[string]string{"host": "https://o.example"}); e != nil {
+		t.Fatal(e)
+	}
+	if b, _ := os.ReadFile(path); !strings.HasPrefix(string(b), "{\n  \"default_profile\": \"work\",") {
+		t.Fatalf("the default changed: %s", b)
 	}
 }
 

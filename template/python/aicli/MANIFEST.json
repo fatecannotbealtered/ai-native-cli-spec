@@ -21,7 +21,7 @@
     "registry.py": "ab3106207d22b8926d2874aa853a3005dccdc6f496da3df1592aafdd78f66710",
     "scope.py": "4390d0e744a00c707d64a402bdd62820f312bc767c45c612d3e8652c126e2182",
     "selfupdate.py": "086197d65c0bf2cc1dbfa2a02d8e424c2785f2900ca0ebb18efc3657d09c3b06",
-    "settings.py": "7a95535347bc7084cf305870c7fc909e79cc6b06fd1a5dd91b6b7f323b6667f8",
+    "settings.py": "ff5a9f65ef1a2f5709d4badec9e0efcb8fb2c0a9436cf87736769ed898eb2f1a",
     "stream.py": "34d6eb4772a4d9bb40a57ccdfca4d4326e1c2c6acd9f65afafc9ea57975874d2",
     "token.py": "1befa1e42cf6b7f8c65798dfb6b4ab8c0b1a1292b10b93248fb49b9eb5bf7e9f",
     "update.py": "8db10edc4c1222a1bc230ebb0b784e82a4897e48c94f91a6364c3a30c0d65d8f",

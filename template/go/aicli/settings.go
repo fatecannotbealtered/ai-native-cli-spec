@@ -402,14 +402,17 @@ func (a *App) allowsUnknownProfile(c *cobra.Command) bool {
 // must match ^[a-z0-9][a-z0-9_-]{0,63}$ and every key must be a declared setting
 // that is not secret (secrets go in the OS keyring, SEC-040). The current file is
 // read with the same strict parser, and an invalid file is E_CONFIG and never
-// overwritten. The profile is created when missing; every other key, profile and
-// default_profile is kept, and a file without default_profile gets this profile as
-// its default (Q3). The file keeps its order: default_profile first, then the
-// profiles in file order (a new one last), each with its keys in file order (new
-// keys last, sorted), indented by two spaces. It is written atomically (a temporary
-// file in the same directory, fsync, rename) with mode 0600; the state directory is
-// created 0700 when the file lives there. A failure to write is E_IO. On any error
-// nothing was written, so Apply returns it wrapped in NotDispatched.
+// overwritten. The profile is created when missing; every other key and profile is
+// kept. default_profile is set only when this write creates the file's first profile
+// (no file, or a file without profiles): it then names this profile (Q3, RC2-1).
+// Otherwise it stays as it was, a name, null or absent; profiles without a default
+// are a person's choice, never filled in. The file keeps its order: default_profile
+// first (when present), then the profiles in file order (a new one last), each with
+// its keys in file order (new keys last, sorted), indented by two spaces. It is
+// written atomically (a temporary file in the same directory, fsync, rename) with
+// mode 0600; the state directory is created 0700 when the file lives there. A
+// failure to write is E_IO. On any error nothing was written, so Apply returns it
+// wrapped in NotDispatched.
 func (a *App) SetProfileSettings(profile string, values map[string]string) *Error {
 	if !profileNamePattern.MatchString(profile) {
 		e := Validation("--profile", "a profile name: a-z, 0-9, _ and -, up to 64 characters", "The profile name is not allowed; nothing was written.")
@@ -482,16 +485,21 @@ func settingsWithValues(raw []byte, profile string, values map[string]string) ([
 			return nil, err
 		}
 	}
+	first := len(profiles.keys) == 0 // this write creates the file's first profile
 	for _, k := range sortedKeys(values) {
 		entry.set(k, compactJSON(values[k]))
 	}
 	profiles.set(profile, compactJSON(entry))
 	out := newOrderedObject()
-	def, ok := top.vals["default_profile"]
-	if !ok || isJSONNull(def) {
-		def = compactJSON(profile) // the first profile written becomes the default (Q3)
+	// The file's first profile becomes its default (Q3, RC2-1). Profiles without a
+	// default are a person's choice: default_profile stays as it was, null or absent.
+	def, has := top.vals["default_profile"]
+	if first && (!has || isJSONNull(def)) {
+		def, has = compactJSON(profile), true
 	}
-	out.set("default_profile", def)
+	if has {
+		out.set("default_profile", def)
+	}
 	out.set("profiles", compactJSON(profiles))
 	var b bytes.Buffer
 	if err := json.Indent(&b, compactJSON(out), "", "  "); err != nil {
