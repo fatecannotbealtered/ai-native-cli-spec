@@ -54,6 +54,7 @@ from .errors import (
     io_error,
     new_error,
     usage,
+    validation,
 )
 from .journal import (
     TARGET_LOCK_WAIT,
@@ -82,7 +83,7 @@ from .receipt import (
     record_status,
     sanitize_outcome,
 )
-from .scope import ScopeNeed, ScopeState
+from .scope import ScopeNeed, ScopeState, output_state
 from .token import TOKEN_LIFETIME, Claims, mint_token, new_operation_id, parse_token, verify_mac
 
 if TYPE_CHECKING:
@@ -131,7 +132,11 @@ class Preview:
     true for a token to be issued; blocked_by says why not. destinations
     (deliver) and outputs (artifact, persist) are checked against the scope.
     untrusted lists paths relative to the preview object that carry external
-    content (for example "changes[].before")."""
+    content (for example "changes[].before"). dangerous makes this plan dangerous
+    although its command is not (a commit that deletes a file, Q13): --dangerous is
+    then needed in both steps, the preview says dangerous: true and the scope must
+    grant dangerous; a plan whose danger changes between the dry-run and the
+    confirm is state_drift."""
 
     action: str = ""
     changes: list[FieldChange] = field(default_factory=list)
@@ -142,6 +147,7 @@ class Preview:
     destinations: list[str] = field(default_factory=list)
     outputs: list[str] = field(default_factory=list)
     untrusted: list[str] = field(default_factory=list)
+    dangerous: bool = False
 
 
 @dataclass
@@ -168,32 +174,72 @@ class WriteSpec:
     is the read command, without the tool name, that shows whether the change
     landed (for example "note get 1"); an unknown outcome's next_action names it.
     Build it from the registry path and validated inputs only, never from upstream
-    text (SEC-002)."""
+    text (SEC-002).
 
-    target: Target
-    preview: Callable[[], Preview]
-    apply: Callable[[Op], Result | None]
+    resolve_target, when set, is used instead of target for a target that takes a
+    read to resolve (the canonical key of a variable named by its name, Q1). The
+    gate calls it at a dry-run or bare call before the scope check, and at confirm
+    only after the token checks (format, key, record, MAC, single use, expiry,
+    inputs, --dangerous), so a used token is token_used before any tool code runs.
+    Its error is returned as the tool's error, nothing sent; a resolved target that
+    differs from the one the token was issued for is token_mismatch (target). Do no
+    such read before App.write."""
+
+    target: Target = field(default_factory=lambda: Target(""))
+    preview: Callable[[], Preview] | None = None
+    apply: Callable[[Op], Result | None] | None = None
     timeout: float = 0.0
     read_back: str = ""
+    resolve_target: Callable[[], Target] | None = None
 
 
 @dataclass
 class BatchItem:
-    """One target of a batch write."""
+    """One target of a batch write. apply may be None when the batch sends its
+    items through BatchSpec.apply_all."""
 
     target: Target
     preview: Callable[[], Preview]
-    apply: Callable[[Op], Result | None]
+    apply: Callable[[Op], Result | None] | None = None
+
+
+@dataclass
+class ItemOutcome:
+    """One item's result of BatchSpec.apply_all (Q12): what the item's apply would
+    have returned (result) or raised (err)."""
+
+    result: Result | None = None
+    err: BaseException | None = None
 
 
 @dataclass
 class BatchSpec:
     """A batch write (CLI-063). continue_on_error overrides the
-    --continue-on-error flag (default true, false for dangerous commands)."""
+    --continue-on-error flag (default true, false for dangerous commands). timeout
+    is the deadline of each apply (or apply_all) call.
+
+    action is the batch preview's action ("Close the merge requests"); empty means
+    the first item's, with the number of targets (Q19).
+
+    resolve_items, when set, is used instead of items for a list that takes reads
+    to resolve, and is called when WriteSpec.resolve_target would be (Q1).
+
+    apply_all sends the items through the upstream's native bulk call instead of
+    each item's apply (Q12): in chunks of at most max_per_call items (all at once
+    when 0), one call per chunk, in item order. It returns one ItemOutcome per op,
+    in the same order, each classified like an item's apply result. A missing or
+    extra outcome is a defect and makes every item of the chunk unknown; an
+    exception of the whole call makes every item of the chunk unknown, unless it is
+    not_dispatched or rejected, which then applies to each. Records and receipts
+    stay per item."""
 
     items: list[BatchItem] = field(default_factory=list)
     continue_on_error: bool | None = None
     timeout: float = 0.0
+    action: str = ""
+    resolve_items: Callable[[], list[BatchItem]] | None = None
+    apply_all: Callable[[list[Op]], list[ItemOutcome]] | None = None
+    max_per_call: int = 0
 
 
 class NotDispatchedError(Exception):
@@ -265,6 +311,50 @@ GATE_CODES = (
     "E_VERIFY_INCOMPLETE",
     "E_CONFIRMATION_REQUIRED",
 )
+
+
+def call_tool(fn: Callable[[], Any], crash_message: str) -> Any:
+    """Run one of the tool's own hooks (resolve_target, resolve_items). An Error it
+    raises keeps its code with dispatch_state not_started; any other exception is
+    an internal error with its text in details.cause (untrusted); nothing was sent
+    either way. Raises the Error."""
+    try:
+        return fn()
+    except Exception as exc:
+        found = find_error(exc)
+        if found is not None:
+            e = found.copy()
+        else:
+            e = internal_error(crash_message)
+            e.details["cause"] = truncate_runes(f"{type(exc).__name__}: {exc}", 300)
+            e.untrusted = ["cause"]
+        e.details["dispatch_state"] = "not_started"
+        raise e from None
+
+
+def output_exists(p: str) -> bool:
+    """Whether a local output path exists, after resolving links; a path whose
+    existence cannot be read counts as existing, the stricter case."""
+    try:
+        _, exists = output_state(p)
+    except (OSError, ValueError):
+        return False  # a junction is refused by the scope check (C2)
+    return exists
+
+
+def create_only_exists(path: str) -> Error:
+    """Q9's refusal of an existing output path by a command that only creates
+    files: E_VALIDATION invalid_value with the path, nothing written."""
+    e = validation(
+        "",
+        "",
+        "The output file already exists, and this command never overwrites files; nothing was "
+        "written.",
+    )
+    e.details["path"] = path
+    e.details["dispatch_state"] = "not_started"
+    e.details["next_action"] = "Choose a new file name, or move the existing file away first."
+    return e
 
 
 def check_target_key(key: str) -> Error | None:
@@ -448,6 +538,8 @@ class GateRun:
         self.confirm_set = False
         self.dangerous_flag = False
         self.idem = ""
+        # a plan made dangerous by Preview.dangerous (Q13)
+        self.plan_dangerous = False
         # the operation whose dispatching record is written: from then on nothing
         # reports dispatch_state not_started (CLI-057, A2)
         self.dispatched_id = ""
@@ -566,8 +658,41 @@ class GateRun:
         return e
 
     def dangerous_arg(self) -> str:
-        """ " --dangerous" for a dangerous command, for next_action texts."""
-        return " --dangerous" if self.m.is_dangerous() else ""
+        """ " --dangerous" for a dangerous write, for next_action texts."""
+        return " --dangerous" if self.dangerous() else ""
+
+    def dangerous(self) -> bool:
+        """A write that needs --dangerous: its command is dangerous, or its plan is
+        (Preview.dangerous, Q13)."""
+        return self.m.is_dangerous() or self.plan_dangerous
+
+    def plan_dangerous_refusal(self, spec: WriteSpec, pv: Preview) -> Error:
+        """dangerous_flag_required for a plan that preview made dangerous (Q13),
+        with the plan attached as dangerous_refusal attaches it."""
+        e = self.attach_preview(self.dangerous_required(), spec, pv)
+        if "preview" in e.details:
+            e.details["next_action"] = (
+                "details.preview shows the plan; run the same command again with --dangerous added "
+                "to get its confirm token (keep --dry-run if you used it)."
+            )
+        return e
+
+    def create_only_existing(self, paths: list[str]) -> Error | None:
+        """An output path that exists, for a command that declares artifact but not
+        persist (Q9): it never overwrites, so no scope grant could help."""
+        if not self.m.has_effect("artifact") or self.m.has_effect("persist"):
+            return None
+        for p in paths:
+            if output_exists(p):
+                return create_only_exists(p)
+        return None
+
+    def without_create_only_existing(self, paths: list[str]) -> list[str]:
+        """A scope request without the existing outputs of a command that only
+        creates files (Q9): roots would not help it."""
+        if not self.m.has_effect("artifact") or self.m.has_effect("persist"):
+            return list(paths)
+        return [p for p in paths if not output_exists(p)]
 
     def token_mismatch(self, parameter: str, message: str) -> Error:
         nxt = (
@@ -684,7 +809,7 @@ class GateRun:
     ) -> ScopeNeed:
         return ScopeNeed(
             effects=self.m.effect_strings(),
-            dangerous=self.m.is_dangerous(),
+            dangerous=self.dangerous(),
             targets=list(targets),
             destinations=list(destinations),
             outputs=list(outputs),
@@ -775,7 +900,7 @@ class GateRun:
             "action": self.action(pv),
             "target": target_object(t),
             "effects": self.m.effect_strings(),
-            "dangerous": self.m.is_dangerous(),
+            "dangerous": self.m.is_dangerous() or pv.dangerous,
             "changes": change_objects(pv.changes),
             "inputs": inputs,
             "can_apply": can_apply,
@@ -830,9 +955,13 @@ class GateRun:
             pv = self.call_preview(spec.preview)
         except Error:
             return e
-        if not need.destinations and not need.outputs and (pv.destinations or pv.outputs):
+        outputs = self.without_create_only_existing(pv.outputs)
+        if not need.destinations and not need.outputs and (pv.destinations or outputs):
             full = dataclasses.replace(
-                need, destinations=list(pv.destinations), outputs=list(pv.outputs)
+                need,
+                destinations=list(pv.destinations),
+                outputs=outputs,
+                dangerous=need.dangerous or pv.dangerous,
             )
             try:
                 self.a.check_scope(sc, full, j)
@@ -908,7 +1037,7 @@ class GateRun:
         if self.m.is_dangerous() and not self.dangerous_flag:
             return e
         try:
-            p = self.prepare_single(spec)
+            p = self.prepare_single(self.resolve_target(spec))
         except Error:
             return e
         if not p.can_apply:
@@ -927,7 +1056,25 @@ class GateRun:
 
     # ---------------------------------------------------------------- single write
 
+    def resolve_target(self, spec: WriteSpec) -> WriteSpec:
+        """The write with its target from WriteSpec.resolve_target (Q1), or as
+        given. The resolver's error is the tool's own, with nothing sent; raises it
+        (not recorded)."""
+        if spec.resolve_target is None:
+            return spec
+        t = call_tool(
+            spec.resolve_target, "The write target could not be resolved; nothing was sent."
+        )
+        if not isinstance(t, Target) or not t.key.strip():
+            raise internal_error("WriteSpec.resolve_target returned a target without a key.")
+        e = check_target_key(t.key)
+        if e is not None:
+            raise e
+        return dataclasses.replace(spec, target=t, resolve_target=None)
+
     def plan_single(self, spec: WriteSpec) -> None:
+        # the target is resolved before the scope check (Q1)
+        spec = self._guard(lambda: self.resolve_target(spec))
         if self.m.is_dangerous() and not self.dangerous_flag:
             raise self.fail(self.dangerous_refusal(spec))
         p = self._guard(lambda: self.prepare_single(spec, True))
@@ -971,7 +1118,16 @@ class GateRun:
         de = self.check_declared(pv)
         if de is not None:
             raise de
+        # A plan preview made dangerous needs --dangerous like a dangerous command (Q13).
+        if pv.dangerous:
+            self.plan_dangerous = True
+            if not self.m.is_dangerous() and not self.dangerous_flag:
+                raise self.plan_dangerous_refusal(spec, pv)
+        ce = self.create_only_existing(pv.outputs)
+        if ce is not None:
+            raise ce
         need.destinations, need.outputs = list(pv.destinations), list(pv.outputs)
+        need.dangerous = self.dangerous()
         try:
             a.check_scope(sc, need, j)
         except Error as e:
@@ -1002,7 +1158,7 @@ class GateRun:
             status="planned",
             target=TargetRef(spec.target.key, spec.target.kind, spec.target.label),
             effects=self.m.effect_strings(),
-            dangerous=self.m.is_dangerous(),
+            dangerous=self.dangerous(),
             scope_id=sc.id(),
             created_at=time_string(now),
             expires_at=time_string(exp),
@@ -1183,6 +1339,11 @@ class GateRun:
         for k in ("action", "changes", "destinations", "outputs"):
             if not json_equal(stored.get(k), fresh.get(k)):
                 raise drift("the planned " + k + " differ")
+        # A plan whose danger changed is another plan (Q13).
+        if stored.get("dangerous") != fresh.get("dangerous"):
+            if fresh.get("dangerous") is True:
+                raise drift("it is now dangerous")
+            raise drift("it is no longer dangerous")
 
     def confirm_single(self, spec: WriteSpec) -> None:
         a = self.a
@@ -1197,8 +1358,13 @@ class GateRun:
         p = self.compare_inputs(rec.claims, b)
         if p:
             raise self.fail(self.input_mismatch(rec, b, p))
-        if self.m.is_dangerous() and not self.dangerous_flag:
+        stored = rec.preview if isinstance(rec.preview, dict) else {}
+        # a plan preview made dangerous (Q13)
+        self.plan_dangerous = stored.get("dangerous") is True
+        if self.dangerous() and not self.dangerous_flag:
             raise self.fail(self.dangerous_required())
+        # The tool's target resolution runs only now, after every token check (Q1).
+        spec = self._guard(lambda: self.resolve_target(spec))
         release = self._guard(lambda: self.lock_targets(state, [spec.target.key], rec.operation_id))
         try:
             timeout = self.checks_single(spec, state, j, rec, b)
@@ -1234,6 +1400,9 @@ class GateRun:
         if self._guard(lambda: j.is_consumed(rec.operation_id)):
             raise self.fail(self.token_used(rec.operation_id))  # lost a race on this token
         stored = rec.preview if isinstance(rec.preview, dict) else {}
+        ce = self.create_only_existing(strings_at(stored, "outputs"))
+        if ce is not None:
+            raise self.fail(ce)
         sc = a.load_scope(state)
         need = self.need(
             [spec.target.key], strings_at(stored, "destinations"), strings_at(stored, "outputs"), 0
@@ -1453,12 +1622,10 @@ class GateRun:
         self.succeed(data, untrusted)
 
     def project_result(self, result: Any) -> Any:
-        """Apply --fields to a confirmed write's result with the command's output
-        schema, as App.ok does for a read (P12). Without --fields the result is
-        returned whole (a write's default fields do not apply); the receipt is never
-        projected."""
-        if not self.st.fields.set:
-            return result
+        """Project a write's result with the command's output schema, as App.ok
+        does for a read: to its default fields (or Meta.default_fields) without
+        --fields (Q16), with --fields replacing or adding as for reads (P12). The
+        receipt is never projected."""
         try:
             gen = to_generic(result)
         except (TypeError, ValueError):
@@ -1675,6 +1842,8 @@ class GateRun:
             if out.unencodable:
                 self.unencodable_notice(op_id)
             else:
+                # the paths of fields the projection removes are dropped when the
+                # response is written (Q20)
                 untrusted = prefix_paths("data.result", untrusted_paths(res.untrusted))
             if out.observed:
                 untrusted.append("data.receipt.observed")
@@ -1809,7 +1978,47 @@ class GateRun:
             plans.append(p)
         return plans
 
-    def plan_batch(self, items: list[BatchItem]) -> None:
+    def batch_items(self, spec: BatchSpec) -> list[BatchItem]:
+        """The batch's items, from BatchSpec.resolve_items when it is set (Q1),
+        checked and de-duplicated by target key with their order kept; none is the
+        missing-target usage error. The resolver's error is the tool's own, with
+        nothing sent. Raises the Error (not recorded)."""
+        given = spec.items
+        if spec.resolve_items is not None:
+            given = call_tool(
+                spec.resolve_items, "The batch targets could not be resolved; nothing was sent."
+            )
+        items: list[BatchItem] = []
+        seen: set[str] = set()
+        for it in given if isinstance(given, list) else []:
+            if (
+                not isinstance(it, BatchItem)
+                or it.preview is None
+                or (it.apply is None and spec.apply_all is None)
+                or not it.target.key.strip()
+            ):
+                raise internal_error(
+                    "Every BatchItem needs target.key and preview, and apply unless "
+                    "BatchSpec.apply_all is set."
+                )
+            e = check_target_key(it.target.key)
+            if e is not None:
+                raise e
+            if it.target.key in seen:
+                continue
+            seen.add(it.target.key)
+            items.append(it)
+        if not items:
+            e = usage(
+                "missing_parameter",
+                "--" + self.m.batch_flag,
+                "The batch names no targets; nothing was changed.",
+            )
+            e.details["next_action"] = f"Give at least one target with --{self.m.batch_flag}."
+            raise e
+        return items
+
+    def plan_batch(self, spec: BatchSpec, items: list[BatchItem]) -> None:
         a = self.a
         if self.m.is_dangerous() and not self.dangerous_flag:
             raise self.fail(self.dangerous_required())
@@ -1832,6 +2041,14 @@ class GateRun:
         for p in plans:
             need.destinations.extend(p.pv.destinations)
             need.outputs.extend(p.pv.outputs)
+            # one dangerous item plan makes the batch dangerous (Q13)
+            self.plan_dangerous = self.plan_dangerous or p.pv.dangerous
+        if self.plan_dangerous and not self.m.is_dangerous() and not self.dangerous_flag:
+            raise self.fail(self.dangerous_required())
+        ce = self.create_only_existing(need.outputs)
+        if ce is not None:
+            raise self.fail(ce)
+        need.dangerous = self.dangerous()
         self._guard(lambda: a.check_scope(sc, need, j))
         ident = self._guard(self.identity)
         key = self._guard(lambda: a.load_key(state, True))
@@ -1868,15 +2085,17 @@ class GateRun:
             )
             bases.append(claim_string(p.pv.base_version))
             untrusted.extend(prefix_paths("items[]", p.pv.untrusted))
-        action = self.action(plans[0].pv)
-        if len(plans) > 1:
-            action = f"{action} ({len(plans)} targets)"
+        action = spec.action.strip()  # the batch's own action (Q19)
+        if not action:
+            action = self.action(plans[0].pv)
+            if len(plans) > 1:
+                action = f"{action} ({len(plans)} targets)"
         pobj: dict[str, Any] = {
             "operation_id": batch_id,
             "command": self.path,
             "action": action,
             "effects": self.m.effect_strings(),
-            "dangerous": self.m.is_dangerous(),
+            "dangerous": self.dangerous(),
             "inputs": b.display,
             "can_apply": can_apply,
             "blocked_by": block_objects(aggregate),
@@ -1902,7 +2121,7 @@ class GateRun:
                 status="planned",
                 target=TargetRef(p.item.target.key, p.item.target.kind, p.item.target.label),
                 effects=self.m.effect_strings(),
-                dangerous=self.m.is_dangerous(),
+                dangerous=self.m.is_dangerous() or p.pv.dangerous,
                 scope_id=sc.id(),
                 created_at=time_string(now),
                 expires_at=time_string(exp),
@@ -1915,7 +2134,7 @@ class GateRun:
             command=self.path,
             status="planned",
             effects=self.m.effect_strings(),
-            dangerous=self.m.is_dangerous(),
+            dangerous=self.dangerous(),
             scope_id=sc.id(),
             created_at=time_string(now),
             expires_at=time_string(exp),
@@ -1927,7 +2146,7 @@ class GateRun:
         j.prune(now)
         self.issue(self._guard(lambda: mint(pobj, batch_id, key, cl, can_apply, exp, untrusted)))
 
-    def confirm_batch(self, spec: BatchSpec, items: list[BatchItem]) -> None:
+    def confirm_batch(self, spec: BatchSpec, items: list[BatchItem] | None) -> None:
         a = self.a
         state, key, j, rec = self._guard(lambda: self.verify_stored_token("batch"))
         assert rec.claims is not None
@@ -1937,7 +2156,10 @@ class GateRun:
             raise self.fail(
                 self.token_mismatch(p, f"The confirm token was issued for a different {p}.")
             )
-        if self.m.is_dangerous() and not self.dangerous_flag:
+        stored = rec.preview if isinstance(rec.preview, dict) else {}
+        # an item plan preview made dangerous (Q13)
+        self.plan_dangerous = stored.get("dangerous") is True
+        if self.dangerous() and not self.dangerous_flag:
             raise self.fail(self.dangerous_required())
         item_recs: list[Record] = []
         for op_id in rec.items or []:
@@ -1959,6 +2181,9 @@ class GateRun:
             if ir.status != "planned":
                 raise self.fail(self.token_used(rec.operation_id))
             item_recs.append(ir)
+        if items is None:
+            # The tool's item resolution runs only now, after every token check (Q1).
+            items = self._guard(lambda: self.batch_items(spec))
         keys = [it.target.key for it in items]
         release = self._guard(lambda: self.lock_targets(state, keys, rec.operation_id))
         try:
@@ -1967,7 +2192,7 @@ class GateRun:
             release()
         if ready is None:
             return  # an idempotent replay of the whole batch: nothing was sent
-        timeout, sc_id = ready
+        timeout, sc_id, chunk = ready
         continue_on_error = not self.m.is_dangerous()
         f = self.node.flag("continue-on-error")
         if f is not None:
@@ -1975,7 +2200,9 @@ class GateRun:
         if spec.continue_on_error is not None:
             continue_on_error = spec.continue_on_error
         try:
-            self.run_batch(j, rec, items, item_recs, timeout, continue_on_error, sc_id)
+            self.run_batch(
+                j, rec, items, item_recs, timeout, continue_on_error, sc_id, spec=spec, chunk=chunk
+            )
         except Error:
             if self.st.gate.set:
                 raise  # the gate's own report
@@ -1992,12 +2219,13 @@ class GateRun:
         rec: Record,
         item_recs: list[Record],
         b: Binding,
-    ) -> tuple[float, str | None] | None:
+    ) -> tuple[float, str | None, int] | None:
         """Confirm steps 9 to 14 of a batch, under every item target's lock: the
         single-use marker again, scope and budget (each item counts), unresolved
         operations, targets, previews and drift, identity, the batch's idempotency
-        key, the marker and the budget count, and the dispatching record. Returns
-        apply's timeout per item and the scope id, or None when an idempotent
+        key, the marker and the budget count, and the dispatching record (its lease
+        covers every apply or apply_all call). Returns the timeout of each call, the
+        scope id and the number of items per call (Q12), or None when an idempotent
         replay answered the request."""
         a = self.a
         assert rec.claims is not None
@@ -2005,6 +2233,9 @@ class GateRun:
             raise self.fail(self.token_used(rec.operation_id))  # lost a race on this token
         keys = [it.target.key for it in items]
         stored = rec.preview if isinstance(rec.preview, dict) else {}
+        ce = self.create_only_existing(strings_at(stored, "outputs"))
+        if ce is not None:
+            raise self.fail(ce)
         sc = a.load_scope(state)
         need = self.need(keys, strings_at(stored, "destinations"), strings_at(stored, "outputs"), 0)
         self._guard(lambda: a.check_scope(sc, need, j))
@@ -2061,14 +2292,18 @@ class GateRun:
             return None
         self._guard(lambda: self.consume_counted(j, sc, need, rec.operation_id, len(items), now))
         timeout = spec.timeout if spec.timeout > 0 else DEFAULT_TIMEOUT
+        chunk = 1  # one apply call per item, or one apply_all call per chunk (Q12)
+        if spec.apply_all is not None:
+            chunk = len(items)
+            if 0 < spec.max_per_call < chunk:
+                chunk = spec.max_per_call
+        calls = (len(items) + chunk - 1) // chunk
         rec.status = "dispatching"
         rec.dispatched_at = time_string(now)
-        rec.lease_until = time_string(
-            now + _dt.timedelta(seconds=timeout * len(items) + LEASE_GRACE)
-        )
+        rec.lease_until = time_string(now + _dt.timedelta(seconds=timeout * calls + LEASE_GRACE))
         self._guard(lambda: j.write(rec))
         self.dispatched_id = rec.operation_id
-        return timeout, sc.id()
+        return timeout, sc.id(), chunk
 
     def batch_replay_of(
         self, j: Journal, prev: Record
@@ -2154,6 +2389,43 @@ class GateRun:
             self.a.notice(journal_notice())
         self.succeed(data, untrusted)
 
+    def call_apply_all(
+        self, fn: Callable[[list[Op]], list[ItemOutcome]], ops: list[Op]
+    ) -> list[ItemOutcome]:
+        """One native bulk call for a chunk of batch items (Q12): one outcome per op.
+        An exception of the whole call becomes every item's error (not_dispatched and
+        rejected keep their meaning; anything else is unknown); a call that returns a
+        different number of outcomes is a defect, and every item of the chunk is
+        unknown. An outcome that is not an ItemOutcome, or whose result is not a
+        Result, is unknown like a bad apply return."""
+        try:
+            outs = fn(list(ops))
+        except BaseException as exc:  # every failure is classified, interrupts included
+            return [ItemOutcome(err=exc) for _ in ops]
+        if not isinstance(outs, (list, tuple)) or len(outs) != len(ops):
+            n = len(outs) if isinstance(outs, (list, tuple)) else 0
+            self.a.defect(
+                f"BatchSpec.apply_all returned {n} outcomes for {len(ops)} items; every item of "
+                "that call is reported unknown."
+            )
+            return [
+                ItemOutcome(err=Exception("the bulk call returned no outcome for this item"))
+                for _ in ops
+            ]
+        each: list[ItemOutcome] = []
+        for o in outs:
+            if not isinstance(o, ItemOutcome):
+                bad = "apply_all returned something other than an aicli ItemOutcome"
+                each.append(ItemOutcome(err=TypeError(bad)))
+                continue
+            res = o.result if o.result is not None else Result()
+            if not isinstance(res, Result):
+                bad = "apply returned something other than an aicli Result"
+                each.append(ItemOutcome(err=TypeError(bad)))
+                continue
+            each.append(ItemOutcome(result=res, err=o.err))
+        return each
+
     def run_batch(
         self,
         j: Journal,
@@ -2163,132 +2435,176 @@ class GateRun:
         timeout: float,
         continue_on_error: bool,
         scope_id: str | None = None,
+        spec: BatchSpec | None = None,
+        chunk: int = 1,
     ) -> None:
-        """Apply the items in order and report the batch (CLI-063). Each item's
-        upstream idempotency key is <key>/<first 16 hex of sha256(target key)>,
-        stable across dry-runs (CLI-062); items never dispatched give their budget
+        """Apply the items in order and report the batch (CLI-063): one apply call
+        per item, or one BatchSpec.apply_all call per chunk of chunk items (Q12),
+        each outcome mapped onto its item. Each item's upstream idempotency key is
+        <key>/<first 16 hex of sha256(target key)>, stable across dry-runs
+        (CLI-062); items never dispatched (skipped after a stop) give their budget
         back (A4)."""
         m = self.m
+        apply_all = spec.apply_all if spec is not None else None
+        chunk = max(chunk, 1)
         results: list[Any] = []
         first_fail: WriteOutcome | None = None
         succeeded = failed = unknown_n = skipped = never_sent = 0
         any_applied = any_dispatched = stop = observed_any = False
         result_untrusted: list[str] = []
-        try:
-            for it, ir in zip(items, item_recs, strict=False):
-                now = self.a._now()
-                if stop:
-                    o = sanitize_outcome(
-                        Outcome(
-                            execution="not_started",
-                            change=pick(
-                                m.has_effect("change", "configure"), "not_applied", "not_applicable"
-                            ),
-                            delivery=pick(
-                                m.has_effect("deliver"), "not_attempted", "not_applicable"
-                            ),
-                            persistence=pick(
-                                m.has_effect("artifact", "persist"), "unchanged", "not_applicable"
-                            ),
-                            verification="not_applicable",
-                        )
+
+        def not_sent(i: int) -> dict[str, Any]:
+            """Item i recorded as never started: skipped after a stop, or in a chunk
+            whose records could not all be written."""
+            nonlocal never_sent
+            it, ir = items[i], item_recs[i]
+            o = sanitize_outcome(
+                Outcome(
+                    execution="not_started",
+                    change=pick(
+                        m.has_effect("change", "configure"), "not_applied", "not_applicable"
+                    ),
+                    delivery=pick(m.has_effect("deliver"), "not_attempted", "not_applicable"),
+                    persistence=pick(
+                        m.has_effect("artifact", "persist"), "unchanged", "not_applicable"
+                    ),
+                    verification="not_applicable",
+                )
+            )
+            receipt = self.skipped_receipt(ir.operation_id, it.target, o)
+            ir.status = "not_applied"
+            ir.finished_at = time_string(self.a._now())
+            ir.lease_until = None
+            ir.receipt = to_generic(receipt)
+            try:
+                j.write(ir)
+            except Error:
+                self.a.notice(journal_notice())
+            never_sent += 1
+            return {
+                "target": it.target.key,
+                "operation_id": ir.operation_id,
+                "ok": False,
+                "receipt": receipt,
+            }
+
+        def report(i: int, res: Result, apply_err: BaseException | None) -> bool:
+            """The outcome of dispatched item i, recorded and reported; whether it
+            succeeded."""
+            nonlocal succeeded, failed, unknown_n, first_fail
+            nonlocal any_applied, any_dispatched, observed_any
+            it, ir = items[i], item_recs[i]
+            stored = ir.preview if isinstance(ir.preview, dict) else {}
+            out = self.classify(ir.operation_id, it.target, stored, res, apply_err)
+            self.finish_record(j, ir, out)
+            if out.resolved_meanwhile:
+                # resolved by hand while apply still ran: the item's outcome is unknown (A6)
+                out.ok, out.code, out.cause, out.dispatch = (
+                    False,
+                    "E_OUTCOME_UNKNOWN",
+                    None,
+                    "unknown",
+                )
+            if out.dispatch != "not_started":
+                any_dispatched = True
+            entry: dict[str, Any] = {
+                "target": it.target.key,
+                "operation_id": ir.operation_id,
+                "ok": out.ok,
+                "receipt": out.receipt,
+            }
+            if out.observed:
+                observed_any = True
+            o = out.outcome
+            if (
+                o.change in ("applied", "partial")
+                or o.delivery in ("delivered", "partial")
+                or o.persistence in ("saved", "partial")
+            ):
+                any_applied = True
+            if out.ok:
+                succeeded += 1
+                if res.data is not None:
+                    entry["result"] = (
+                        out.result_data if out.unencodable else self.project_result(out.result_data)
                     )
-                    receipt = self.skipped_receipt(ir.operation_id, it.target, o)
-                    ir.status = "not_applied"
-                    ir.finished_at = time_string(now)
-                    ir.receipt = to_generic(receipt)
+                    if out.unencodable:
+                        self.unencodable_notice(ir.operation_id)
+                    else:
+                        result_untrusted.extend(
+                            prefix_paths("data.items[].result", untrusted_paths(res.untrusted))
+                        )
+            elif out.code == "E_OUTCOME_UNKNOWN":
+                unknown_n += 1
+                entry["error"] = self.item_error(out)
+            else:
+                failed += 1
+                entry["error"] = self.item_error(out)
+                if first_fail is None:
+                    first_fail = out
+            results.append(entry)
+            return out.ok
+
+        try:
+            for start in range(0, len(items), chunk):
+                end = min(start + chunk, len(items))
+                if stop:
+                    for i in range(start, end):
+                        results.append(not_sent(i))
+                        skipped += 1
+                    continue
+                # The chunk's records turn dispatching before its call (CLI-057 step 14).
+                now = self.a._now()
+                ops: list[Op] = []
+                rec_err: Error | None = None
+                failed_at = -1
+                for i in range(start, end):
+                    ir = item_recs[i]
+                    ir.status = "dispatching"
+                    ir.dispatched_at = time_string(now)
+                    ir.lease_until = time_string(now + _dt.timedelta(seconds=timeout + LEASE_GRACE))
                     try:
                         j.write(ir)
-                    except Error:
-                        self.a.notice(journal_notice())
-                    results.append(
-                        {
-                            "target": it.target.key,
-                            "operation_id": ir.operation_id,
-                            "ok": False,
-                            "receipt": receipt,
-                        }
+                    except Error as e:
+                        rec_err, failed_at = e, i
+                        break
+                    ops.append(Op(ir.operation_id, self.item_key(items[i].target.key), timeout))
+                if rec_err is not None:
+                    # Nothing of this chunk was sent: the item whose record could not be
+                    # written reports the journal error, and the others were not started.
+                    out = WriteOutcome(
+                        ok=False, code=rec_err.code, cause=rec_err, dispatch="not_started"
                     )
-                    skipped += 1
-                    never_sent += 1
-                    continue
-                ir.status = "dispatching"
-                ir.dispatched_at = time_string(now)
-                ir.lease_until = time_string(now + _dt.timedelta(seconds=timeout + LEASE_GRACE))
-                try:
-                    j.write(ir)
-                except Error as e:
-                    out = WriteOutcome(ok=False, code=e.code, cause=e, dispatch="not_started")
-                    results.append(
-                        {
-                            "target": it.target.key,
-                            "operation_id": ir.operation_id,
-                            "ok": False,
-                            "error": self.item_error(out),
-                        }
-                    )
-                    failed += 1
-                    never_sent += 1
-                    if first_fail is None:
-                        first_fail = out
-                    stop = True
-                    continue
-                res, apply_err = self.call_apply(
-                    it.apply, Op(ir.operation_id, self.item_key(it.target.key), timeout)
-                )
-                stored = ir.preview if isinstance(ir.preview, dict) else {}
-                out = self.classify(ir.operation_id, it.target, stored, res, apply_err)
-                self.finish_record(j, ir, out)
-                if out.resolved_meanwhile:
-                    # resolved by hand while apply still ran: the item's outcome is unknown (A6)
-                    out.ok, out.code, out.cause, out.dispatch = (
-                        False,
-                        "E_OUTCOME_UNKNOWN",
-                        None,
-                        "unknown",
-                    )
-                if out.dispatch != "not_started":
-                    any_dispatched = True
-                entry: dict[str, Any] = {
-                    "target": it.target.key,
-                    "operation_id": ir.operation_id,
-                    "ok": out.ok,
-                    "receipt": out.receipt,
-                }
-                if out.observed:
-                    observed_any = True
-                o = out.outcome
-                if (
-                    o.change in ("applied", "partial")
-                    or o.delivery in ("delivered", "partial")
-                    or o.persistence in ("saved", "partial")
-                ):
-                    any_applied = True
-                if out.ok:
-                    succeeded += 1
-                    if res.data is not None:
-                        entry["result"] = (
-                            out.result_data
-                            if out.unencodable
-                            else self.project_result(out.result_data)
-                        )
-                        if out.unencodable:
-                            self.unencodable_notice(ir.operation_id)
-                        else:
-                            result_untrusted.extend(
-                                prefix_paths("data.items[].result", untrusted_paths(res.untrusted))
+                    for i in range(start, end):
+                        if i == failed_at:
+                            results.append(
+                                {
+                                    "target": items[i].target.key,
+                                    "operation_id": item_recs[i].operation_id,
+                                    "ok": False,
+                                    "error": self.item_error(out),
+                                }
                             )
-                elif out.code == "E_OUTCOME_UNKNOWN":
-                    unknown_n += 1
-                    entry["error"] = self.item_error(out)
-                else:
-                    failed += 1
-                    entry["error"] = self.item_error(out)
+                            failed += 1
+                            never_sent += 1
+                            continue
+                        results.append(not_sent(i))
+                        skipped += 1
                     if first_fail is None:
                         first_fail = out
-                results.append(entry)
-                if not out.ok and not continue_on_error:
                     stop = True
+                    continue
+                if apply_all is None:
+                    fn = items[start].apply
+                    assert fn is not None  # batch_items checked it
+                    res, apply_err = self.call_apply(fn, ops[0])
+                    outcomes = [ItemOutcome(result=res, err=apply_err)]
+                else:
+                    outcomes = self.call_apply_all(apply_all, ops)
+                for k, oc in enumerate(outcomes):
+                    ok = report(start + k, oc.result or Result(), oc.err)
+                    if not ok and not continue_on_error:
+                        stop = True
         finally:
             # items never dispatched (skipped after a stop) give their unit back (A4)
             self.refund_budget(j, scope_id, never_sent)
@@ -2476,11 +2792,20 @@ class GateMixin:
         """Run a single-target write through the gate. Returns on success; raises
         the gate's Error otherwise (the error is already the run's outcome)."""
         g = self._start_gate(cmd, False)
-        if spec.preview is None or spec.apply is None or not spec.target.key.strip():
-            raise g.fail(internal_error("App.write needs WriteSpec.target.key, preview and apply."))
-        e = check_target_key(spec.target.key)
-        if e is not None:
-            raise g.fail(e)
+        if (
+            spec.preview is None
+            or spec.apply is None
+            or (spec.resolve_target is None and not spec.target.key.strip())
+        ):
+            raise g.fail(
+                internal_error(
+                    "App.write needs WriteSpec.target.key (or resolve_target), preview and apply."
+                )
+            )
+        if spec.resolve_target is None:
+            e = check_target_key(spec.target.key)
+            if e is not None:
+                raise g.fail(e)
         if g.confirm_set:
             g.confirm_single(spec)
         else:
@@ -2494,27 +2819,13 @@ class GateMixin:
         item applied, else the first failed item's code. Items are de-duplicated
         by target key, order kept."""
         g = self._start_gate(cmd, True)
-        items: list[BatchItem] = []
-        seen: set[str] = set()
-        for it in spec.items:
-            if it.preview is None or it.apply is None or not it.target.key.strip():
-                raise g.fail(internal_error("Every BatchItem needs target.key, preview and apply."))
-            e = check_target_key(it.target.key)
-            if e is not None:
-                raise g.fail(e)
-            if it.target.key in seen:
-                continue
-            seen.add(it.target.key)
-            items.append(it)
-        if not items:
-            e = usage(
-                "missing_parameter",
-                "--" + g.m.batch_flag,
-                "The batch names no targets; nothing was changed.",
-            )
-            e.details["next_action"] = f"Give at least one target with --{g.m.batch_flag}."
-            raise g.fail(e)
+        if spec.resolve_items is not None and g.confirm_set:
+            # resolved at confirm only after the token checks (Q1)
+            g.confirm_batch(spec, None)
+            return
+        # at a dry-run, resolved before the scope check (Q1)
+        items = g._guard(lambda: g.batch_items(spec))
         if g.confirm_set:
             g.confirm_batch(spec, items)
         else:
-            g.plan_batch(items)
+            g.plan_batch(spec, items)

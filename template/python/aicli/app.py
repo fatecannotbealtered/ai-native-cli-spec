@@ -14,6 +14,7 @@ import datetime as _dt
 import os
 import ssl
 import sys
+import threading
 import time
 import urllib.parse
 from collections.abc import Callable
@@ -263,6 +264,8 @@ class App(
         self._offline = False
         # secrets the tool registered with add_secret (redacted from errors and debug)
         self._added_secrets: list[str] = []
+        # debug, notice and add_secret may run on several threads (Q22)
+        self._mu = threading.Lock()
 
     # ---------------------------------------------------------------- basics
 
@@ -307,9 +310,10 @@ class App(
         """The TLS settings of CLI-110 (P10), for the tool's upstream client and
         aicli's own requests: TLS 1.2 or newer, always verified, against the system
         roots plus the PEM file <PREFIX>_CA_FILE names. An unusable CA file is
-        E_CONFIG. Build the upstream client on it with the proxy from the environment
-        (HTTPS_PROXY, HTTP_PROXY, NO_PROXY), a per-request timeout of at most 30 s and
-        user_agent(), and never re-send a write (CLI-110)."""
+        E_CONFIG. Build the upstream client on it with the proxy from HTTPS_PROXY,
+        HTTP_PROXY and NO_PROXY as App.env gives them (Q2; update.app_proxies reads
+        them as update does), a per-request timeout of at most 30 s and user_agent(),
+        and never re-send a write (CLI-110)."""
         ctx = ssl.create_default_context()  # system roots, verification on
         ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         prefix = self._prefix()
@@ -339,21 +343,24 @@ class App(
         empty or 0 (spaces trimmed), "debug: <message>" goes to stderr, never to
         stdout; output and exit codes do not change. Secret values (redaction_values)
         are replaced by ***, and line breaks are escaped so every line starts with
-        "debug:"."""
+        "debug:". It is safe to call from several threads (Q22): each line is written
+        whole."""
         flag = self._env(self._prefix() + "_DEBUG").strip()
         if flag in ("", "0"):
             return
         text = self.redact(str(message)).replace("\r", "\\r").replace("\n", "\\n")
-        with contextlib.suppress(Exception):
-            self._write(self._stderr(), ("debug: " + text + "\n").encode("utf-8", "replace"))
+        line = ("debug: " + text + "\n").encode("utf-8", "replace")
+        with self._mu, contextlib.suppress(Exception):
+            self._write(self._stderr(), line)
 
     def _debug_once(self, message: str) -> None:
         """A library diagnostic, written at most once per run."""
         st = self._run
         if st is not None:
-            if message in st.debugged:
-                return
-            st.debugged.add(message)
+            with self._mu:
+                if message in st.debugged:
+                    return
+                st.debugged.add(message)
         self.debug(message)
 
     def add_secret(self, value: str) -> None:
@@ -361,7 +368,9 @@ class App(
         keyring), so errors and debug lines show it as *** like a secret flag
         (CLI-102, SEC-021). Values shorter than 4 characters are ignored."""
         if isinstance(value, str) and len(value) >= MIN_SECRET_LEN:
-            self._added_secrets.append(value)
+            with self._mu:
+                if value not in self._added_secrets:
+                    self._added_secrets.append(value)
 
     def redaction_values(self) -> list[str]:
         """What debug lines replace with ***, longest first: the running command's
@@ -370,7 +379,8 @@ class App(
         settings (from their flag, the environment or the default) and the values
         registered with add_secret; each also URL query-escaped, path-escaped, and
         path-escaped keeping "/" (P17). Errors use error_redaction_values."""
-        base: set[str] = set(self._added_secrets)
+        with self._mu:
+            base: set[str] = set(self._added_secrets)
         st = self._run
         node = (st.cmd or st.parsed) if st is not None else None
         m = self.meta_for(node) if node is not None and self._prepared else None
@@ -653,33 +663,77 @@ class App(
 
     def normalize_args(self, args: list[str]) -> list[str]:
         """Rewrite the command forms agents guess first (CLI-022) before parsing:
-        root shortcuts for nested nouns, single-letter flags and long flag
-        aliases. Arguments that already parse are returned unchanged."""
+        root shortcuts for nested nouns, single-letter flags, long flag aliases
+        (App-wide and the command's own, Q11) and renamed flags (Q10). Arguments
+        that already parse are returned unchanged. A renamed flag's use is
+        remembered for its notice, and its use beside the new name for the refusal
+        (prepare_run)."""
         out = self._apply_shortcut(list(args))
         target, kinds = self.classify(out)
         if target is self._root:
             return out
+        given = {flag_name(arg) for i, arg in enumerate(out) if kinds[i] == "flag"}
+        m = self.meta_for(target)
+        renamed: list[tuple[str, str]] = []
         for i, arg in enumerate(out):
-            if kinds[i] == "flag":
-                out[i] = self._rewrite_flag(target, arg)
+            if kinds[i] != "flag":
+                continue
+            out[i], old = self._rewrite_flag(target, arg)
+            if old and m is not None:
+                renamed.append((old, m.renamed_flags[old]))
+        st = self._run
+        if st is not None:
+            for old, new in renamed:
+                if old not in st.renamed_used:
+                    st.renamed_used.append(old)
+                f = target.flag(new)
+                if new in given or (f is not None and f.shorthand and f.shorthand in given):
+                    st.renamed_both = (old, new)
         return out
 
-    def _rewrite_flag(self, target: Node, arg: str) -> str:
+    def _rewrite_flag(self, target: Node, arg: str) -> tuple[str, str]:
+        """One flag token mapped through Meta.renamed_flags, App.flag_aliases,
+        Meta.flag_aliases and App.short_flags. The second value is the renamed
+        flag's old name when the token used it."""
         name, value, has_value = split_flag(arg)
         if not name:
-            return arg
-        long = ""
+            return arg, ""
+
+        def applies(to: str | None) -> bool:
+            return bool(to) and target.flag(name) is None and target.flag(to or "") is not None
+
+        m = self.meta_for(target)
+        long = old = ""
         if arg.startswith("--"):
-            to = self.flag_aliases.get(name)
-            if to and target.flag(name) is None and target.flag(to) is not None:
-                long = to
+            if m is not None and applies(m.renamed_flags.get(name)):
+                long, old = m.renamed_flags[name], name
+            elif applies(self.flag_aliases.get(name)):
+                long = self.flag_aliases[name]
+            elif m is not None and applies(m.flag_aliases.get(name)):
+                long = m.flag_aliases[name]
         elif len(name) == 1:
             to = self.short_flags.get(name)
             if to and target.shorthand_flag(name) is None and target.flag(to) is not None:
                 long = to
         if not long:
-            return arg
-        return f"--{long}={value}" if has_value else f"--{long}"
+            return arg, ""
+        return (f"--{long}={value}" if has_value else f"--{long}"), old
+
+    def example_command(self, ex: str) -> tuple[Node | None, str]:
+        """An example resolved the way the parser resolves a command line (Q21): the
+        tool name, then root shortcuts and aliases. Returns the command the example
+        runs (None when it names none) and the example rewritten with the command's
+        path in place of the words that named it."""
+        tokens = ex.split()
+        if not tokens or tokens[0] != self.tool_name():
+            return None, ex
+        args = self._apply_shortcut(tokens[1:])
+        target, kinds = self.classify(args)
+        if target is self._root or target.has_subcommands():
+            return None, ex
+        out = [tokens[0], target.path]
+        out.extend(a for a, k in zip(args, kinds, strict=True) if k != "word")
+        return target, " ".join(out)
 
     def _apply_shortcut(self, args: list[str]) -> list[str]:
         """A root-level word that is not a root command replaced with the path
@@ -773,10 +827,14 @@ class App(
             return
         self.validate_args(node, positionals)
         self.prepare_run(node, positionals)
-        if self.settings is not None and not node.builtin and not self._creates_profile(node):
+        if (
+            self.settings is not None
+            and not node.builtin
+            and not self._allows_unknown_profile(node)
+        ):
             # An unknown profile stops every tool command before it runs; the
             # built-ins still run, and context reports the problem (CLI-101), and so
-            # does a command that creates the profile (Meta.new_profile, P6).
+            # does a command declared with Meta.allow_unknown_profile (P6, Q4).
             ps = self._profile_state()
             if ps.unknown and not ps.reason:
                 raise self._profile_unknown(ps)

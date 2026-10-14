@@ -20,10 +20,27 @@ import (
 // the spec repository only; a tool repo vendors the library without the corpus.
 
 type corpusEntry struct {
-	File   string `json:"file"`
-	Schema string `json:"schema"`
-	Expect string `json:"expect"`
-	Rule   string `json:"rule"`
+	File      string `json:"file"`
+	Schema    string `json:"schema"`
+	Expect    string `json:"expect"`
+	Rule      string `json:"rule"`
+	Violation struct {
+		Check any `json:"check"` // a check name, or a list of them
+	} `json:"violation"`
+}
+
+// budgetProblems is the success budget of a default invocation, which conformance
+// R04 checks and ValidateEnvelope does not (Q24): the corpus's success_budget
+// examples are checked with it.
+func budgetProblems(e corpusEntry, doc any) []string {
+	env, ok := doc.(map[string]any)
+	if !ok || e.Violation.Check != "success_budget" {
+		return nil
+	}
+	if size, over := overSuccessBudget(env); over {
+		return []string{"the response is " + itoa(size) + " characters, over the success budget (R04)"}
+	}
+	return nil
 }
 
 // corpusValidators maps a corpus schema name to the library check for it.
@@ -167,6 +184,7 @@ func TestContractCorpus(t *testing.T) {
 		problems := append([]string{}, pv.problems...)
 		if parsed {
 			problems = append(problems, check(doc)...)
+			problems = append(problems, budgetProblems(e, doc)...)
 		}
 		checked[e.Schema]++
 		switch {
@@ -218,6 +236,14 @@ func TestValidateEnvelopeOnTheCorpusBytes(t *testing.T) {
 		}
 		compact.WriteByte('\n')
 		err = ValidateEnvelope(compact.Bytes())
+		if err == nil && e.Violation.Check == "success_budget" {
+			// ValidateEnvelope leaves the success budget to conformance R04 (Q24).
+			var doc any
+			if json.Unmarshal(compact.Bytes(), &doc) == nil && len(budgetProblems(e, doc)) == 0 {
+				t.Errorf("%s: the R04 budget check accepts it", e.File)
+			}
+			continue
+		}
 		switch {
 		case e.Expect == "valid" && err != nil:
 			t.Errorf("%s: valid example rejected: %v", e.File, err)

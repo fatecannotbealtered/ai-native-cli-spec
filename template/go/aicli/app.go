@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -88,6 +89,7 @@ type App struct {
 	run               *runState
 	defects           []string // tool bugs the library corrected at run time (RunConformance reports them)
 	debugSeen         map[string]bool
+	mu                sync.Mutex     // Debugf, Notice and AddSecret may run on several goroutines (Q22)
 	secrets           []string       // values registered with AddSecret
 	updateCmd         *cobra.Command // the built-in update, when App.Update is set
 	// skillCopy replaces the Skill directory copy of update's Skill sync (tests).
@@ -142,6 +144,8 @@ func devVersion(changelog string) string {
 // from the keyring, so that debug lines and errors show it as *** (CLI-102, D2),
 // also in its URL-escaped forms. Values shorter than 4 characters are ignored.
 func (a *App) AddSecret(value string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	if utf8.RuneCountInString(value) < 4 || contains(a.secrets, value) {
 		return
 	}
@@ -246,6 +250,9 @@ func (a *App) Execute(args []string) int {
 			st.panicErr = internalError("App.Root is nil.")
 			return
 		}
+		// OutputFormat and WantsField find the run from a command (Q14, Q17).
+		appsByRoot.Store(a.Root, a)
+		defer appsByRoot.CompareAndDelete(a.Root, a)
 		a.InstallBuiltins()
 		a.prepareTree()
 		norm := a.normalizeArgs(args)
@@ -434,8 +441,10 @@ func childNamed(c *cobra.Command, word string) *cobra.Command {
 // ---------------------------------------------------------------- normalisation
 
 // normalizeArgs rewrites the command forms agents guess first (CLI-022) before
-// cobra parses them: root shortcuts for nested nouns, single-letter flags and long
-// flag aliases. Arguments that already parse are returned unchanged.
+// cobra parses them: root shortcuts for nested nouns, single-letter flags, long flag
+// aliases (App-wide and the command's own, Q11) and renamed flags (Q10). Arguments
+// that already parse are returned unchanged. A renamed flag's use is remembered for
+// its notice, and its use beside the new name for the refusal (prepareRun).
 func (a *App) normalizeArgs(args []string) []string {
 	out := append([]string{}, args...)
 	out = a.applyShortcut(out)
@@ -443,25 +452,57 @@ func (a *App) normalizeArgs(args []string) []string {
 	if target == nil || target == a.Root {
 		return out
 	}
+	given := map[string]bool{}
+	for i, arg := range out {
+		if kinds[i] == argFlag {
+			given[flagName(arg)] = true
+		}
+	}
+	var renamed [][2]string
 	for i, arg := range out {
 		if kinds[i] != argFlag {
 			continue
 		}
-		out[i] = a.rewriteFlag(target, arg)
+		var old string
+		out[i], old = a.rewriteFlag(target, arg)
+		if old != "" {
+			renamed = append(renamed, [2]string{old, a.metaFor(target).RenamedFlags[old]})
+		}
+	}
+	if st := a.run; st != nil {
+		for _, r := range renamed {
+			if !contains(st.renamedUsed, r[0]) {
+				st.renamedUsed = append(st.renamedUsed, r[0])
+			}
+			if f := lookupFlag(target, r[1]); given[r[1]] || (f != nil && f.Shorthand != "" && given[f.Shorthand]) {
+				st.renamedBoth = r
+			}
+		}
 	}
 	return out
 }
 
-// rewriteFlag maps one flag token through ShortFlags and FlagAliases.
-func (a *App) rewriteFlag(target *cobra.Command, arg string) string {
+// rewriteFlag maps one flag token through Meta.RenamedFlags, App.FlagAliases,
+// Meta.FlagAliases and App.ShortFlags. old is the renamed flag's old name when the
+// token used it.
+func (a *App) rewriteFlag(target *cobra.Command, arg string) (string, string) {
 	name, value, hasValue := splitFlag(arg)
 	if name == "" {
-		return arg
+		return arg, ""
 	}
-	long := ""
+	applies := func(to string) bool {
+		return to != "" && lookupFlag(target, name) == nil && lookupFlag(target, to) != nil
+	}
+	m := a.metaFor(target)
+	long, old := "", ""
 	if strings.HasPrefix(arg, "--") {
-		if to, ok := a.FlagAliases[name]; ok && lookupFlag(target, name) == nil && lookupFlag(target, to) != nil {
-			long = to
+		switch {
+		case m != nil && applies(m.RenamedFlags[name]):
+			long, old = m.RenamedFlags[name], name
+		case applies(a.FlagAliases[name]):
+			long = a.FlagAliases[name]
+		case m != nil && applies(m.FlagAliases[name]):
+			long = m.FlagAliases[name]
 		}
 	} else if len(name) == 1 {
 		if to, ok := a.ShortFlags[name]; ok && shorthandFlag(target, name) == nil && lookupFlag(target, to) != nil {
@@ -469,12 +510,12 @@ func (a *App) rewriteFlag(target *cobra.Command, arg string) string {
 		}
 	}
 	if long == "" {
-		return arg
+		return arg, ""
 	}
 	if hasValue {
-		return "--" + long + "=" + value
+		return "--" + long + "=" + value, old
 	}
-	return "--" + long
+	return "--" + long, old
 }
 
 // splitFlag splits "--name=value" / "-n=value" / "--name" into its parts.

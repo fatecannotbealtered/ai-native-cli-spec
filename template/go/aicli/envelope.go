@@ -93,6 +93,8 @@ type runState struct {
 	stdinFlag          string
 	stream             *Stream       // an NDJSON stream, once the command starts one
 	profile            *profileState // the active profile, once resolved (settings.go)
+	renamedUsed        []string      // old names of renamed flags the arguments used (Q10)
+	renamedBoth        [2]string     // a renamed flag given with its new name too: {old, new}
 }
 
 // fieldSelection is the parsed --fields value (CLI-040).
@@ -123,7 +125,8 @@ func (a *App) runFor(cmd *cobra.Command) (*runState, *Error) {
 	return st, nil
 }
 
-// Notice adds a notice to the current response's meta.notices.
+// Notice adds a notice to the current response's meta.notices. It is safe to call
+// from several goroutines (Q22).
 func (a *App) Notice(n Notice) {
 	st := a.run
 	if st == nil {
@@ -135,6 +138,8 @@ func (a *App) Notice(n Notice) {
 	if !contains(noticeSeverityValues, n.Severity) {
 		n.Severity = "info"
 	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	for _, have := range st.notices {
 		if have == n {
 			return
@@ -258,6 +263,66 @@ func schemaUntrusted(s SchemaDef, shape string) []string {
 		}
 	}
 	return out
+}
+
+// presentPaths keeps the untrusted paths that name at least one value in the
+// response (Q20): the path of a field the projection removed, or of the items of an
+// empty list, names none and is dropped. root holds the response's data
+// ({"data": ...}) or error ({"error": {"details": ...}}) in generic JSON form.
+func presentPaths(root map[string]any, paths []string) []string {
+	var out []string
+	for _, p := range paths {
+		if pathPresent(root, strings.TrimSpace(p)) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// pathPresent walks one untrusted path ("data.items[].title"): each segment names a
+// key, and each [] steps into a list.
+func pathPresent(root map[string]any, path string) bool {
+	nodes := []any{root}
+	for _, seg := range strings.Split(path, ".") {
+		name := strings.TrimRight(seg, "[]")
+		arrays := (len(seg) - len(name)) / 2
+		var next []any
+		for _, n := range nodes {
+			obj, ok := n.(map[string]any)
+			if !ok {
+				continue
+			}
+			v, has := obj[name]
+			if !has {
+				continue
+			}
+			vals := []any{v}
+			for k := 0; k < arrays; k++ {
+				var items []any
+				for _, x := range vals {
+					if list, ok := x.([]any); ok {
+						items = append(items, list...)
+					}
+				}
+				vals = items
+			}
+			next = append(next, vals...)
+		}
+		if len(next) == 0 {
+			return false
+		}
+		nodes = next
+	}
+	return true
+}
+
+// errorRoot is an error's details as the root presentPaths walks.
+func errorRoot(obj errorObject) map[string]any {
+	details, err := toGeneric(obj.Details)
+	if err != nil {
+		details = map[string]any{}
+	}
+	return map[string]any{"error": map[string]any{"details": details}}
 }
 
 // cleanPaths de-duplicates and sorts untrusted paths.
@@ -385,7 +450,7 @@ func (a *App) emit(st *runState, res result) int {
 	stdout, stderr := a.stdout(), a.stderr()
 	meta := metaObject{DurationMS: time.Since(st.startReal).Milliseconds(), Notices: st.notices}
 	if res.err == nil {
-		meta.Untrusted = cleanPaths(res.untrusted)
+		meta.Untrusted = cleanPaths(presentPaths(map[string]any{"data": res.data}, res.untrusted))
 		switch st.format {
 		case "text":
 			writeText(stdout, res.data)
@@ -410,6 +475,7 @@ func (a *App) emit(st *runState, res result) int {
 			data := res.data
 			if res.fromGate {
 				data = fitSuccessBudget(data, meta)
+				meta.Untrusted = cleanPaths(presentPaths(map[string]any{"data": data}, meta.Untrusted))
 			}
 			env := successEnvelope{OK: true, SchemaVersion: SchemaVersion, Data: data, Meta: meta}
 			b, err := encodeJSON(env, st.pretty)
@@ -421,8 +487,9 @@ func (a *App) emit(st *runState, res result) int {
 		}
 	}
 	obj, exit, errUntrusted := a.normalizeError(res.err)
-	meta.Untrusted = cleanPaths(append(errUntrusted, res.untrusted...))
+	meta.Untrusted = cleanPaths(presentPaths(errorRoot(obj), append(errUntrusted, res.untrusted...)))
 	obj = fitErrorBudget(obj, meta, a.toolName())
+	meta.Untrusted = cleanPaths(presentPaths(errorRoot(obj), meta.Untrusted))
 	if st.format == "text" {
 		writeTextError(stderr, obj)
 		a.textNotices(st, stderr)

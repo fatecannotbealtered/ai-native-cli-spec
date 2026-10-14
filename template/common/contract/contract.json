@@ -928,7 +928,7 @@
     "default_success_chars": 8000,
     "error_chars": 2000,
     "reference_index_chars": 8000,
-    "reference_command_chars": 4000,
+    "reference_command_chars": 6000,
     "exempt": [
       "the full reference (CLI-033) and raw-format output"
     ]

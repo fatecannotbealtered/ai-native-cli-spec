@@ -25,7 +25,7 @@ The aicli library (Go: `internal/aicli/`; Python: `<pkg>/_aicli/`) implements mo
 3. Every command with an effect other than `observe` calls `App.Write` or `App.WriteBatch`. Never add your own tokens, keys, confirm stores or gate flags (CLI-050). Declare `Effects` and `Dangerous` truthfully; a read never writes (CLI-025).
 4. Neither the CLI nor you create or edit the scope file, unless the user explicitly asks you to (SEC-011, SKL-006).
 5. Map upstream failures by status with `FromHTTP`, never by message text (CLI-016). In `Apply`, wrap an error in `NotDispatched` only if nothing was sent and in `Rejected` only if the upstream definitively refused, and wrap the `*aicli.Error` from `FromHTTP` (status 0 for a connection that never opened), never a raw error; return any other error as is, so aicli reports `E_OUTCOME_UNKNOWN` (CLI-015, CLI-050).
-6. Declare secret flags in `Meta.Secrets` and never log or echo them (SEC-021). Declare every output path that carries external text as untrusted (CLI-046, SEC-002).
+6. Declare secret flags in `Meta.Secrets` and never log or echo them, nor any secret the upstream returns (SEC-021). Declare every output path that carries external text as untrusted, a ref that holds people's text included (CLI-046, SEC-002).
 7. Lists state their completeness and scope (CLI-041); counting, filtering and finding the latest happen in the tool (CLI-044).
 8. `update` is aicli's built-in: set `App.Update` to an `UpdateConfig` with the repository and the package names, and never write an `update` command or update code of your own (CLI-070).
 9. Every write command has a conformance `Sample`, and every registry command runs in a test (VER-001, VER-003).
@@ -45,10 +45,10 @@ The aicli library (Go: `internal/aicli/`; Python: `<pkg>/_aicli/`) implements mo
        Settings: []aicli.Setting{{Name: "host", Description: "Acme Notes URL"}}}            // NOTES_CLI_HOST, profiles
    os.Exit(app.Execute(os.Args[1:]))
    ```
-4. Shape the tree: flat `<noun> <verb>`, with `list`, `get`, `search`, `create`, `update`, `delete` before domain verbs (CLI-021), each verb with its standard meaning and each flag from the shared vocabulary where one fits (CLI-028, CLI-029). Accept the fleet's measured guesses through `Shortcuts`, `ShortFlags`, `FlagAliases` and `Meta.Aliases`, and suggest the rest through `FlagSynonyms` and `VerbSynonyms` (CLI-022).
+4. Shape the tree: flat `<noun> <verb>`, with `list`, `get`, `search`, `create`, `update`, `delete` before domain verbs (CLI-021), each verb with its standard meaning and each flag from the shared vocabulary where one fits (CLI-028, CLI-029). Accept the fleet's measured guesses through `AddShortcut` (one root shortcut per noun nested under exactly one parent), `ShortFlags`, `FlagAliases` and `Meta.Aliases`, and suggest the rest through `FlagSynonyms` and `VerbSynonyms` (CLI-022).
 5. Register every leaf with `app.Register(cmd, aicli.Meta{...})`: `Summary`, `Effects`, `Dangerous`, `Maturity`, `Output` (a schema defined with `app.Schema`), `ErrorCodes`, `Examples` (writes show the dry-run and confirm pair), plus `Positional`, `FileInputs`, `Secrets`, `DefaultFields` and `BatchFlag` where they apply.
 6. Reads return through `app.OK` or `app.List(cmd, aicli.Page{...})`; errors use the constructors (`Usage`, `Validation`, `NotFound`, `Ambiguous`, `FromHTTP`).
-7. Writes return through `app.Write`; batches use `app.WriteBatch` with `Meta.BatchFlag` (CLI-063).
+7. Writes return through `app.Write`; batches use `app.WriteBatch` with `Meta.BatchFlag` (CLI-063). A target that takes an upstream lookup comes from `WriteSpec.ResolveTarget`, which the gate calls after the token checks, never from a read before `app.Write` (CLI-057).
    ```go
    return app.Write(cmd, aicli.WriteSpec{
        Target:  aicli.Target{Key: "team/notes#7", Kind: "note", Label: "#7 Groceries"},
@@ -67,7 +67,7 @@ The aicli library (Go: `internal/aicli/`; Python: `<pkg>/_aicli/`) implements mo
 1. Read the rules for what you touch: output and errors (CLI-001…CLI-018), commands and discovery (CLI-020…CLI-037), reads (CLI-040…CLI-049), writes (CLI-050…CLI-065, SEC-010…SEC-021), settings and network (CLI-100…CLI-110, SEC-022), the Skill (SKILL-SPEC).
 2. New command: register it with `Meta`; VER-003 requires a test that runs it. If it writes, implement it with `app.Write` and add its `Sample`, or G00 fails. Set its maturity from its evidence (VER-005).
 3. Changed parameters or output: update the output schema. A command, flag or field you rename or remove is deprecated first (`Meta.Deprecated`, `Meta.DeprecatedFlags`), keeps working through at least one MINOR release and 90 days, and goes only in a MAJOR release (CLI-081). The change voids the command's `live` and `eval` evidence: re-run them or lower its maturity (VER-005).
-4. Agents keep guessing a form you don't accept (eval traces, bug reports)? Accept it (`Meta.Aliases`, `FlagAliases`, `Shortcuts`), or make the error carry the exact `did_you_mean` (`FlagSynonyms`, `VerbSynonyms`) (CLI-022).
+4. Agents keep guessing a form you don't accept (eval traces, bug reports)? Accept it (`Meta.Aliases`, `FlagAliases`, `AddShortcut`), or make the error carry the exact `did_you_mean` (`FlagSynonyms`, `VerbSynonyms`) (CLI-022).
 5. Update `CHANGELOG.md` and the Skill (playbooks by hand, the command map from the registry). Never edit `metadata.version` or `metadata.min_version`: `npm version` sets both to the tool version on every release (`scripts/sync-version.js`), and `check-version.js` fails on any other value (SKL-001, REPO-031).
 6. Before merge: the tests including the conformance suite, `node scripts/check-spec.js`, lint. Before a release that changes commands, outputs or the Skill: the agent eval (VER-006).
 7. New spec version: write its tag to `.agent/SPEC_VERSION`, run `node scripts/sync-spec.js` and the full test suite, and fix the tool, never the vendored files.

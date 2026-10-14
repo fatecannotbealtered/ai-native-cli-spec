@@ -395,9 +395,13 @@ def test_p5_set_profile_settings(h: THarness) -> None:
         with open(path, encoding="utf-8") as fh:
             return json.load(fh)
 
-    # no file yet: the state directory and the file are created
+    # no file yet: the state directory and the file are created, and the profile
+    # becomes the default (Q3)
     h.app().set_profile_settings("lab", {"host": "https://lab.example"})
-    assert read_back() == {"profiles": {"lab": {"host": "https://lab.example"}}}
+    assert read_back() == {
+        "default_profile": "lab",
+        "profiles": {"lab": {"host": "https://lab.example"}},
+    }
     if not WINDOWS:
         assert os.stat(path).st_mode & 0o777 == 0o600
         assert os.stat(h.state).st_mode & 0o777 == 0o700
@@ -475,7 +479,7 @@ def test_p5_set_profile_settings(h: THarness) -> None:
 
 
 def login_app(u: Upstream) -> App:
-    """The settings tool with login (Meta.new_profile): it reads its settings and
+    """The settings tool with login (Meta.allow_unknown_profile): it reads its settings and
     the profile, and its apply creates the profile with set_profile_settings."""
     a = settings_app(u)
     a.settings = [
@@ -531,7 +535,7 @@ def login_app(u: Upstream) -> App:
             summary="Sign in and keep the host in a profile",
             effects=[CONFIGURE],
             output="login_result",
-            new_profile=True,
+            allow_unknown_profile=True,
             examples=["notes login --profile lab --host https://lab.example --dangerous --dry-run"],
         ),
     )
@@ -539,7 +543,7 @@ def login_app(u: Upstream) -> App:
 
 
 def test_p6_new_profile_commands(h: THarness) -> None:
-    """A command declared with Meta.new_profile runs with a requested profile the
+    """A command declared with Meta.allow_unknown_profile runs with a requested profile the
     settings file does not have: setting reads the flag, the environment and the
     default; profile() and the binding name the requested profile; its apply can
     create it with set_profile_settings. Other commands still refuse the profile."""

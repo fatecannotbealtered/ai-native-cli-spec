@@ -60,8 +60,13 @@ func (a *App) ReadFileInput(cmd *cobra.Command, flag string) ([]byte, error) {
 
 // SetResolved replaces a flag's value with its resolved form before Write (for
 // example a ref or URL resolved to an id), so equivalent inputs bind identically
-// (CLI-054: bind resolved values, not input forms). Slice flags take every value.
-// Only call it for flags the user gave; it keeps the flag marked as given.
+// (CLI-054: bind resolved values, not input forms). Slice flags take every value,
+// and the flag is marked as given. Call it for a flag the user gave, and also for
+// one the user did not give when its value came inside another input (Q26): the
+// project in acme/web!5 sets --project, the note in acme/web!5#note_12 sets
+// --note-id. Bind each input's own part (the iid, the project), never a ref that
+// embeds both: changing --project then names --project, and acme/web!5 and
+// 5 --project acme/web bind alike.
 func SetResolved(cmd *cobra.Command, flag string, values ...string) error {
 	f := lookupFlag(cmd, flag)
 	if f == nil || len(values) == 0 {
@@ -261,7 +266,7 @@ func (a *App) bindSettings(b *binding, cmd *cobra.Command, key []byte) {
 	ps := a.profileState()
 	profile := ps.name
 	if profile == "" {
-		profile = ps.requested // a profile a Meta.NewProfile command creates (P6)
+		profile = ps.requested // a profile a Meta.AllowUnknownProfile command runs under (P6, Q4)
 	}
 	b.add("profile", claimString(profile), displayString(profile), "profile")
 	shown := map[string]any{}

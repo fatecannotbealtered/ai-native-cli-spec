@@ -19,7 +19,7 @@ import stat
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from ._util import RawNumber, go_bool_string, truncate_runes
+from ._util import Ordered, RawNumber, go_bool_string, truncate_runes
 from .errors import Error, internal_error, new_error
 from .keystore import is_link_or_reparse
 from .scope import _depth, _ScopeError, _strict_pairs
@@ -83,6 +83,16 @@ def _near(word: str, known: list[str]) -> str:
 
     near = closest_words(word, known)
     return f" (did you mean `{near[0]}`?)" if near else ""
+
+
+def _ordered(v: Any) -> Any:
+    """A decoded JSON value with every object as an Ordered, so it is written back
+    in its key order (Q3)."""
+    if isinstance(v, dict):
+        return Ordered((k, _ordered(x)) for k, x in v.items())
+    if isinstance(v, list):
+        return [_ordered(x) for x in v]
+    return v
 
 
 def parse_settings_file(
@@ -179,6 +189,8 @@ def parse_settings_file(
         out.profiles[name] = got
     if dp is not None and dp not in out.profiles:
         return None, f"default_profile `{truncate_runes(dp, 64)}` is not one of its profiles"
+    # the profiles in file order (App.profiles, Q3); problems were found in sorted order
+    out.profiles = {name: out.profiles[name] for name in profiles}
     return out, ""
 
 
@@ -324,28 +336,36 @@ class SettingsMixin:
         """The active profile's name and where it came from (CLI-101): flag, env,
         config, single, or ("", "none") when no profile is active (no settings, an
         invalid settings file, or a requested profile the file does not define).
-        Tools use it to key keyring entries per profile. For a command that creates
-        a profile (Meta.new_profile, P6), a requested profile the settings file does
-        not have yet is the one returned, with its source (flag or env)."""
+        Tools use it to key keyring entries per profile. For a command declared with
+        Meta.allow_unknown_profile (P6, Q4), a requested profile the settings file
+        does not have is the one returned, with its source (flag or env)."""
         if self.settings is None:
             return "", "none"
         ps = self._profile_state()
         if ps.reason:
             return "", "none"
         if ps.name is None:
-            if ps.unknown and self._creates_profile():
+            if ps.unknown and self._allows_unknown_profile():
                 return ps.unknown, ps.unknown_source or "flag"
             return "", "none"
         return ps.name, ps.source
 
-    def _creates_profile(self: App, node: Node | None = None) -> bool:
-        """A command declared with Meta.new_profile (P6); None means the running
-        command."""
+    def profiles(self: App) -> list[str]:
+        """The profile names of the settings file in file order (Q3): empty without a
+        file, and for an invalid one, whose E_CONFIG App.setting reports."""
+        ps = self._profile_state()
+        if ps.reason:
+            return []
+        return list(ps.profiles)
+
+    def _allows_unknown_profile(self: App, node: Node | None = None) -> bool:
+        """A command declared with Meta.allow_unknown_profile (P6, Q4); None means
+        the running command."""
         if node is None:
             st = self._run
             node = st.cmd if st is not None else None
         m = self.meta_for(node) if node is not None else None
-        return m is not None and m.new_profile
+        return m is not None and m.allow_unknown_profile
 
     def set_profile_settings(self: App, profile: str, values: dict[str, str]) -> None:
         """Write values into one profile of the settings file (CLI-101, P5), for a
@@ -354,11 +374,14 @@ class SettingsMixin:
         that is not secret (secrets go in the OS keyring, SEC-040). The current file
         is read with the same strict parser, and an invalid file is E_CONFIG and
         never overwritten. The profile is created when missing; every other key,
-        profile and default_profile is kept. The file is written atomically (a
-        temporary file in the same directory, fsync, rename) with mode 0600; the
-        state directory is created 0700 when the file lives there. A failure to
-        write is E_IO. Raises the Error; nothing was written then, so apply raises
-        it wrapped in not_dispatched."""
+        profile and default_profile is kept, and a file without default_profile gets
+        this profile as its default (Q3). The file keeps its order: default_profile
+        first, then the profiles in file order (a new one last), each with its keys
+        in file order (new keys last, sorted), indented by two spaces. It is written
+        atomically (a temporary file in the same directory, fsync, rename) with mode
+        0600; the state directory is created 0700 when the file lives there. A
+        failure to write is E_IO. Raises the Error; nothing was written then, so
+        apply raises it wrapped in not_dispatched."""
         from ._util import decode_generic, go_json, go_quote
         from .errors import io_error, validation
         from .journal import write_file_atomic
@@ -408,17 +431,22 @@ class SettingsMixin:
                 ) from None
             if isinstance(got, dict):
                 top = got
-        profiles = top.get("profiles")
-        if not isinstance(profiles, dict):
-            profiles = {}
+        # The file keeps its order (Q3): every object is written in its key order.
+        profiles = _ordered(top.get("profiles"))
+        if not isinstance(profiles, Ordered):
+            profiles = Ordered()
         entry = profiles.get(profile)
-        if not isinstance(entry, dict):
-            entry = {}
-        for k, v in values.items():
-            entry[k] = str(v)
+        if not isinstance(entry, Ordered):
+            entry = Ordered()
+        for k in sorted(values):
+            entry[k] = str(values[k])
         profiles[profile] = entry
-        top["profiles"] = profiles
-        data = (go_json(top, pretty=True) + "\n").encode("utf-8")
+        out = Ordered()
+        dp = top.get("default_profile")
+        # the first profile written becomes the default (Q3)
+        out["default_profile"] = profile if dp is None else _ordered(dp)
+        out["profiles"] = profiles
+        data = (go_json(out, pretty=True) + "\n").encode("utf-8")
         d = os.path.dirname(path)
         try:
             state = self.state_dir_path()
@@ -443,9 +471,9 @@ class SettingsMixin:
         command's flag the setting names, when it was given on the command line
         (flag); else <PREFIX>_<ENV> (env); else the active profile (profile); else
         the default (default). An invalid settings file or an unknown profile is
-        E_CONFIG whatever the value's source, except for a command that creates the
-        profile (Meta.new_profile, P6): it reads the flag, the environment and the
-        default."""
+        E_CONFIG whatever the value's source, except for a command declared with
+        Meta.allow_unknown_profile (P6, Q4): it reads the flag, the environment and
+        the default."""
         s = next((x for x in self.settings or [] if x.name == name), None)
         if s is None:
             raise internal_error(
@@ -454,7 +482,7 @@ class SettingsMixin:
         ps = self._profile_state()
         if ps.reason:
             raise self._settings_invalid(ps)
-        if ps.unknown and not self._creates_profile():
+        if ps.unknown and not self._allows_unknown_profile():
             raise self._profile_unknown(ps)
         st = self._run
         if s.flag and st is not None and st.cmd is not None:

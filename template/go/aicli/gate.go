@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -52,6 +54,10 @@ type Block struct{ Kind, Message string }
 // token to be issued; BlockedBy says why not. Destinations (deliver) and Outputs
 // (artifact, persist) are checked against the scope. Untrusted lists paths relative
 // to the preview object that carry external content (for example "changes[].before").
+// Dangerous makes this plan dangerous although its command is not (a commit that
+// deletes a file, Q13): --dangerous is then needed in both steps, the preview says
+// dangerous: true and the scope must grant dangerous; a plan whose danger changes
+// between the dry-run and the confirm is state_drift.
 type Preview struct {
 	Action                  string
 	Changes                 []FieldChange
@@ -60,6 +66,7 @@ type Preview struct {
 	BlockedBy               []Block
 	Destinations, Outputs   []string
 	Untrusted               []string
+	Dangerous               bool
 }
 
 // WriteSpec describes one write. Preview is read-only and is called at dry-run, at
@@ -71,12 +78,21 @@ type Preview struct {
 // whether the change landed (for example "note get 1"); an unknown outcome's
 // next_action names it. Build it from the registry path and validated inputs only,
 // never from upstream text (SEC-002).
+//
+// ResolveTarget, when set, is used instead of Target for a target that takes a read
+// to resolve (the canonical key of a variable named by its name, Q1). The gate calls
+// it at a dry-run or bare call before the scope check, and at confirm only after the
+// token checks (format, key, record, MAC, single use, expiry, inputs, --dangerous),
+// so a used token is token_used before any tool code runs. Its error is returned as
+// the tool's error, nothing sent; a resolved target that differs from the one the
+// token was issued for is token_mismatch (target). Do no such read before App.Write.
 type WriteSpec struct {
-	Target   Target
-	Preview  func(ctx context.Context) (Preview, error)
-	Apply    func(ctx context.Context, op Op) (Result, error)
-	Timeout  time.Duration
-	ReadBack string
+	Target        Target
+	ResolveTarget func(ctx context.Context) (Target, error)
+	Preview       func(ctx context.Context) (Preview, error)
+	Apply         func(ctx context.Context, op Op) (Result, error)
+	Timeout       time.Duration
+	ReadBack      string
 }
 
 // Op is handed to Apply: the operation id and the idempotency key to send upstream.
@@ -94,7 +110,8 @@ const leaseGrace = 5 * time.Second
 // (CLI-057 step 9) before it answers lock_held.
 var targetLockWait = 10 * time.Second
 
-// BatchItem is one target of a batch write.
+// BatchItem is one target of a batch write. Apply may be nil when the batch sends
+// its items through BatchSpec.ApplyAll.
 type BatchItem struct {
 	Target  Target
 	Preview func(ctx context.Context) (Preview, error)
@@ -102,11 +119,37 @@ type BatchItem struct {
 }
 
 // BatchSpec describes a batch write (CLI-063). ContinueOnError overrides the
-// --continue-on-error flag (default true, false for dangerous commands).
+// --continue-on-error flag (default true, false for dangerous commands). Timeout is
+// the deadline of each Apply (or ApplyAll) call.
+//
+// Action is the batch preview's action ("Close the merge requests"); empty means the
+// first item's, with the number of targets (Q19).
+//
+// ResolveItems, when set, is used instead of Items for a list that takes reads to
+// resolve, and is called when WriteSpec.ResolveTarget would be (Q1).
+//
+// ApplyAll sends the items through the upstream's native bulk call instead of each
+// item's Apply (Q12): in chunks of at most MaxPerCall items (all at once when 0),
+// one call per chunk, in item order. It returns one ItemOutcome per op, in the same
+// order, each classified like an item's Apply result. A missing or extra outcome is
+// a defect and makes every item of the chunk unknown; an error of the whole call
+// makes every item of the chunk unknown, unless it is NotDispatched or Rejected,
+// which then applies to each. Records and receipts stay per item.
 type BatchSpec struct {
 	Items           []BatchItem
 	ContinueOnError *bool
 	Timeout         time.Duration
+	Action          string
+	ResolveItems    func(ctx context.Context) ([]BatchItem, error)
+	ApplyAll        func(ctx context.Context, ops []Op) ([]ItemOutcome, error)
+	MaxPerCall      int
+}
+
+// ItemOutcome is one item's result of BatchSpec.ApplyAll: what the item's Apply
+// would have returned.
+type ItemOutcome struct {
+	Result Result
+	Err    error
 }
 
 type notDispatchedError struct{ err error }
@@ -152,6 +195,8 @@ type gateRun struct {
 	confirmSet    bool
 	dangerousFlag bool
 	idem          string
+	// planDangerous is a plan made dangerous by Preview.Dangerous (Q13).
+	planDangerous bool
 	// dispatched is the operation id once its dispatching record is written
 	// (CLI-057 step 14): from then on no error says that nothing was sent.
 	dispatched string
@@ -164,16 +209,62 @@ func (a *App) Write(cmd *cobra.Command, spec WriteSpec) (err error) {
 		return err
 	}
 	defer g.recoverAfterDispatch(&err)
-	if spec.Preview == nil || spec.Apply == nil || strings.TrimSpace(spec.Target.Key) == "" {
-		return g.fail(internalError("App.Write needs WriteSpec.Target.Key, Preview and Apply."))
+	if spec.Preview == nil || spec.Apply == nil || (strings.TrimSpace(spec.Target.Key) == "" && spec.ResolveTarget == nil) {
+		return g.fail(internalError("App.Write needs WriteSpec.Target.Key (or ResolveTarget), Preview and Apply."))
 	}
-	if e := checkTargetKey(spec.Target.Key); e != nil {
-		return g.fail(e)
+	if spec.ResolveTarget == nil {
+		if e := checkTargetKey(spec.Target.Key); e != nil {
+			return g.fail(e)
+		}
 	}
 	if g.confirmSet {
 		return g.confirmSingle(spec)
 	}
+	spec, e := g.resolveTarget(spec)
+	if e != nil {
+		return g.fail(e)
+	}
 	return g.planSingle(spec)
+}
+
+// resolveTarget calls WriteSpec.ResolveTarget when it is set (Q1) and checks the key
+// it returns. Its error is the tool's own, and nothing was sent.
+func (g *gateRun) resolveTarget(spec WriteSpec) (WriteSpec, *Error) {
+	if spec.ResolveTarget == nil {
+		return spec, nil
+	}
+	t, e := callTool(g.a, spec.ResolveTarget, "The write target could not be resolved; nothing was sent.")
+	if e != nil {
+		return spec, e
+	}
+	if strings.TrimSpace(t.Key) == "" {
+		return spec, internalError("WriteSpec.ResolveTarget returned a target without a key.")
+	}
+	if e := checkTargetKey(t.Key); e != nil {
+		return spec, e
+	}
+	spec.Target, spec.ResolveTarget = t, nil // resolved once per run
+	return spec, nil
+}
+
+// callTool runs one of the tool's own hooks (ResolveTarget, ResolveItems) with the
+// run's context. Its error keeps its code with dispatch_state not_started; a panic is
+// an internal error, and nothing was sent either way.
+func callTool[T any](a *App, fn func(context.Context) (T, error), panicMessage string) (out T, e *Error) {
+	defer func() {
+		if r := recover(); r != nil {
+			e = internalError("%s", panicMessage)
+			e.Details["cause"] = truncateRunes(fmt.Sprint(r), 300)
+			e.Untrusted = []string{"cause"}
+		}
+	}()
+	out, err := fn(a.ctx())
+	if err != nil {
+		e = copyError(asError(err))
+		e.Details["dispatch_state"] = "not_started"
+		return out, e
+	}
+	return out, nil
 }
 
 // checkTargetKey refuses target keys that could slip past scope prefix matching:
@@ -353,8 +444,72 @@ func (g *gateRun) checkUnresolved(j *journal, targets []string, exclude map[stri
 }
 
 func (g *gateRun) need(targets, destinations, outputs []string, operations int) scopeNeed {
-	return scopeNeed{effects: g.m.effectStrings(), dangerous: g.m.dangerous(), targets: targets,
+	return scopeNeed{effects: g.m.effectStrings(), dangerous: g.dangerous(), targets: targets,
 		destinations: destinations, outputs: outputs, operations: operations}
+}
+
+// dangerous reports a write that needs --dangerous: its command is dangerous, or its
+// plan is (Preview.Dangerous, Q13).
+func (g *gateRun) dangerous() bool { return g.m.dangerous() || g.planDangerous }
+
+// planDangerousRefusal is dangerous_flag_required for a plan that Preview made
+// dangerous (Q13), with the plan attached as dangerousRefusal attaches it.
+func (g *gateRun) planDangerousRefusal(spec WriteSpec, pv Preview) *Error {
+	e := g.attachPreview(g.dangerousRequired(), spec, pv)
+	if hasKey(e.Details, "preview") {
+		e.Details["next_action"] = "details.preview shows the plan; run the same command again with --dangerous added to get its confirm token (keep --dry-run if you used it)."
+	}
+	return e
+}
+
+// createOnlyExisting refuses an output path that exists for a command that declares
+// artifact but not persist (Q9): it never overwrites, so no scope grant could help.
+func (g *gateRun) createOnlyExisting(paths []string) *Error {
+	if !g.m.hasEffect(Artifact) || g.m.hasEffect(Persist) {
+		return nil
+	}
+	for _, p := range paths {
+		if outputExists(p) {
+			return createOnlyExists(p)
+		}
+	}
+	return nil
+}
+
+// outputExists reports whether a local output path exists, after resolving links; a
+// path whose existence cannot be read counts as existing, the stricter case.
+func outputExists(p string) bool {
+	r, reason := resolvePath(p)
+	if reason != "" {
+		return false // a junction is refused by the scope check (C2)
+	}
+	_, err := os.Lstat(r)
+	return !errors.Is(err, fs.ErrNotExist)
+}
+
+// createOnlyExists is Q9's refusal of an existing output path by a command that only
+// creates files: E_VALIDATION invalid_value with the path, nothing written.
+func createOnlyExists(path string) *Error {
+	e := Validation("", "", "The output file already exists, and this command never overwrites files; nothing was written.")
+	e.Details["path"] = path
+	e.Details["dispatch_state"] = "not_started"
+	e.Details["next_action"] = "Choose a new file name, or move the existing file away first."
+	return e
+}
+
+// withoutCreateOnlyExisting leaves out of a scope request the existing outputs of a
+// command that only creates files (Q9): roots would not help it.
+func (g *gateRun) withoutCreateOnlyExisting(paths []string) []string {
+	if !g.m.hasEffect(Artifact) || g.m.hasEffect(Persist) {
+		return paths
+	}
+	var out []string
+	for _, p := range paths {
+		if !outputExists(p) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // identity resolves the account and host from App.Identity (local configuration).
@@ -414,6 +569,39 @@ func (g *gateRun) callApply(fn func(context.Context, Op) (Result, error), op Op,
 		}
 	}()
 	return fn(ctx, op)
+}
+
+// callApplyAll runs one native bulk call for a chunk of batch items (Q12) and returns
+// one outcome per op. An error of the whole call becomes every item's error
+// (NotDispatched and Rejected keep their meaning; anything else is unknown), as does
+// a panic; a call that returns a different number of outcomes is a defect, and every
+// item of the chunk is unknown.
+func (g *gateRun) callApplyAll(fn func(context.Context, []Op) ([]ItemOutcome, error), ops []Op, timeout time.Duration) []ItemOutcome {
+	ctx, cancel := context.WithTimeout(g.a.ctx(), timeout)
+	defer cancel()
+	outs, err := func() (outs []ItemOutcome, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				outs, err = nil, fmt.Errorf("apply panicked: %v", r)
+			}
+		}()
+		return fn(ctx, ops)
+	}()
+	each := make([]ItemOutcome, len(ops))
+	switch {
+	case err != nil:
+		for i := range each {
+			each[i] = ItemOutcome{Err: err}
+		}
+	case len(outs) != len(ops):
+		g.a.defect(fmt.Sprintf("BatchSpec.ApplyAll returned %d outcomes for %d items; every item of that call is reported unknown.", len(outs), len(ops)))
+		for i := range each {
+			each[i] = ItemOutcome{Err: errors.New("the bulk call returned no outcome for this item")}
+		}
+	default:
+		copy(each, outs)
+	}
+	return each
 }
 
 // checkDeclared makes deliver and local-file writes declare what the scope must cover.
@@ -485,7 +673,7 @@ func (g *gateRun) action(pv Preview) string {
 func (g *gateRun) previewObject(id string, t Target, pv Preview, inputs map[string]any, canApply bool, blocks []Block) map[string]any {
 	obj := map[string]any{
 		"operation_id": id, "command": g.path, "action": g.action(pv), "target": targetObject(t),
-		"effects": g.m.effectStrings(), "dangerous": g.m.dangerous(), "changes": changeObjects(pv.Changes),
+		"effects": g.m.effectStrings(), "dangerous": g.m.dangerous() || pv.Dangerous, "changes": changeObjects(pv.Changes),
 		"inputs": inputs, "can_apply": canApply, "blocked_by": blockObjects(blocks),
 	}
 	if pv.BaseVersion != "" {
@@ -555,9 +743,11 @@ func (g *gateRun) withPreview(e *Error, spec WriteSpec, sc scopeState, need scop
 	if perr != nil {
 		return e
 	}
-	if len(need.destinations)+len(need.outputs) == 0 && len(pv.Destinations)+len(pv.Outputs) > 0 {
+	outputs := g.withoutCreateOnlyExisting(pv.Outputs)
+	if len(need.destinations)+len(need.outputs) == 0 && len(pv.Destinations)+len(outputs) > 0 {
 		full := need
-		full.destinations, full.outputs = pv.Destinations, pv.Outputs
+		full.destinations, full.outputs = pv.Destinations, outputs
+		full.dangerous = full.dangerous || pv.Dangerous
 		if wider := g.a.checkScope(sc, full, state); wider != nil && wider.Code == e.Code {
 			e = wider
 		}
@@ -642,9 +832,9 @@ func (g *gateRun) issue(p *issued) error {
 	return g.fail(e)
 }
 
-// dangerousArg is " --dangerous" for a dangerous command, for next_action texts.
+// dangerousArg is " --dangerous" for a dangerous write, for next_action texts.
 func (g *gateRun) dangerousArg() string {
-	if g.m.dangerous() {
+	if g.dangerous() {
 		return " --dangerous"
 	}
 	return ""
@@ -656,6 +846,10 @@ func (g *gateRun) dangerousArg() string {
 // When the write cannot be planned or applied now, the conflict stands alone.
 func (g *gateRun) withFreshPlan(e *Error, spec WriteSpec) *Error {
 	if g.m.dangerous() && !g.dangerousFlag {
+		return e
+	}
+	spec, re := g.resolveTarget(spec) // an expired token: the new plan is a dry-run (Q1)
+	if re != nil {
 		return e
 	}
 	p, pe := g.prepareSingle(spec, false)
@@ -745,7 +939,15 @@ func (g *gateRun) prepareSingle(spec WriteSpec, lookup bool) (*issued, *Error) {
 	if e := g.checkDeclared(pv); e != nil {
 		return nil, e
 	}
-	need.destinations, need.outputs = pv.Destinations, pv.Outputs
+	// A plan Preview made dangerous needs --dangerous like a dangerous command (Q13).
+	g.planDangerous = pv.Dangerous
+	if pv.Dangerous && !g.m.dangerous() && !g.dangerousFlag {
+		return nil, g.planDangerousRefusal(spec, pv)
+	}
+	if e := g.createOnlyExisting(pv.Outputs); e != nil {
+		return nil, e
+	}
+	need.destinations, need.outputs, need.dangerous = pv.Destinations, pv.Outputs, g.dangerous()
 	if e := g.a.checkScope(sc, need, state); e != nil {
 		return nil, g.withPreview(e, spec, sc, need, state)
 	}
@@ -774,7 +976,7 @@ func (g *gateRun) prepareSingle(spec WriteSpec, lookup bool) (*issued, *Error) {
 	pobj := g.previewObject(id, spec.Target, pv, b.display, canApply, blocks)
 	cl := g.claims(id, b, ident, claimString(spec.Target.Key), sc.digest, claimString(pv.BaseVersion), exp)
 	rec := &record{V: 2, OperationID: id, Kind: "single", Command: g.path, Status: "planned", Target: targetPtr(spec.Target),
-		Effects: g.m.effectStrings(), Dangerous: g.m.dangerous(), ScopeID: sc.id(), CreatedAt: timeString(now),
+		Effects: g.m.effectStrings(), Dangerous: g.dangerous(), ScopeID: sc.id(), CreatedAt: timeString(now),
 		ExpiresAt: timeString(exp), Claims: &cl, Preview: rawJSON(pobj)}
 	if e := j.write(rec); e != nil {
 		return nil, e
@@ -1086,6 +1288,13 @@ func (g *gateRun) checkDrift(base string, stored map[string]any, pv Preview, t T
 			return drift("the planned " + k + " differ")
 		}
 	}
+	// A plan whose danger changed is another plan (Q13).
+	if stored["dangerous"] != fresh["dangerous"] {
+		if fresh["dangerous"] == true {
+			return drift("it is now dangerous")
+		}
+		return drift("it is no longer dangerous")
+	}
 	return nil
 }
 
@@ -1104,8 +1313,15 @@ func (g *gateRun) confirmSingle(spec WriteSpec) error {
 	if p := g.compareInputs(rec.Claims, b); p != "" {
 		return g.fail(g.inputMismatch(rec, b, p))
 	}
-	if g.m.dangerous() && !g.dangerousFlag {
+	stored := decodeGeneric(rec.Preview)
+	g.planDangerous = stored["dangerous"] == true // a plan Preview made dangerous (Q13)
+	if g.dangerous() && !g.dangerousFlag {
 		return g.fail(g.dangerousRequired())
+	}
+	// The tool's target resolution runs only now, after every token check (Q1).
+	spec, e = g.resolveTarget(spec)
+	if e != nil {
+		return g.fail(e)
 	}
 	// Steps 9 to 14 run under the target's lock (A3).
 	unlock, e := g.lockTargets(state, []string{spec.Target.Key}, rec.OperationID)
@@ -1116,7 +1332,9 @@ func (g *gateRun) confirmSingle(spec WriteSpec) error {
 	if e := g.recheckUsed(j, rec.OperationID); e != nil {
 		return g.fail(e)
 	}
-	stored := decodeGeneric(rec.Preview)
+	if e := g.createOnlyExisting(stringsAt(stored, "outputs")); e != nil {
+		return g.fail(e)
+	}
 	sc := g.a.loadScope(state)
 	need := g.need([]string{spec.Target.Key}, stringsAt(stored, "destinations"), stringsAt(stored, "outputs"), 0)
 	if e := g.a.checkScope(sc, need, ""); e != nil {
@@ -1304,14 +1522,11 @@ func (g *gateRun) replay(j *journal, state string, sc scopeState, rec, prev *rec
 	return g.succeed(data, untrusted)
 }
 
-// projectResult applies --fields to a confirmed write's result with the command's
-// output schema, as App.OK does for a read (P12). Without --fields the result is
-// returned whole (a write's default fields do not apply); the receipt is never
+// projectResult projects a confirmed write's result with the command's output schema
+// as App.OK does for a read: its default fields (or Meta.DefaultFields) without
+// --fields (Q16), what --fields replaces or adds with it (P12). The receipt is never
 // projected.
 func (g *gateRun) projectResult(result any) any {
-	if !g.st.fields.set {
-		return result
-	}
 	gen, err := toGeneric(result)
 	if err != nil || gen == nil {
 		return result
@@ -1608,14 +1823,47 @@ func (a *App) WriteBatch(cmd *cobra.Command, spec BatchSpec) (err error) {
 		return err
 	}
 	defer g.recoverAfterDispatch(&err)
+	if spec.ResolveItems != nil {
+		// The items are resolved at the dry-run before the scope check, and at
+		// confirm after the token checks (Q1).
+		if g.confirmSet {
+			return g.confirmBatch(spec, nil)
+		}
+		items, e := g.batchItems(spec)
+		if e != nil {
+			return g.fail(e)
+		}
+		return g.planBatch(spec, items)
+	}
+	items, e := g.batchItems(spec)
+	if e != nil {
+		return g.fail(e)
+	}
+	if g.confirmSet {
+		return g.confirmBatch(spec, items)
+	}
+	return g.planBatch(spec, items)
+}
+
+// batchItems returns the batch's items, from BatchSpec.ResolveItems when it is set
+// (Q1), checked and de-duplicated by target key with their order kept.
+func (g *gateRun) batchItems(spec BatchSpec) ([]BatchItem, *Error) {
+	list := spec.Items
+	if spec.ResolveItems != nil {
+		resolved, e := callTool(g.a, spec.ResolveItems, "The batch targets could not be resolved; nothing was sent.")
+		if e != nil {
+			return nil, e
+		}
+		list = resolved
+	}
 	var items []BatchItem
 	seen := map[string]bool{}
-	for _, it := range spec.Items {
-		if it.Preview == nil || it.Apply == nil || strings.TrimSpace(it.Target.Key) == "" {
-			return g.fail(internalError("Every BatchItem needs Target.Key, Preview and Apply."))
+	for _, it := range list {
+		if it.Preview == nil || (it.Apply == nil && spec.ApplyAll == nil) || strings.TrimSpace(it.Target.Key) == "" {
+			return nil, internalError("Every BatchItem needs Target.Key and Preview, and Apply unless BatchSpec.ApplyAll is set.")
 		}
 		if e := checkTargetKey(it.Target.Key); e != nil {
-			return g.fail(e)
+			return nil, e
 		}
 		if seen[it.Target.Key] {
 			continue
@@ -1626,12 +1874,9 @@ func (a *App) WriteBatch(cmd *cobra.Command, spec BatchSpec) (err error) {
 	if len(items) == 0 {
 		e := Usage("missing_parameter", "--"+g.m.BatchFlag, "The batch names no targets; nothing was changed.")
 		e.Details["next_action"] = fmt.Sprintf("Give at least one target with --%s.", g.m.BatchFlag)
-		return g.fail(e)
+		return nil, e
 	}
-	if g.confirmSet {
-		return g.confirmBatch(spec, items)
-	}
-	return g.planBatch(items)
+	return items, nil
 }
 
 // itemPlan is one previewed batch item.
@@ -1686,7 +1931,7 @@ func (g *gateRun) previewItems(items []BatchItem) ([]itemPlan, *Error) {
 	return plans, nil
 }
 
-func (g *gateRun) planBatch(items []BatchItem) error {
+func (g *gateRun) planBatch(spec BatchSpec, items []BatchItem) error {
 	if g.m.dangerous() && !g.dangerousFlag {
 		return g.fail(g.dangerousRequired())
 	}
@@ -1729,7 +1974,15 @@ func (g *gateRun) planBatch(items []BatchItem) error {
 	for _, p := range plans {
 		need.destinations = append(need.destinations, p.pv.Destinations...)
 		need.outputs = append(need.outputs, p.pv.Outputs...)
+		g.planDangerous = g.planDangerous || p.pv.Dangerous // one dangerous item plan makes the batch dangerous (Q13)
 	}
+	if g.planDangerous && !g.m.dangerous() && !g.dangerousFlag {
+		return g.fail(g.dangerousRequired())
+	}
+	if e := g.createOnlyExisting(need.outputs); e != nil {
+		return g.fail(e)
+	}
+	need.dangerous = g.dangerous()
 	if e := g.a.checkScope(sc, need, state); e != nil {
 		return g.fail(e)
 	}
@@ -1779,13 +2032,16 @@ func (g *gateRun) planBatch(items []BatchItem) error {
 		bases = append(bases, claimString(p.pv.BaseVersion))
 		untrusted = append(untrusted, prefixPaths("items[]", p.pv.Untrusted)...)
 	}
-	action := g.action(plans[0].pv)
-	if len(plans) > 1 {
-		action = fmt.Sprintf("%s (%d targets)", action, len(plans))
+	action := strings.TrimSpace(spec.Action) // the batch's own action (Q19)
+	if action == "" {
+		action = g.action(plans[0].pv)
+		if len(plans) > 1 {
+			action = fmt.Sprintf("%s (%d targets)", action, len(plans))
+		}
 	}
 	pobj := map[string]any{
 		"operation_id": batchID, "command": g.path, "action": action, "effects": g.m.effectStrings(),
-		"dangerous": g.m.dangerous(), "inputs": b.display, "can_apply": canApply, "blocked_by": blockObjects(aggregate),
+		"dangerous": g.dangerous(), "inputs": b.display, "can_apply": canApply, "blocked_by": blockObjects(aggregate),
 		"targets": targets, "total": len(plans), "items": previewItems,
 	}
 	if len(need.destinations) > 0 {
@@ -1802,14 +2058,14 @@ func (g *gateRun) planBatch(items []BatchItem) error {
 	cl := g.claims(batchID, b, ident, digestList(keys), sc.digest, digestList(bases), exp)
 	for _, p := range plans {
 		ir := &record{V: 2, OperationID: p.id, Kind: "item", BatchID: strPtr(batchID), Command: g.path, Status: "planned",
-			Target: targetPtr(p.item.Target), Effects: g.m.effectStrings(), Dangerous: g.m.dangerous(), ScopeID: sc.id(),
+			Target: targetPtr(p.item.Target), Effects: g.m.effectStrings(), Dangerous: g.m.dangerous() || p.pv.Dangerous, ScopeID: sc.id(),
 			CreatedAt: timeString(now), ExpiresAt: timeString(exp), Preview: rawJSON(p.pobj)}
 		if e := j.write(ir); e != nil {
 			return g.fail(e)
 		}
 	}
 	rec := &record{V: 2, OperationID: batchID, Kind: "batch", Command: g.path, Status: "planned", Effects: g.m.effectStrings(),
-		Dangerous: g.m.dangerous(), ScopeID: sc.id(), CreatedAt: timeString(now), ExpiresAt: timeString(exp), Claims: &cl,
+		Dangerous: g.dangerous(), ScopeID: sc.id(), CreatedAt: timeString(now), ExpiresAt: timeString(exp), Claims: &cl,
 		Preview: rawJSON(pobj), Items: itemIDs}
 	if e := j.write(rec); e != nil {
 		return g.fail(e)
@@ -1834,7 +2090,9 @@ func (g *gateRun) confirmBatch(spec BatchSpec, items []BatchItem) error {
 	if p := g.compareInputs(rec.Claims, b); p != "" {
 		return g.fail(g.inputMismatch(rec, b, p))
 	}
-	if g.m.dangerous() && !g.dangerousFlag {
+	stored := decodeGeneric(rec.Preview)
+	g.planDangerous = stored["dangerous"] == true // an item plan Preview made dangerous (Q13)
+	if g.dangerous() && !g.dangerousFlag {
 		return g.fail(g.dangerousRequired())
 	}
 	// The planned item records, in order.
@@ -1850,6 +2108,14 @@ func (g *gateRun) confirmBatch(spec BatchSpec, items []BatchItem) error {
 		}
 		itemRecs = append(itemRecs, ir)
 	}
+	if items == nil {
+		// The tool's item resolution runs only now, after every token check (Q1).
+		resolved, e := g.batchItems(spec)
+		if e != nil {
+			return g.fail(e)
+		}
+		items = resolved
+	}
 	keys := batchKeys(items)
 	// Steps 9 to 14 run under every item target's lock (A3).
 	unlock, e := g.lockTargets(state, keys, rec.OperationID)
@@ -1860,7 +2126,9 @@ func (g *gateRun) confirmBatch(spec BatchSpec, items []BatchItem) error {
 	if e := g.recheckUsed(j, rec.OperationID); e != nil {
 		return g.fail(e)
 	}
-	stored := decodeGeneric(rec.Preview)
+	if e := g.createOnlyExisting(stringsAt(stored, "outputs")); e != nil {
+		return g.fail(e)
+	}
 	sc := g.a.loadScope(state)
 	need := g.need(keys, stringsAt(stored, "destinations"), stringsAt(stored, "outputs"), 0)
 	if e := g.a.checkScope(sc, need, ""); e != nil {
@@ -1933,9 +2201,17 @@ func (g *gateRun) confirmBatch(spec BatchSpec, items []BatchItem) error {
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
+	chunk := 1 // one Apply call per item, or one ApplyAll call per chunk (Q12)
+	if spec.ApplyAll != nil {
+		chunk = len(items)
+		if spec.MaxPerCall > 0 && spec.MaxPerCall < chunk {
+			chunk = spec.MaxPerCall
+		}
+	}
+	calls := (len(items) + chunk - 1) / chunk
 	rec.Status = "dispatching"
 	rec.DispatchedAt = strPtr(timeString(now))
-	rec.LeaseUntil = strPtr(timeString(now.Add(timeout*time.Duration(len(items)) + leaseGrace)))
+	rec.LeaseUntil = strPtr(timeString(now.Add(timeout*time.Duration(calls) + leaseGrace)))
 	if e := j.write(rec); e != nil {
 		return g.fail(e)
 	}
@@ -1949,7 +2225,7 @@ func (g *gateRun) confirmBatch(spec BatchSpec, items []BatchItem) error {
 	if spec.ContinueOnError != nil {
 		continueOnError = *spec.ContinueOnError
 	}
-	return g.runBatch(j, state, sc, rec, items, itemRecs, timeout, continueOnError)
+	return g.runBatch(j, state, sc, rec, spec, items, itemRecs, chunk, timeout, continueOnError)
 }
 
 // batchReplayOf is the answer to a repeated batch (A5): the original batch's id, its
@@ -2021,10 +2297,12 @@ func (g *gateRun) replayBatch(j *journal, state string, sc scopeState, rec *reco
 	return g.succeed(data, untrusted)
 }
 
-// runBatch applies the items in order and reports the batch (CLI-063). Items that
-// were never dispatched (skipped after a stop) give their budget back (A4).
-func (g *gateRun) runBatch(j *journal, state string, sc scopeState, rec *record, items []BatchItem, itemRecs []*record,
-	timeout time.Duration, continueOnError bool) error {
+// runBatch applies the items in order and reports the batch (CLI-063): one Apply
+// call per item, or one BatchSpec.ApplyAll call per chunk of chunk items (Q12), each
+// outcome mapped onto its item. Items that were never dispatched (skipped after a
+// stop) give their budget back (A4).
+func (g *gateRun) runBatch(j *journal, state string, sc scopeState, rec *record, spec BatchSpec, items []BatchItem, itemRecs []*record,
+	chunk int, timeout time.Duration, continueOnError bool) error {
 	var results []any
 	var firstFail *writeOutcome
 	succeeded, failed, unknownN, skipped, undispatched := 0, 0, 0, 0, 0
@@ -2035,43 +2313,29 @@ func (g *gateRun) runBatch(j *journal, state string, sc scopeState, rec *record,
 			refundScopeUsage(state, *id, undispatched)
 		}
 	}()
-	for i, it := range items {
-		ir := itemRecs[i]
-		now := g.a.now()
-		if stop {
-			o := sanitizeOutcome(Outcome{Execution: "not_started",
-				Change:       pick(g.m.hasEffect(Change, Configure), "not_applied", "not_applicable"),
-				Delivery:     pick(g.m.hasEffect(Deliver), "not_attempted", "not_applicable"),
-				Persistence:  pick(g.m.hasEffect(Artifact, Persist), "unchanged", "not_applicable"),
-				Verification: "not_applicable"})
-			receipt := g.skippedReceipt(ir.OperationID, it.Target, o)
-			ir.Status = "not_applied"
-			ir.FinishedAt = strPtr(timeString(now))
-			ir.Receipt = rawJSON(receipt)
-			if e := j.write(ir); e != nil {
-				g.a.Notice(journalNotice())
-			}
-			results = append(results, map[string]any{"target": it.Target.Key, "operation_id": ir.OperationID, "ok": false, "receipt": receipt})
-			skipped++
-			undispatched++
-			continue
-		}
-		ir.Status = "dispatching"
-		ir.DispatchedAt = strPtr(timeString(now))
-		ir.LeaseUntil = strPtr(timeString(now.Add(timeout + leaseGrace)))
+	// notSent records item i as never started: skipped after a stop, or in a chunk
+	// whose records could not all be written.
+	notSent := func(i int) map[string]any {
+		it, ir := items[i], itemRecs[i]
+		o := sanitizeOutcome(Outcome{Execution: "not_started",
+			Change:       pick(g.m.hasEffect(Change, Configure), "not_applied", "not_applicable"),
+			Delivery:     pick(g.m.hasEffect(Deliver), "not_attempted", "not_applicable"),
+			Persistence:  pick(g.m.hasEffect(Artifact, Persist), "unchanged", "not_applicable"),
+			Verification: "not_applicable"})
+		receipt := g.skippedReceipt(ir.OperationID, it.Target, o)
+		ir.Status = "not_applied"
+		ir.FinishedAt = strPtr(timeString(g.a.now()))
+		ir.LeaseUntil = nil
+		ir.Receipt = rawJSON(receipt)
 		if e := j.write(ir); e != nil {
-			out := writeOutcome{ok: false, code: e.Code, cause: e, dispatch: "not_started"}
-			results = append(results, map[string]any{"target": it.Target.Key, "operation_id": ir.OperationID, "ok": false,
-				"error": g.itemError(out)})
-			failed++
-			undispatched++
-			if firstFail == nil {
-				firstFail = &out
-			}
-			stop = true
-			continue
+			g.a.Notice(journalNotice())
 		}
-		res, applyErr := g.callApply(it.Apply, Op{ID: ir.OperationID, IdempotencyKey: itemKey(g.idem, it.Target.Key)}, timeout)
+		undispatched++
+		return map[string]any{"target": it.Target.Key, "operation_id": ir.OperationID, "ok": false, "receipt": receipt}
+	}
+	// report records the outcome of dispatched item i.
+	report := func(i int, res Result, applyErr error) bool {
+		it, ir := items[i], itemRecs[i]
 		out := g.classify(ir.OperationID, it.Target, decodeGeneric(ir.Preview), res, applyErr)
 		if resolved := g.finishRecord(j, ir, out); resolved {
 			// Resolved by hand while Apply still ran: the item's outcome is unknown (A6).
@@ -2112,8 +2376,65 @@ func (g *gateRun) runBatch(j *journal, state string, sc scopeState, rec *record,
 			}
 		}
 		results = append(results, entry)
-		if !out.ok && !continueOnError {
+		return out.ok
+	}
+	for start := 0; start < len(items); start += chunk {
+		end := min(start+chunk, len(items))
+		if stop {
+			for i := start; i < end; i++ {
+				results = append(results, notSent(i))
+				skipped++
+			}
+			continue
+		}
+		// The chunk's records turn dispatching before its call (CLI-057 step 14).
+		now := g.a.now()
+		ops := make([]Op, 0, end-start)
+		var recErr *Error
+		failedAt := -1
+		for i := start; i < end; i++ {
+			ir := itemRecs[i]
+			ir.Status = "dispatching"
+			ir.DispatchedAt = strPtr(timeString(now))
+			ir.LeaseUntil = strPtr(timeString(now.Add(timeout + leaseGrace)))
+			if e := j.write(ir); e != nil {
+				recErr, failedAt = e, i
+				break
+			}
+			ops = append(ops, Op{ID: ir.OperationID, IdempotencyKey: itemKey(g.idem, items[i].Target.Key)})
+		}
+		if recErr != nil {
+			// Nothing of this chunk was sent: the item whose record could not be
+			// written reports the journal error, and the others were not started.
+			out := writeOutcome{ok: false, code: recErr.Code, cause: recErr, dispatch: "not_started"}
+			for i := start; i < end; i++ {
+				if i == failedAt {
+					results = append(results, map[string]any{"target": items[i].Target.Key, "operation_id": itemRecs[i].OperationID,
+						"ok": false, "error": g.itemError(out)})
+					failed++
+					undispatched++
+					continue
+				}
+				results = append(results, notSent(i))
+				skipped++
+			}
+			if firstFail == nil {
+				firstFail = &out
+			}
 			stop = true
+			continue
+		}
+		var outcomes []ItemOutcome
+		if spec.ApplyAll == nil {
+			res, applyErr := g.callApply(items[start].Apply, ops[0], timeout)
+			outcomes = []ItemOutcome{{Result: res, Err: applyErr}}
+		} else {
+			outcomes = g.callApplyAll(spec.ApplyAll, ops, timeout)
+		}
+		for k := range outcomes {
+			if !report(start+k, outcomes[k].Result, outcomes[k].Err) && !continueOnError {
+				stop = true
+			}
 		}
 	}
 	summary := map[string]any{"total": len(items), "succeeded": succeeded, "failed": failed, "unknown": unknownN, "skipped": skipped}

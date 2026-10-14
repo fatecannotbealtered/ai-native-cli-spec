@@ -36,7 +36,7 @@ Include: a description and impact, steps to reproduce (if safe to share), and th
 | **T1** | `change`, `artifact`, `persist` | edit an object upstream, export a file, overwrite a local file |
 | **T2** | `deliver` or `configure`, or irreversible / account-level damage | send or publish, change permissions or credentials, delete a project |
 
-The tier describes what the commands can do, not what the credential could do. `{{TOOL_NAME}} reference --index` lists each command's effects and whether it is dangerous. Dangerous commands (irreversible deletes and merges, and every `deliver` and `configure` command) need `--dangerous` in both write steps and a scope that grants `"dangerous": true` (CLI-056, SEC-012).
+The tier describes what the commands can do, not what the credential could do. `{{TOOL_NAME}} reference --index` lists each command's effects and whether it is dangerous. Dangerous commands (irreversible deletes and merges, and every `deliver` and `configure` command) and dangerous plans (a write whose preview says `dangerous: true`, such as a commit that deletes files) need `--dangerous` in both write steps and a scope that grants `"dangerous": true` (CLI-056, SEC-012). A bulk command is dangerous only when what it does is, not because it has many targets.
 
 <!-- A T0 tool (no write commands) replaces the next two sections with one sentence: it has no write commands, so it needs no scope file and has no write gate. -->
 
@@ -72,7 +72,7 @@ Every command with an effect other than `observe` runs through the write gate of
 - **Passwords** are exchanged for tokens at login and never stored. The exception is a durable secret the upstream protocol needs (for example Basic auth): it is stored in the OS keyring (SEC-040).
 - **Environment variables** (`{{ENV_PREFIX}}_HOST`, `{{ENV_PREFIX}}_TOKEN`) are the non-interactive channel and take precedence over stored credentials. A person sets them before the agent's session. Secrets are not passed as flags in documented use: argv shows up in process lists, shell history and the agent's transcript.
 - **Changing credentials is dangerous**: commands that store, change or remove credentials or profiles declare the `configure` effect, so an agent needs a scope that grants `configure` and `dangerous` to change the account the tool acts as (SEC-040).
-- **Redaction**: secret values never appear in stdout, stderr, previews (shown as `"***"`), confirm tokens, operation records, logs, `{{ENV_PREFIX}}_DEBUG` output or error details, and no unsalted hash of a secret is ever published (SEC-021, CLI-102). A new flag that carries a secret is declared in `Meta.Secrets`.
+- **Redaction**: secret values never appear in stdout, stderr, previews (shown as `"***"`), confirm tokens, operation records, logs, `{{ENV_PREFIX}}_DEBUG` output or error details, and no unsalted hash of a secret is ever published (SEC-021, CLI-102). Secret values that {{THIRD_PARTY}} returns (a masked variable, a key shown once) are never output either; read them in {{THIRD_PARTY}} itself. A new flag that carries a secret, in any of its values, is declared in `Meta.Secrets`.
 
 ## Outbound Contact
 

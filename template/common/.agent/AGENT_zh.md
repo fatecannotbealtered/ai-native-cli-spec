@@ -25,7 +25,7 @@ aicli 库（Go：`internal/aicli/`；Python：`<pkg>/_aicli/`）实现了 CLI-SP
 3. 每个带有 `observe` 以外效果的命令，都调用 `App.Write` 或 `App.WriteBatch`。绝不自己添加令牌、密钥、确认存储或写入门控标志（CLI-050）。如实声明 `Effects` 和 `Dangerous`；读操作绝不写入（CLI-025）。
 4. 除非用户明确要求你这样做，否则 CLI 和你都不创建或编辑授权范围文件（SEC-011、SKL-006）。
 5. 用 `FromHTTP` 按状态码映射上游失败，绝不按消息文本映射（CLI-016）。在 `Apply` 中，只有什么都没发出去时才把错误包装成 `NotDispatched`，只有上游明确拒绝时才包装成 `Rejected`，而且包装的是 `FromHTTP` 返回的 `*aicli.Error`（连接根本没建立时状态码为 0），绝不包装原始错误；其他错误原样返回，让 aicli 报告 `E_OUTCOME_UNKNOWN`（CLI-015、CLI-050）。
-6. 在 `Meta.Secrets` 中声明机密标志，绝不记录或回显它们（SEC-021）。把每个承载外部文本的输出路径声明为不可信（CLI-046、SEC-002）。
+6. 在 `Meta.Secrets` 中声明机密标志，绝不记录或回显它们，也绝不输出上游返回的机密（SEC-021）。把每个承载外部文本的输出路径声明为不可信，带着人写的文本的 ref 也包括在内（CLI-046、SEC-002）。
 7. 列表要说明自己的完整性和范围（CLI-041）；计数、过滤和查找最新项都在工具里完成（CLI-044）。
 8. `update` 是 aicli 的内置命令：把 `App.Update` 设为一个写明仓库和包名的 `UpdateConfig`，绝不自己编写 `update` 命令或任何更新代码（CLI-070）。
 9. 每个写命令都有一个符合性 `Sample`，注册表中的每个命令都在测试中运行过（VER-001、VER-003）。
@@ -45,10 +45,10 @@ aicli 库（Go：`internal/aicli/`；Python：`<pkg>/_aicli/`）实现了 CLI-SP
        Settings: []aicli.Setting{{Name: "host", Description: "Acme Notes URL"}}}            // NOTES_CLI_HOST, profiles
    os.Exit(app.Execute(os.Args[1:]))
    ```
-4. 设计命令树：扁平的 `<noun> <verb>`，`list`、`get`、`search`、`create`、`update`、`delete` 排在领域动词之前（CLI-021），每个动词取它的标准含义，有合适的共享词汇时，标志就用共享词汇中的名称（CLI-028、CLI-029）。通过 `Shortcuts`、`ShortFlags`、`FlagAliases` 和 `Meta.Aliases`，接受在工具群（fleet）中实测到的猜测写法，其余的通过 `FlagSynonyms` 和 `VerbSynonyms` 给出建议（CLI-022）。
+4. 设计命令树：扁平的 `<noun> <verb>`，`list`、`get`、`search`、`create`、`update`、`delete` 排在领域动词之前（CLI-021），每个动词取它的标准含义，有合适的共享词汇时，标志就用共享词汇中的名称（CLI-028、CLI-029）。通过 `AddShortcut`（只嵌套在一个父级下的名词，每个有一个根级快捷方式）、`ShortFlags`、`FlagAliases` 和 `Meta.Aliases`，接受在工具群（fleet）中实测到的猜测写法，其余的通过 `FlagSynonyms` 和 `VerbSynonyms` 给出建议（CLI-022）。
 5. 用 `app.Register(cmd, aicli.Meta{...})` 注册每个叶子命令：`Summary`、`Effects`、`Dangerous`、`Maturity`、`Output`（用 `app.Schema` 定义的 schema）、`ErrorCodes`、`Examples`（写命令要展示预演（dry-run）和确认这一对），适用时再加上 `Positional`、`FileInputs`、`Secrets`、`DefaultFields` 和 `BatchFlag`。
 6. 读命令通过 `app.OK` 或 `app.List(cmd, aicli.Page{...})` 返回；错误使用构造函数（`Usage`、`Validation`、`NotFound`、`Ambiguous`、`FromHTTP`）。
-7. 写命令通过 `app.Write` 返回；批量操作使用 `app.WriteBatch` 配合 `Meta.BatchFlag`（CLI-063）。
+7. 写命令通过 `app.Write` 返回；批量操作使用 `app.WriteBatch` 配合 `Meta.BatchFlag`（CLI-063）。需要查询上游才能确定的目标，由 `WriteSpec.ResolveTarget` 提供，写入门控在令牌检查之后才调用它；绝不在 `app.Write` 之前读取上游来确定目标（CLI-057）。
    ```go
    return app.Write(cmd, aicli.WriteSpec{
        Target:  aicli.Target{Key: "team/notes#7", Kind: "note", Label: "#7 Groceries"},
@@ -67,7 +67,7 @@ aicli 库（Go：`internal/aicli/`；Python：`<pkg>/_aicli/`）实现了 CLI-SP
 1. 读你要改动部分的规则：输出和错误（CLI-001 至 CLI-018）、命令和发现（CLI-020 至 CLI-037）、读操作（CLI-040 至 CLI-049）、写操作（CLI-050 至 CLI-065、SEC-010 至 SEC-021）、设置和网络（CLI-100 至 CLI-110、SEC-022）、Skill（SKILL-SPEC）。
 2. 新命令：用 `Meta` 注册它；VER-003 要求有一个运行它的测试。如果它会写入，就用 `app.Write` 实现并加上它的 `Sample`，否则 G00 会失败。根据它的证据设定成熟度（VER-005）。
 3. 参数或输出有变化：更新输出 schema。你要改名或移除的命令、标志或字段，先标为弃用（`Meta.Deprecated`、`Meta.DeprecatedFlags`），至少在一个 MINOR 版本中、并且至少在 90 天内保持可用，只在 MAJOR 版本中移除（CLI-081）。这次改动会使该命令的 `live` 和 `eval` 证据作废：重新运行它们，或者降低它的成熟度（VER-005）。
-4. Agent 一直在猜一种你不接受的写法（评测轨迹、缺陷报告里能看到）？那就接受它（`Meta.Aliases`、`FlagAliases`、`Shortcuts`），或者让错误带上准确的 `did_you_mean`（`FlagSynonyms`、`VerbSynonyms`）（CLI-022）。
+4. Agent 一直在猜一种你不接受的写法（评测轨迹、缺陷报告里能看到）？那就接受它（`Meta.Aliases`、`FlagAliases`、`AddShortcut`），或者让错误带上准确的 `did_you_mean`（`FlagSynonyms`、`VerbSynonyms`）（CLI-022）。
 5. 更新 `CHANGELOG.md` 和 Skill（剧本手工更新，命令地图从注册表生成）。绝不编辑 `metadata.version` 或 `metadata.min_version`：每次发布时 `npm version` 都会把两者设为工具版本（`scripts/sync-version.js`），值不同时 `check-version.js` 会失败（SKL-001、REPO-031）。
 6. 合并之前：包括符合性测试套件在内的测试、`node scripts/check-spec.js`、lint。在改动命令、输出或 Skill 的发布之前：Agent 评测（VER-006）。
 7. 新的规范版本：把它的 tag 写入 `.agent/SPEC_VERSION`，运行 `node scripts/sync-spec.js` 和完整的测试套件，然后修改工具，绝不修改内置副本文件。

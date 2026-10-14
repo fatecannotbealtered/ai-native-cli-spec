@@ -173,8 +173,12 @@ class BindingMixin:
         """Replace a flag's value with its resolved form before write (for example a
         ref or URL resolved to an id), so equivalent inputs bind identically
         (CLI-054: bind resolved values, not input forms). Slice flags take every
-        value. Only call it for flags the user gave; it keeps the flag marked as
-        given."""
+        value, and the flag is marked as given. Call it for a flag the user gave, and
+        also for one the user did not give when its value came inside another input
+        (Q26): the project in acme/web!5 sets --project, the note in
+        acme/web!5#note_12 sets --note-id. Bind each input's own part (the iid, the
+        project), never a ref that embeds both: changing --project then names
+        --project, and acme/web!5 and 5 --project acme/web bind alike."""
         _, node = self._run_for(cmd)
         f = node.flag(flag)
         if f is None or not values:
@@ -319,9 +323,9 @@ class BindingMixin:
 
     def _bind_settings(self: App, b: Binding, key: bytes) -> None:
         """The active profile as input profile ("" when none is active; the
-        requested one a Meta.new_profile command creates, P6) and each declared
-        setting's resolved value as setting.<name>, or its error reason when it
-        cannot be resolved: a secret one by keyed digest (shown as ***)."""
+        requested one for a Meta.allow_unknown_profile command, P6, Q4) and each
+        declared setting's resolved value as setting.<name>, or its error reason when
+        it cannot be resolved: a secret one by keyed digest (shown as ***)."""
         ps = self._profile_state()
         name = ps.name or ps.unknown or ""
         b.add("profile", claim_string(name), display_string(name), "profile")

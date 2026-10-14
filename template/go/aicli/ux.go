@@ -893,6 +893,9 @@ func (a *App) prepareRun(c *cobra.Command, args []string) error {
 		st.positionalConsumed = true
 	}
 	a.flagDeprecationNotices(c, m) // after the positional is bound to its flag
+	if err := a.renamedFlagUse(st); err != nil {
+		return err
+	}
 	if err := a.checkRequired(c); err != nil {
 		return err
 	}
@@ -905,6 +908,25 @@ func (a *App) prepareRun(c *cobra.Command, args []string) error {
 		}
 	}
 	return a.checkFields(c, m)
+}
+
+// renamedFlagUse reports a renamed flag's old name (Meta.RenamedFlags, Q10): given
+// beside its new name it is E_USAGE conflicting_flags; alone it adds the deprecated
+// notice.
+func (a *App) renamedFlagUse(st *runState) error {
+	if old, renamed := st.renamedBoth[0], st.renamedBoth[1]; old != "" {
+		e := Usage("conflicting_flags", "--"+old, fmt.Sprintf("--%s is the old name of --%s; give only one of them.", old, renamed))
+		e.Details["next_action"] = fmt.Sprintf("Drop --%s and keep --%s.", old, renamed)
+		return e
+	}
+	m := a.metaFor(st.cmd)
+	for _, old := range st.renamedUsed {
+		if m != nil && m.RenamedFlags[old] != "" {
+			a.Notice(Notice{Type: "deprecated", Severity: "warning",
+				Message: fmt.Sprintf("`--%s` is deprecated: use `--%s`.", old, m.RenamedFlags[old])})
+		}
+	}
+	return nil
 }
 
 // applyOutputFlags reads --format/--json/--pretty/--quiet/--fields for the run.

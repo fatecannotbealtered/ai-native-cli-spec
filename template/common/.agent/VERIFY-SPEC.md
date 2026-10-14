@@ -6,7 +6,7 @@ Part of ai-native-cli-spec 2.0.0; rules VER-001 to VER-008. This spec says how a
 
 MUST, MUST NOT, SHOULD and MAY have their RFC 2119 meaning. A *fake upstream* is any stand-in for the real service: an in-process fake, a mock server, recorded responses. A *real upstream* is an instance of the actual product, including a disposable one in Docker.
 
-> **What the library gives you.** aicli ships `RunConformance(t, aicli.Harness{…})` (Python: `run_conformance`, same harness fields in snake_case), which runs checks G00–G10 on every write command and R01–R05 on the whole tool (VER-001); `ValidateEnvelope(raw)` (Python `validate_envelope`), which checks one stdout document: the envelope and `meta`, error details per code, and the dry-run, receipt, batch and page shapes inside it (VER-002); and the coverage recorder with `CheckCoverage(t, h)` (Python `check_coverage`), which runs R06 after the tool's own tests (VER-003). The library's own tests, run in the spec repo, cover what one tool's run cannot: concurrent confirms of one token (exactly one write), lease expiry, corrupt journal records.
+> **What the library gives you.** aicli ships `RunConformance(t, aicli.Harness{…})` (Python: `run_conformance`, same harness fields in snake_case), which runs checks G00–G10 on every write command and R01–R05 on the whole tool (VER-001); `ValidateEnvelope(raw)` (Python `validate_envelope`), which checks one stdout document: the envelope and `meta`, error details per code, the dry-run, receipt, batch and page shapes inside it, and the error budget (VER-002; R04 checks the success budget on default invocations); and the coverage recorder with `CheckCoverage(t, h)` (Python `check_coverage`), which runs R06 after the tool's own tests (VER-003). The library's own tests, run in the spec repo, cover what one tool's run cannot: concurrent confirms of one token (exactly one write), lease expiry, corrupt journal records.
 >
 > **What you still do:** the `Harness` (a fake upstream that counts writes, a sample per write command, a scope), behaviour-matrix tests per command (VER-004), evidence records (VER-005), the agent eval (VER-006) and release parity (VER-008).
 
@@ -17,9 +17,9 @@ MUST, MUST NOT, SHOULD and MAY have their RFC 2119 meaning. A *fake upstream* is
 Every tool MUST run the aicli conformance suite in CI on every merge and every release, with a `Harness` that supplies a fake upstream, a sample for every write command and a scope. A tool MUST NOT skip, filter or weaken a check; a write command without a sample fails the suite (G00).
 
 - `NewApp(env)` returns a fresh `App` and command tree; the suite overlays `env` on `App.Env`. The tool MUST read its environment through `App.Env`, never `os.Getenv`, or the suite's isolation fails; `main` sets `Env: os.Getenv`, because the field has no default.
-- `Writes()` counts every state-changing request the fake upstream received, rejected ones included; for `artifact` and `persist` commands it also counts files created or overwritten at the sample's output path. `Reset()` restores the fake between checks.
+- `Writes()` counts every state-changing request the fake upstream received, rejected ones included; for `artifact` and `persist` commands it also counts files created or overwritten at the sample's output path. `Reset()` restores the fake between checks; for a command that creates its output file and never overwrites (`artifact` without `persist`), it also removes that file, since the checks repeat the sample.
 - `Samples` maps each write command path to the arguments of one valid write, without gate flags (the suite adds `--dry-run`, `--confirm` and `--dangerous`). A sample SHOULD supply every input that changes the effect (target, content, recipients, file inputs), because G03 can only mutate what the sample supplies.
-- `Scope` is the grant for the positive checks; the suite writes it to a temp file.
+- `Scope` is the grant for the positive checks (`roots` only when a sample overwrites a file); the suite writes it to a temp file.
 
 | Check | What the suite does | What a pass proves |
 |---|---|---|
@@ -34,10 +34,10 @@ Every tool MUST run the aicli conformance suite in CI on every merge and every r
 | G08 | corrupts the key; puts a file where the journal directory goes | `E_IO`; 0 writes: the gate fails closed (CLI-055, CLI-058) |
 | G09 | runs a dangerous command without `--dangerous` | exit 5, `dangerous_flag_required`; 0 writes (CLI-056) |
 | G10 | edits the scope file between dry-run and confirm | `E_CONFLICT` `scope_changed`; 0 writes (CLI-057) |
-| R01 | validates full `reference`, `--index` and `--command` | valid shapes; index ≤ 8000 characters or grouped; command ≤ 4000 characters (CLI-031, CLI-032) |
-| R02 | walks the tree | tree rules hold; every leaf has a summary, output schema and example; write examples show dry-run and confirm, dangerous ones `--dangerous` (CLI-020, CLI-021, CLI-030) |
+| R01 | validates full `reference`, `--index` and `--command` | valid shapes; index ≤ 8000 characters or grouped; command ≤ 6000 characters; examples resolve as the parser resolves them, shortcuts and aliases included (CLI-030, CLI-031, CLI-032) |
+| R02 | walks the tree | tree rules hold; every noun nested under one parent has a root shortcut, and no shortcut word maps to two paths; every leaf has a summary, output schema and example; write examples show dry-run and confirm, dangerous ones `--dangerous` (CLI-020, CLI-021, CLI-022, CLI-030) |
 | R03 | sends an unknown command, an unknown flag, an extra positional | `E_USAGE` with `unknown_command` and suggestions, `unknown_flag`, `unexpected_argument` (CLI-012, CLI-022, CLI-023) |
-| R04 | validates every envelope it saw | contract-valid, snake_case keys, errors ≤ 2000 characters (CLI-002, CLI-007, CLI-042) |
+| R04 | validates every envelope it saw | contract-valid, snake_case keys, `_at` values UTC times; default invocations ≤ 8000 characters, errors ≤ 2000 characters (CLI-002, CLI-007, CLI-042) |
 | R05 | runs `context`, `doctor`, `operation list` | valid; `doctor` has the required checks; an empty journal works (CLI-035, CLI-036, CLI-061) |
 | R06 | `CheckCoverage` reads the coverage record after the tool's own tests | every registry command ran in the tool's own tests (VER-003) |
 
@@ -90,9 +90,11 @@ Each command at `experimental` maturity or above MUST have command-level tests, 
 
 aicli supplies `FromHTTP` for the status mapping and classifies `Apply` errors (`NotDispatched`, `Rejected`, anything else unknown), but only the tool knows how its upstream fails, so these rows are the tool's tests.
 
+A batch command (CLI-063) has a receipt per item, so its success, gate and apply-failure rows check every item's receipt and the `summary`, and, for a dangerous batch, that it stops after the first failure.
+
 The built-ins are aicli's, and the library's own tests cover their behaviour: `update` in every stage and install method, the resolution of settings and profiles, `context` and `doctor`. A tool tests what it supplies: that its `UpdateConfig` names its repository and its package names (for example, `update --check` against a fake release server set through `UpdateConfig.APIBase` shows the `command` each install method would run), and that each declared setting resolves from its flag, its environment variable and a profile as the README documents (CLI-070, CLI-100).
 
-Why: v1.6.3 required this breadth (its CLI-SPEC §13). The no-side-effect row exists because the fleet audit found a write that `reference` reported as a read (kibana-cli `patterns infer --write`); the empty row asserts `scope` because in the 2026-10 eval `project members` returned `[]`, marked complete, for a project whose members all came through its group, and an agent told the user something false.
+Why: v1.6.3 required this breadth (its CLI-SPEC §13). The no-side-effect row exists because the fleet audit found a write that `reference` reported as a read (kibana-cli `patterns infer --write`); the empty row asserts `scope` because in the 2026-10 eval `project members` returned `[]`, marked complete, for a project whose members all came through its group, and an agent told the user something false. In the gitlab-cli pilot (2026-10), a shared matrix that read one receipt failed the write rows of every bulk command.
 
 Check: subtest names carry the row; `go test -v` or `pytest -rs` lists the `not applicable:` skips; reviewers sample commands against the table.
 

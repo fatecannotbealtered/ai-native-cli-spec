@@ -100,12 +100,27 @@ class Meta:
     # leaves a deprecated command out.
     deprecated: str = ""
     deprecated_flags: dict[str, str] = field(default_factory=dict)
-    # new_profile lets the command run with a requested profile (--profile or
-    # <PREFIX>_PROFILE) that the settings file does not have yet, as `auth login
-    # --profile lab` creates it (CLI-101, P6): the unknown-profile refusal is skipped,
-    # App.setting reads the flag, the environment and the default only, and the
-    # requested name is still bound into the confirm token.
-    new_profile: bool = False
+    # renamed_flags keeps old flag names working (old -> new, Q10): --old is read as
+    # --new (and binds as --new), using it adds the notice "`--old` is deprecated:
+    # use `--new`.", giving both is E_USAGE, and help leaves it out while reference
+    # lists it as a deprecated parameter. The command defines only --new.
+    renamed_flags: dict[str, str] = field(default_factory=dict)
+    # flag_aliases accepts other long flag names on this command only (alias ->
+    # canonical, Q11), after App.flag_aliases: an alias App.flag_aliases maps on this
+    # command wins. The canonical flag binds; reference does not list the alias.
+    flag_aliases: dict[str, str] = field(default_factory=dict)
+    # stream_item names the schema of the items an NDJSON stream writes (App.stream,
+    # Q23) when they are not the output schema's objects (a log's lines): items are
+    # projected with it and take its untrusted fields.
+    stream_item: str = ""
+    # allow_unknown_profile lets the command run under a profile (--profile or
+    # <PREFIX>_PROFILE) that the settings file does not have (CLI-101, P6, Q4): `auth
+    # login --profile lab` creates it, `auth logout --profile gone` cleans up after a
+    # deleted one. The unknown-profile refusal is skipped, App.setting reads the flag,
+    # the environment and the default only, App.profile returns the requested name,
+    # and that name is still bound into the confirm token. apply creates the profile
+    # with App.set_profile_settings.
+    allow_unknown_profile: bool = False
 
     def is_write(self) -> bool:
         """Whether any declared effect is not observe."""
@@ -145,6 +160,9 @@ class Registry:
         self.group_aliases: dict[click.Command, list[str]] = {}
         self.schemas: dict[str, SchemaDef] = {}
         self.order: list[click.Command] = []  # leaves in the order they were registered
+        # registration defects (a schema registered twice, Q18; a shortcut word
+        # mapped to two paths, Q6), which the tree check reports
+        self.problems: list[str] = []
 
 
 @dataclass
@@ -262,6 +280,16 @@ def replacement_text(text: str) -> str:
     return text.strip().removesuffix(".").strip()
 
 
+def schema_entry_of(s: SchemaDef) -> dict[str, Any]:
+    """A schema as the reference catalog shows it."""
+    return {
+        "shape": s.shape,
+        "fields": list(s.fields),
+        "default_fields": list(s.default_fields),
+        "untrusted_fields": list(s.untrusted),
+    }
+
+
 def with_twins(secrets: list[str], file_inputs: dict[str, str]) -> list[str]:
     """Meta.secrets with each secret's twin added (B2): the literal flag a secret
     file flag stands in for, and the file flag of a secret literal. One notion of a
@@ -298,6 +326,8 @@ class RegistryMixin:
             default_fields=list(m.default_fields),
             params=dict(m.params),
             deprecated_flags=dict(m.deprecated_flags),
+            renamed_flags=dict(m.renamed_flags),
+            flag_aliases=dict(m.flag_aliases),
         )
         if not cp.maturity:
             cp.maturity = DRAFT
@@ -319,8 +349,34 @@ class RegistryMixin:
             self._reg.group_aliases[cmd] = list(aliases)
 
     def schema(self: App, name: str, s: SchemaDef) -> None:
-        """Register an output schema under name."""
+        """Register an output schema under name. A name is registered once: a second
+        call is a defect the tree check reports (Q18), and the first definition
+        stays."""
+        if name in self._reg.schemas:
+            self._reg.problems.append(
+                f"App.schema({go_quote(name)}) was called twice; register each schema name once "
+                "(the first definition is kept)"
+            )
+            return
         self._reg.schemas[name] = s
+
+    def add_shortcut(self: App, word: str, *path: str) -> None:
+        """Map a word typed at the root to a command path (CLI-022, Q6), as
+        App.shortcuts does: add_shortcut("branch", "repo", "branch"). A word already
+        mapped to a different path is a defect the tree check reports, and the first
+        mapping stays; the same mapping again is harmless."""
+        if self.shortcuts is None:
+            self.shortcuts = {}
+        have = self.shortcuts.get(word)
+        if have is not None:
+            if list(have) != list(path):
+                self._reg.problems.append(
+                    f"App.add_shortcut({go_quote(word)}) maps it to {go_quote(' '.join(path))}, "
+                    f"but it already maps to {go_quote(' '.join(have))}; a shortcut word names "
+                    "one path (the first is kept)"
+                )
+            return
+        self.shortcuts[word] = list(path)
 
     def meta_for(self: App, node: Node | None) -> Meta | None:
         if node is None or node.cmd is None:
@@ -411,8 +467,10 @@ class RegistryMixin:
             p.description = deprecated_text(m.deprecated_flags[f.name], p.description)
         return p
 
-    def params(self: App, c: Node) -> list[ParamEntry]:
-        """A command's reference params: positionals first, then flags by name."""
+    def params(self: App, c: Node, with_renamed: bool = False) -> list[ParamEntry]:
+        """A command's params: positionals first, then flags by name. with_renamed
+        adds the old names of renamed flags as deprecated parameters, which reference
+        lists and help does not (Q10)."""
         m = self.meta_for(c)
         out: list[ParamEntry] = []
         pos_flag = m.positional if m is not None else ""
@@ -445,6 +503,15 @@ class RegistryMixin:
             if f.hidden or is_global(f) or (used and f.name == pos_flag):
                 continue
             flags.append(self.param_for(m, f))
+        if with_renamed and m is not None:
+            for old in sorted(m.renamed_flags):
+                f = c.flag(m.renamed_flags[old])
+                if f is None or c.flag(old) is not None:
+                    continue  # the tree check reports it
+                p = self.param_for(m, f)
+                p.name, p.required, p.default = old, False, None
+                p.description = deprecated_text("use `--" + f.name + "`", f.usage)
+                flags.append(p)
         flags.sort(key=lambda e: e.name)
         return out + flags
 
@@ -471,10 +538,13 @@ class RegistryMixin:
     def command_type(self: App, m: Meta | None) -> str:
         return "write" if m is not None and m.is_write() else "read"
 
-    def error_codes_of(self: App, m: Meta | None) -> list[str]:
+    def error_codes_of(self: App, m: Meta | None, builtin: bool = False) -> list[str]:
         """The codes a command can return: its declared codes plus the codes the
-        library itself returns for it."""
+        library itself returns for it. With settings declared, a tool command
+        (not a built-in) can stop at E_CONFIG for an unknown profile (D4, Q25)."""
         codes = {"E_USAGE", "E_UNKNOWN"}
+        if self.settings is not None and not builtin:
+            codes.add("E_CONFIG")
         if m is not None:
             codes.update(m.error_codes)
             if m.is_write():
@@ -504,9 +574,9 @@ class RegistryMixin:
             "dangerous": False,
             "maturity": DRAFT,
             "evidence": [],
-            "params": [p.to_json() for p in self.params(c)],
+            "params": [p.to_json() for p in self.params(c, True)],
             "output": "",
-            "error_codes": self.error_codes_of(m),
+            "error_codes": self.error_codes_of(m, c.builtin),
             "examples": [],
         }
         if m is not None:
@@ -515,7 +585,7 @@ class RegistryMixin:
             e["dangerous"] = m.is_dangerous()
             e["maturity"] = m.maturity
             e["evidence"] = list(m.evidence)
-            e["output"] = m.output
+            e["output"] = self.output_of(c, m)[0]
             e["examples"] = list(m.examples)
         return e
 
@@ -533,15 +603,35 @@ class RegistryMixin:
         return {k: e[k] for k in ("path", "type", "effects", "dangerous", "maturity", "summary")}
 
     def schema_entries(self: App) -> dict[str, Any]:
-        return {
-            name: {
-                "shape": s.shape,
-                "fields": list(s.fields),
-                "default_fields": list(s.default_fields),
-                "untrusted_fields": list(s.untrusted),
-            }
-            for name, s in self._reg.schemas.items()
-        }
+        """The reference's schema catalog: every registered schema, and the
+        command-specific copies output_of names (Q5)."""
+        out = {name: schema_entry_of(s) for name, s in self._reg.schemas.items()}
+        for c in self.commands():
+            name, own = self.output_of(c, self.meta_for(c))
+            if own is not None:
+                out[name] = own
+        return out
+
+    def output_of(self: App, c: Node, m: Meta | None) -> tuple[str, dict[str, Any] | None]:
+        """The schema name a command's reference entry gives as its output (Q5): its
+        output schema, or, when Meta.default_fields differ from the schema's default
+        fields, a copy of the schema with the command's default fields under the name
+        <output>_for_<path> (path words joined by _, - read as _), returned as own,
+        so reference shows the defaults the command really uses, as help does."""
+        if m is None:
+            return "", None
+        s = self._reg.schemas.get(m.output)
+        if s is None or not m.default_fields or list(m.default_fields) == list(s.default_fields):
+            return m.output, None
+        base = m.output + "_for_" + "_".join(c.path.split()).replace("-", "_")
+        name = base
+        n = 2
+        while name in self._reg.schemas:
+            name = f"{base}_{n}"
+            n += 1
+        own = schema_entry_of(s)
+        own["default_fields"] = list(m.default_fields)
+        return name, own
 
     def code_table(self: App, codes: list[str]) -> dict[str, Any]:
         out = {}
@@ -1016,7 +1106,47 @@ class RegistryMixin:
                 add(f'"{path}" has no example')
             for ex in m.examples:
                 if not ex.startswith(tool + " "):
-                    add(f'"{path}": example "{ex}" does not start with "{tool}"')
+                    add(
+                        f"{go_quote(path)}: example {go_quote(ex)} does not start with "
+                        f"{go_quote(tool)}"
+                    )
+                elif self.example_command(ex)[0] is not c:
+                    # Resolved as the parser resolves it (shortcuts, aliases), as R01
+                    # does (Q21).
+                    add(
+                        f"{go_quote(path)}: example {go_quote(ex)} does not run this command; "
+                        f"start it with {go_quote(tool)} and the command's path, a shortcut or an "
+                        "alias"
+                    )
+            if m.stream_item and m.stream_item not in self._reg.schemas:
+                add(
+                    f"{go_quote(path)} names stream item schema {go_quote(m.stream_item)}, which "
+                    "is not registered"
+                )
+            for old in sorted(m.renamed_flags):
+                renamed = m.renamed_flags[old]
+                if c.flag(renamed) is None:
+                    add(
+                        f'"{path}": Meta.renamed_flags maps --{old} to --{renamed}, which the '
+                        "command does not define"
+                    )
+                elif c.flag(old) is not None:
+                    add(
+                        f'"{path}": Meta.renamed_flags names --{old}, which the command still '
+                        f"defines; keep only --{renamed}"
+                    )
+            for alias in sorted(m.flag_aliases):
+                canonical = m.flag_aliases[alias]
+                if c.flag(canonical) is None:
+                    add(
+                        f'"{path}": Meta.flag_aliases maps --{alias} to --{canonical}, which the '
+                        "command does not define"
+                    )
+                elif c.flag(alias) is not None:
+                    add(
+                        f'"{path}": Meta.flag_aliases names --{alias}, which the command already '
+                        "defines"
+                    )
             if m.is_write():
                 if not any("--dry-run" in ex for ex in m.examples) or not any(
                     "--confirm" in ex for ex in m.examples
@@ -1102,6 +1232,7 @@ class RegistryMixin:
                 f"App.risk_tier {self.risk_tier} is below {max_tier}, which the declared effects "
                 "require (SEC-001)"
             )
+        problems.extend(self._reg.problems)
         for key in sorted(self.shortcuts or {}):
             to = " ".join(self.shortcuts[key])
             target = self.command_by_path(to)
@@ -1110,6 +1241,19 @@ class RegistryMixin:
             words = key.split()
             if words and self._root.child(words[0]) is not None:
                 add(f'App.shortcuts["{key}"] never applies: "{words[0]}" is already a root command')
+        # A nested group needs a root shortcut (CLI-022) when its noun occurs under one
+        # parent only; a noun under several parents (comment under issue and mr) needs
+        # none, since a root word could name only one of them (Q6).
+        nested: dict[str, int] = {}
+        for c in self._root.walk():
+            if (
+                c is not self._root
+                and not c.internal
+                and not c.hidden
+                and c.has_subcommands()
+                and c.parent is not self._root
+            ):
+                nested[c.name] = nested.get(c.name, 0) + 1
         for c in self._root.walk():
             if (
                 c is self._root
@@ -1117,6 +1261,7 @@ class RegistryMixin:
                 or c.hidden
                 or not c.has_subcommands()
                 or c.parent is self._root
+                or nested.get(c.name, 0) > 1
             ):
                 continue
             words = c.path.split()

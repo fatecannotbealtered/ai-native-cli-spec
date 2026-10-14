@@ -23,6 +23,7 @@ from .registry import Meta, flag_type, is_global
 
 if TYPE_CHECKING:
     from .app import App
+    from .envelope import RunState
 
 # The verbs agents guess first for the contract's standard verbs (CLI-021, CLI-022,
 # the fleet guess list). They are used for a word that App.verb_synonyms does not
@@ -814,11 +815,37 @@ class UXMixin:
             # after Meta.positional is bound, so a deprecated flag given as the
             # positional is noticed too (Go's order, D10)
             self.deprecation_notices(c, m)
+        self.renamed_flag_use(st)
         self.check_required(c)
         if m is not None:
             self.check_file_inputs(c, m)
             self.check_enums(c, m)
         self.check_fields(c, m)
+
+    def renamed_flag_use(self: App, st: RunState) -> None:
+        """A renamed flag's old name (Meta.renamed_flags, Q10): given beside its new
+        name it is E_USAGE conflicting_flags; alone it adds the deprecated notice."""
+        from .envelope import Notice
+
+        old, renamed = st.renamed_both
+        if old:
+            e = usage(
+                "conflicting_flags",
+                "--" + old,
+                f"--{old} is the old name of --{renamed}; give only one of them.",
+            )
+            e.details["next_action"] = f"Drop --{old} and keep --{renamed}."
+            raise e
+        m = self.meta_for(st.cmd)
+        for name in st.renamed_used:
+            if m is not None and m.renamed_flags.get(name):
+                self.notice(
+                    Notice(
+                        type="deprecated",
+                        severity="warning",
+                        message=f"`--{name}` is deprecated: use `--{m.renamed_flags[name]}`.",
+                    )
+                )
 
     def deprecation_notices(self: App, c: Node, m: Meta) -> None:
         """A deprecated notice for each use of a deprecated command and of each

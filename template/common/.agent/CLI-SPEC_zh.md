@@ -38,14 +38,14 @@
 >
 > | 规则 | aicli 负责 | 工具仍需负责 |
 > |---|---|---|
-> | 输出：CLI-001–006、046、047 | 唯一的信封输出器（panic 转为 `E_UNKNOWN`）；紧凑 JSON 和 `--pretty`；`--fields` 投影；`meta`；格式检查；安静的 stderr；通知；NDJSON 流输出器（CLI-006） | 声明 `raw` 命令和流式命令；指明外部文本的路径 |
+> | 输出：CLI-001–006、046、047 | 唯一的信封输出器（panic 转为 `E_UNKNOWN`）；紧凑 JSON 和 `--pretty`；`--fields` 投影；`meta`；格式检查和 `OutputFormat`；安静的 stderr；通知；NDJSON 流输出器（CLI-006） | 声明 `raw` 命令和流式命令；指明外部文本的路径 |
 > | 错误：CLI-010–018 | 契约的错误码表；每种 details 形状的构造函数；信息充实的用法错误；`FromHTTP`；在 `App.ExtCodes`（`CodeSpec`）中声明的扩展错误码，负责检查并公布 | 写给模型看的错误信息（CLI-017）；自身错误上的 `next_action`；在 403 错误里给出角色；`contract-ext.json` |
-> | 命令模型：CLI-020–029 | 注册表（registry，即 cobra 或 click 命令树加上 `aicli.Meta`，用 `Meta.Params`（`ParamDoc`）声明类型、枚举和单位）；命令树检查；先匹配路径的解析；位置参数；接受的猜测写法（`Shortcuts`、`ShortFlags`、`FlagAliases`、`Meta.Aliases`）、给出建议的猜测写法（`FlagSynonyms`、`VerbSynonyms`，以及共享标志名的默认同义词）和全树范围的建议；Skill 的命令地图（command map，`App.CommandMap`） | 如实的 `Meta`：效果、输出 schema、错误码、示例、成熟度（maturity）、证据；自己的猜测清单；共享的标志名和动词含义（CLI-028、CLI-029） |
+> | 命令模型：CLI-020–029 | 注册表（registry，即 cobra 或 click 命令树加上 `aicli.Meta`，用 `Meta.Params`（`ParamDoc`）声明类型、枚举和单位）；命令树检查；先匹配路径的解析；位置参数；接受的猜测写法（`AddShortcut`、`ShortFlags`、`FlagAliases`、`Meta.FlagAliases`、`Meta.Aliases`）、给出建议的猜测写法（`FlagSynonyms`、`VerbSynonyms`，以及共享标志名的默认同义词）和全树范围的建议；Skill 的命令地图（command map，`App.CommandMap`） | 如实的 `Meta`：效果、输出 schema、错误码、示例、成熟度（maturity）、证据；自己的猜测清单；共享的标志名和动词含义（CLI-028、CLI-029） |
 > | 发现：CLI-030–037 | `--help`、`reference`（完整版、`--index`、`--command`）、`context`（工具声明了设置时带 `profile`）、`doctor`（其 `version` 检查从 `App.SkillDirs` 读取已安装的 Skill；工具声明了设置时有 `settings` 检查）、`changelog` | `Identity`、`DoctorChecks` 和 `ContextExtra` 钩子；内嵌的 `CHANGELOG.md` |
-> | 读取：CLI-040–049 | 投影；带完整性规则的 `Page`；`Ambiguous`；文件和 stdin 输入；`--output <file>` 辅助函数（CLI-042） | 默认字段、如实的 `scope`、服务端过滤、ref、URL 和名称、响应大小（CLI-040–045）；`--input`（CLI-048）；多 ref 读取和 `--wait`（CLI-049） |
-> | 写操作：CLI-050–065 | 整个写入门控（write gate）：绑定（`SetResolved` 绑定从其他形式解析出的值）、令牌、密钥、操作记录、授权范围检查、回执（receipt）和 `ok`、批量操作、`operation show/list/resolve`、`HumanRequired` | `Target`；只读、确定性、带基准版本的 `Preview`；如实分类失败并回读所改内容的 `Apply`；长时间运行的任务（CLI-064） |
+> | 读取：CLI-040–049 | 投影和 `WantsField`；带完整性规则的 `Page`；`Ambiguous`；文件和 stdin 输入；`ParseTime` 和 `ParseDuration`；经过写入门控写出的 `--output <file>` 文件（`WriteOutput`、`OpenOutput`，CLI-042） | 默认字段、如实的 `scope`、服务端过滤、ref、URL 和名称、响应大小（CLI-040–045）；`--input`（CLI-048）；多 ref 读取和 `--wait`（CLI-049） |
+> | 写操作：CLI-050–065 | 整个写入门控（write gate）：绑定（`SetResolved` 绑定从其他形式解析出的值）、令牌、密钥、操作记录、授权范围检查、回执（receipt）和 `ok`、批量操作（经由 `ApplyAll` 调用原生批量接口）、`operation show/list/resolve`、`HumanRequired` | `Target`，需要查询才能确定目标时改用 `ResolveTarget`；只读、确定性、带基准版本的 `Preview`；如实分类失败并回读所改内容的 `Apply`；长时间运行的任务（CLI-064） |
 > | 自更新：CLI-070、071 | 用 `App.Update`（`UpdateConfig`）启用的内置命令 `update`：发现发布、Sigstore 签名和校验和校验、原子替换或运行包管理器、Skill 同步、分阶段的错误；`RecordUpdateCheck`、`meta.notices` 中的缓存通知，以及 `doctor` 的刷新 | 一个写明仓库和包名的 `UpdateConfig`；在二进制旁边带上 `skills/` 的发布归档（REPO-043） |
-> | 版本：CLI-080、081 | `reference` 中的 `spec_version` 和 `schema_version`；依据 `Meta.Deprecated` 和 `Meta.DeprecatedFlags` 处理弃用：`Deprecated:` 前缀、`deprecated` 通知、不含已弃用命令的命令地图 | 弃用什么以及用什么替代；`CHANGELOG.md` 中的条目 |
+> | 版本：CLI-080、081 | `reference` 中的 `spec_version` 和 `schema_version`；依据 `Meta.Deprecated`、`Meta.DeprecatedFlags` 和 `Meta.RenamedFlags` 处理弃用：`Deprecated:` 前缀、`deprecated` 通知、不含已弃用命令的命令地图 | 弃用什么以及用什么替代；`CHANGELOG.md` 中的条目 |
 > | 设置与诊断：CLI-100–102 | `App.Settings` 和 `App.Setting`：设置文件、配置档和 `--profile`；`App.Debugf` 和 `<PREFIX>_DEBUG` | 声明的设置；`auth` 命令（CLI-101） |
 > | 网络：CLI-110 | 自身请求（`update`、`doctor` 的刷新）遵守的规则 | 上游客户端：超时、只重试读取、代理、TLS、User-Agent |
 > | 验证 | `RunConformance`（`G00`–`G10`、`R01`–`R05`）、`CheckCoverage`（`R06`，从 `TestMain` 运行）、`ValidateEnvelope` | 每个写命令一个符合性样例；命令级测试；Agent 评测（VERIFY-SPEC） |
@@ -94,7 +94,7 @@ JSON 输出默认必须是紧凑的：不缩进，记号之间不留空格。`--
 
 ### CLI-005 输出格式
 
-`--format` 必须接受 `json`（默认格式，也是给 Agent 的唯一格式）和 `text`（给人看；可能变化，绝不拿来解析），还要接受 `raw`（仅限声明了这种格式的命令，`Meta.RawOutput`）：日志、diff 和文件内容按字节原样透传。`--json` 是 `--format json` 的别名。命令不支持的格式以 `E_USAGE`、`problem: unsupported_format` 失败，并以 JSON 输出。`raw` 命令如果在写出任何输出之前失败，就输出 JSON 错误信封。格式永远不改变退出码，也不改变写入门控（CLI-055）。
+`--format` 必须接受 `json`（默认格式，也是给 Agent 的唯一格式）和 `text`（给人看；可能变化，绝不拿来解析），还要接受 `raw`（仅限声明了这种格式的命令，`Meta.RawOutput`）：日志、diff 和文件内容按字节原样透传。`--json` 是 `--format json` 的别名。命令不支持的格式以 `E_USAGE`、`problem: unsupported_format` 失败，并以 JSON 输出。`raw` 命令如果在写出任何输出之前失败，就输出 JSON 错误信封。raw 形式与 JSON 形式不同的命令（文件的字节与描述这个文件的对象），用 `aicli.OutputFormat(cmd)`（Python 为 `output_format(ctx)`）询问本次运行用的是哪种格式。格式永远不改变退出码，也不改变写入门控（CLI-055）。
 
 原因：评测中，对只支持 JSON 的命令使用 `--format raw`，得到的是 Agent 无法解析的纯文本错误；正是这类摩擦让「指派 MR 并打标签」（T07）代价高昂。
 
@@ -102,24 +102,24 @@ JSON 输出默认必须是紧凑的：不缩进，记号之间不留空格。`--
 
 ### CLI-006 NDJSON 流
 
-输出是流的命令（跟踪日志、事件订阅、长时间导出）可以输出 NDJSON。此时每一行都必须是完整的信封，外加一个键 `type`，取值为 `item` 或 `summary`；最后一行必须是 `summary`：要么是 `ok: true`，带上这个流覆盖了什么（计数；提前停止时还要带 CLI-041 的完整性键），要么是 `ok: false`，带上 `error`。退出码与汇总行一致；没有汇总行就结束的流是不完整的。命令的简介和示例要说明它以流的形式输出。aicli 提供流输出器，负责输出条目行和收尾的汇总行。
+输出是流的命令（跟踪日志、事件订阅、长时间导出）可以输出 NDJSON。此时每一行都必须是完整的信封，外加一个键 `type`，取值为 `item` 或 `summary`；最后一行必须是 `summary`：要么是 `ok: true`，带上这个流覆盖了什么（计数；提前停止时还要带 CLI-041 的完整性键），要么是 `ok: false`，带上 `error`。退出码与汇总行一致；没有汇总行就结束的流是不完整的。命令的简介和示例要说明它以流的形式输出。aicli 提供流输出器，负责输出条目行和收尾的汇总行。在 `--format raw` 下，流只写出字节，没有信封，也没有汇总行，由退出码说明它是怎样结束的。条目行列出的不可信路径来自条目自己的 schema，而不是命令的输出 schema。
 
 ```jsonl
 {"ok":true,"schema_version":"2.0","type":"item","data":{"time":"2026-10-12T08:00:01Z","line":"Running tests"},"meta":{"duration_ms":40,"untrusted":["data.line"]}}
 {"ok":true,"schema_version":"2.0","type":"summary","data":{"count":1,"has_more":false},"meta":{"duration_ms":41}}
 ```
 
-原因：流让 Agent 可以提前停下，内存占用也保持平稳；汇总行能区分正常结束的流和被杀掉的流。
+原因：流让 Agent 可以提前停下，内存占用也保持平稳；汇总行能区分正常结束的流和被杀掉的流。在 gitlab-cli 试点（2026-10）中，`job log --follow` 的每一行都列出了作业对象的不可信字段，raw 输出的各行之后还跟着一行管道用不上的 JSON 汇总。
 
 检查：人工评审；工具的流测试逐行解析。
 
 ### CLI-007 命名与取值
 
-所有地方的键都必须是 snake_case，`data` 和 `details` 里也一样。ID 一律是字符串，即使上游用的是数字。时间采用带 `Z` 后缀的 ISO 8601 UTC 格式（`2026-10-12T08:00:00Z`）。枚举值用小写 snake_case，除非 contract.json 另有规定。数量把单位写在键名里（`duration_ms`、`retry_after_ms`），或写在参数的 `unit` 里（CLI-024）。
+所有地方的键都必须是 snake_case，`data` 和 `details` 里也一样。ID 一律是字符串，即使上游用的是数字。时间采用带 `Z` 后缀的 ISO 8601 UTC 格式（`2026-10-12T08:00:00Z`），以 `_at` 结尾的键只放这样的时间；不带时刻的日期放在以 `_on` 结尾的键下（`expires_on`）。枚举值用小写 snake_case，除非 contract.json 另有规定。数量把单位写在键名里（`duration_ms`、`retry_after_ms`），或写在参数的 `unit` 里（CLI-024）。
 
-原因：Agent 会在工具之间、调用之间复制键和值；gitlab-cli 1.2.17 返回的是 `hasMore`，而工具群里的其他工具都用 `has_more`。
+原因：Agent 会在工具之间、调用之间复制键和值；gitlab-cli 1.2.17 返回的是 `hasMore`，而工具群里的其他工具都用 `has_more`。GitLab 会把一些日期放在 `_at` 键下（成员的 `expires_at` 为 `2026-12-31`），gitlab-cli 试点（2026-10）把这些键改了名。
 
-检查：`R04` 检查键的大小写；取值靠人工评审。
+检查：`R04` 检查键的大小写，以及 `_at` 键的值是否为 UTC 时间；其他取值靠人工评审。
 
 ## 错误
 
@@ -296,7 +296,7 @@ JSON 输出默认必须是紧凑的：不缩进，记号之间不留空格。`--
 
 每个工具都必须有唯一一个注册表来定义它的命令树。注册表为每个命令记录路径、别名、简介、带类型的参数、效果、危险标记、输出 schema、错误码、示例、成熟度和证据。`--help`、`reference`、Skill 的命令地图（`App.CommandMap()`，SKL-002）和覆盖率枚举（VER-003）都从它生成；不在它旁边手工维护任何东西。
 
-使用 aicli 时，注册表就是 cobra（Go）或 click（Python）命令树，加上每个叶子命令一个 `aicli.Meta`，通过 `App.Register` 挂上去。命令组的简介来自 `App.Group`；输出 schema 用 `App.Schema` 声明。
+使用 aicli 时，注册表就是 cobra（Go）或 click（Python）命令树，加上每个叶子命令一个 `aicli.Meta`，通过 `App.Register` 挂上去。命令组的简介来自 `App.Group`；输出 schema 用 `App.Schema` 声明，同一个 schema 名称注册两次属于缺陷，aicli 会报告它。
 
 ```go
 app.Register(mrUpdate, aicli.Meta{
@@ -336,7 +336,7 @@ app.Register(mrUpdate, aicli.Meta{
 
 ### CLI-022 根级可达与实测的猜测写法
 
-用户会说出的每个名词都必须能从根级到达；嵌套的名词要有根级快捷方式（`branch` 对应 `repo branch`）。应当接受名词的复数别名。有证据表明 Agent 会首先猜的写法，必须被接受，或者以确切的 `did_you_mean` 回应：每个工具维护一份猜测清单，以下面的工具群清单为起点，再根据自己评测中的失败调用扩充。建议必须搜索整个命令树，不能只看输错的那个词的同级节点。
+用户会说出的每个名词都必须能从根级到达：只嵌套在一个父级下的名词要有根级快捷方式（`branch` 对应 `repo branch`）。嵌套在多个父级下的名词（`comment` 同时在 `issue` 和 `mr` 之下）不设快捷方式，或者设一个带限定的快捷方式（`issue-comment`），因为一个词不能指向两条路径。应当接受名词的复数别名。有证据表明 Agent 会首先猜的写法，必须被接受，或者以确切的 `did_you_mean` 回应：每个工具维护一份猜测清单，以下面的工具群清单为起点，再根据自己评测中的失败调用扩充。建议必须搜索整个命令树，不能只看输错的那个词的同级节点。
 
 工具群清单，来自 2026-10 的评测：
 
@@ -347,11 +347,11 @@ app.Register(mrUpdate, aicli.Meta{
 - 位置形式的标识符（`branch delete old-experiment`），以及在以位置参数接收项目的命令上使用的 `--project`；
 - 在只支持 JSON 的命令上使用 `--format raw`，返回带 `unsupported_format` 的 `E_USAGE`。
 
-aicli 通过 `App.Shortcuts`（根级名词）、`App.ShortFlags`（`-p`）、`App.FlagAliases`（用 `--repo` 表示 `--project`）和 `Meta.Aliases`（其他命令名）接受猜测写法，通过 `App.FlagSynonyms` 和 `App.VerbSynonyms` 给出建议；它的未知命令错误和未知标志错误都会搜索整个命令树。
+aicli 通过 `App.AddShortcut(word, path...)`（根级名词）、`App.ShortFlags`（`-p`）、`App.FlagAliases`（用 `--repo` 表示 `--project`，对所有命令有效）、`Meta.FlagAliases`（只对一个命令有效的别名，例如用 `--branch` 表示 `--name`）和 `Meta.Aliases`（其他命令名）接受猜测写法，通过 `App.FlagSynonyms` 和 `App.VerbSynonyms` 给出建议；它的未知命令错误和未知标志错误都会搜索整个命令树。`AddShortcut` 拒绝已经指向另一条路径的词；`App.Shortcuts` 中某个词的目标不是已注册的路径时，命令树检查会报告它。
 
-原因：接受这些猜测写法，加上 v3 Skill 的命令地图，把每次试验的无效调用从 0.22 降到 0.07（D 组对比 C 组）；相对同一小时内运行的 gitlab-cli 1.2.17，则是从 0.54 降到 0.07（D 组对比 A′ 组）。关闭 Skill、只有 CLI 发生变化时，无效调用比 C 组少 75%，降到 0.04。
+原因：接受这些猜测写法，加上 v3 Skill 的命令地图，把每次试验的无效调用从 0.22 降到 0.07（D 组对比 C 组）；相对同一小时内运行的 gitlab-cli 1.2.17，则是从 0.54 降到 0.07（D 组对比 A′ 组）。关闭 Skill、只有 CLI 发生变化时，无效调用比 C 组少 75%，降到 0.04。在 gitlab-cli 试点（2026-10）中，issue 组和合并请求组各自都需要一个根级 `comment`，哪一组最后注册，这个词就会悄悄归它。
 
-检查：`R03`；工具的测试逐条运行其猜测清单。
+检查：`R02`（只在一个父级下的每个名词都有根级快捷方式，没有一个词被映射两次）；`R03`；工具的测试逐条运行其猜测清单。
 
 ### CLI-023 解析
 
@@ -382,15 +382,15 @@ aicli 通过 `App.Shortcuts`（根级名词）、`App.ShortFlags`（`-p`）、`A
 | `artifact` | 创建新的本地文件 |
 | `persist` | 覆盖已有的本地文件 |
 
-带有 `observe` 以外任何效果的命令都是写命令（在 `reference` 中为 `type: write`），要经过写入门控（CLI-050）。`deliver` 和 `configure` 默认让命令成为危险命令，其他写命令可以声明为危险（不可逆的删除、合并、大规模改动）。工具的 `risk_tier`（风险档）至少要达到其效果所要求的级别：`observe` 为 T0；`change`、`artifact` 和 `persist` 为 T1；`deliver` 和 `configure` 为 T2（SEC-001）。工具自己的操作记录、确认密钥和通知缓存，以及它的自更新（`update`，CLI-070），都不算效果。所以内置命令 `reference`、`context`、`doctor`、`changelog` 和 `operation` 都是读命令；`update` 改变的是工具本身，不经过写入门控，只声明 `observe`：这是规范写明的例外，不是矛盾。
+带有 `observe` 以外任何效果的命令都是写命令（在 `reference` 中为 `type: write`），要经过写入门控（CLI-050）。`deliver` 和 `configure` 默认让命令成为危险命令；无法撤销的写命令（删除、合并、清除）必须声明为危险（SEC-001）。批量命令只有在它做的事本身危险时才是危险命令，即它的效果危险，或者它的操作无法撤销；作用于很多目标，并不会让它变得危险（`issue bulk close` 不是危险命令，因为每个 issue 都能重新打开）。命令本身不危险时，某一次计划也可能是危险的（一次删除文件的提交）：`Preview.Dangerous` 让这一次运行成为危险操作（CLI-056）。保存在某个资源上的评论是 `change`，即使上游会通知关注这个资源的人；`deliver` 用于要送到某人手上的内容，例如消息、邮件或共享，并且要写明目的地（CLI-051）。工具的 `risk_tier`（风险档）至少要达到其效果所要求的级别：`observe` 为 T0；`change`、`artifact` 和 `persist` 为 T1；`deliver` 和 `configure` 为 T2（SEC-001）。工具自己的操作记录、确认密钥和通知缓存，以及它的自更新（`update`，CLI-070），都不算效果。所以内置命令 `reference`、`context`、`doctor`、`changelog` 和 `operation` 都是读命令；`update` 改变的是工具本身，不经过写入门控，只声明 `observe`：这是规范写明的例外，不是矛盾。
 
-原因：工具群审计发现了不经过任何门控的写操作（wechat-mp 的 `token refresh`；confluence 的 `page attachment download`，写到服务器选定的文件名），还发现了一个经过门控、却被 `reference` 报告为读操作的写操作（kibana 的 `patterns infer --write`）。
+原因：工具群审计发现了不经过任何门控的写操作（wechat-mp 的 `token refresh`；confluence 的 `page attachment download`，写到服务器选定的文件名），还发现了一个经过门控、却被 `reference` 报告为读操作的写操作（kibana 的 `patterns infer --write`）。在 gitlab-cli 试点（2026-10）中，规范、模板和评审 Skill 对批量命令给出了不同的答案；一条会通知关注者的评论，看起来既像 `change` 又像 `deliver`。
 
 检查：`G00`（每个写命令都有符合性样例）；`R02`；效果测试（VER-004）。
 
 ### CLI-026 每个命令的错误码
 
-每个命令都必须列出它可能返回的错误码，由 `reference --command` 展示。aicli 公布 `Meta.ErrorCodes`，连同库本身会为该命令抛出的错误码（用法错误；写命令还有写入门控、授权范围和操作记录的错误）。不可能出现的错误码不列。
+每个命令都必须列出它可能返回的错误码，由 `reference --command` 展示。aicli 公布 `Meta.ErrorCodes`，连同库本身会为该命令抛出的错误码（用法错误；工具声明了设置时，每个工具命令都带 `E_CONFIG`，因为未知的配置档会让其中任何一个命令停下，CLI-101；写命令还有写入门控、授权范围和操作记录的错误）。不可能出现的错误码不列。
 
 原因：Agent 会为可能出现的分支做打算；列出却到不了的错误码，会把它们引上一条并不存在的路。
 
@@ -421,7 +421,7 @@ aicli 通过 `App.Shortcuts`（根级名词）、`App.ShortFlags`（`-p`）、`A
 - `--profile <name>`：账户配置档（CLI-101）。
 - `--idempotency-key <key>`：让创建操作可以安全地重复（CLI-062）。
 
-时长写作 `<n>ms`、`<n>s`、`<n>m`、`<n>h` 或 `<n>d`，用于 `--wait`、相对时间以及任何接收时长的标志。对常见的同义写法，只要命令有对应的标准标志、而工具的 `FlagSynonyms` 没有为这个词设条目，aicli 就会建议标准名称：`--per-page`、`--page-size`、`--max-results` 和 `--max` 对应 `--limit`；`--page-token`、`--next-token` 和 `--next` 对应 `--cursor`；`--search`、`--keyword`、`--keywords` 和 `--term` 对应 `--query`；`--order-by` 和 `--sort-by` 对应 `--sort`。
+时长写作 `<n>ms`、`<n>s`、`<n>m`、`<n>h` 或 `<n>d`，用于 `--wait`、相对时间以及任何接收时长的标志；`aicli.ParseDuration` 和 `aicli.ParseTime`（Python 为 `parse_duration`、`parse_time_arg`）解析时长和时间（绝对或相对），所以 `7d` 在每个工具里含义相同。对常见的同义写法，只要命令有对应的标准标志、而工具的 `FlagSynonyms` 没有为这个词设条目，aicli 就会建议标准名称：`--per-page`、`--page-size`、`--max-results` 和 `--max` 对应 `--limit`；`--page-token`、`--next-token` 和 `--next` 对应 `--cursor`；`--search`、`--keyword`、`--keywords` 和 `--term` 对应 `--query`；`--order-by` 和 `--sort-by` 对应 `--sort`。
 
 原因：Agent 会输入它们在别的工具里学到的标志。工具群实测到的首选猜测里，就有用 `-R` 和 `--repo` 表示 `--project`、用 `--all` 表示 `--limit`（CLI-022）。有了统一的词汇，Agent 在一个工具上学到的东西，到下一个工具上直接就是有效的调用，用不着先有猜测清单。
 
@@ -433,13 +433,13 @@ aicli 通过 `App.Shortcuts`（根级名词）、`App.ShortFlags`（`-p`）、`A
 
 - `list` 返回一页匹配项（CLI-041）。没有匹配时返回空页，`ok: true`，绝不返回 `E_NOT_FOUND`。
 - `get` 按 ref、URL 或名称返回一个资源（CLI-048）。资源不存在时返回 `E_NOT_FOUND`；一个名称匹配到多个资源时返回 `E_AMBIGUOUS`。
-- `search` 返回按与 `--query` 的相关度排序的一页结果，该页的 `sort` 要写明这一点。
+- `search` 返回与 `--query` 匹配的一页结果，该页的 `sort` 写明这一页实际的顺序：只有上游按相关度排序时才写 `relevance`，否则写上游实际用的顺序（`created_at_desc`）。工具无法判断是哪一种时（GitLab 只在启用高级搜索时按相关度排序），`sort` 写 `upstream`，由 `scope` 说明这个顺序可能是什么。
 - `create` 在与回执并列的 `result` 中返回新资源的 `ref`（CLI-059），并且应当接受 `--idempotency-key`（CLI-062）。
 - `update` 只修改给出的字段。字段只有在明确要求时才清空，即给出空值或 `--clear-<field>`，绝不因为漏掉了某个标志而被清空。没有指明任何要修改字段的调用，在进入写入门控之前就返回 `E_USAGE`（`missing_parameter`），所以不会为它签发令牌。
 - `delete` 的目标不存在时，在预演阶段报告 `E_NOT_FOUND`，绝不报告成功。
 - 领域动词（`merge`、`approve`、`share`）声明自己确切的效果（CLI-025），其简介写明会改变什么。
 
-原因：Agent 会把在一个工具上学到的东西带到下一个工具（CLI-022），所以一个动词在某个工具里换了含义，就会把正确的习惯变成错误的调用或错误的报告。没有匹配就失败的 `list`，或者对一个从未存在过的目标报告成功的 `delete`，会让 Agent 的回答里出现不实的陈述；把没给出的字段统统清空的 `update`，会毁掉用户从未提到的数据。
+原因：Agent 会把在一个工具上学到的东西带到下一个工具（CLI-022），所以一个动词在某个工具里换了含义，就会把正确的习惯变成错误的调用或错误的报告。没有匹配就失败的 `list`，或者对一个从未存在过的目标报告成功的 `delete`，会让 Agent 的回答里出现不实的陈述；把没给出的字段统统清空的 `update`，会毁掉用户从未提到的数据。在 gitlab-cli 试点（2026-10）中，`relevance` 在大多数自托管的 GitLab 实例上都不属实，因为它们的基础搜索按从新到旧列出 issue 和合并请求。
 
 检查：人工评审；VER-004 的空结果行和无效输入行。
 
@@ -471,7 +471,7 @@ aicli 通过 `App.Shortcuts`（根级名词）、`App.ShortFlags`（`-p`）、`A
 
 ### CLI-032 reference --command
 
-`reference --command <path>` 必须返回 `{tool, version, command, schemas, error_codes}`：该命令的完整条目（`path`、`aliases`、`summary`、`type`、`effects`、`dangerous`、`maturity`、`evidence`、`params`、`output`、`error_codes`、`examples`）、其 `output` 所指的 schema 条目，以及所列每个错误码的 `{exit, retryable}`，总长不超过 4,000 个字符。它接受别名；未知路径返回带 `did_you_mean` 的 `E_USAGE` `invalid_value`（`parameter: "--command"`）。
+`reference --command <path>` 必须返回 `{tool, version, command, schemas, error_codes}`：该命令的完整条目（`path`、`aliases`、`summary`、`type`、`effects`、`dangerous`、`maturity`、`evidence`、`params`、`output`、`error_codes`、`examples`）、其 `output` 所指的 schema 条目（命令设置了 `Meta.DefaultFields` 时，带的是命令自己的默认字段），以及所列每个错误码的 `{exit, retryable}`，总长不超过 6,000 个字符。它接受别名；未知路径返回带 `did_you_mean` 的 `E_USAGE` `invalid_value`（`parameter: "--command"`）。
 
 ```json
 {"ok":true,"schema_version":"2.0","data":{"tool":"tool","version":"2.0.0",
@@ -485,9 +485,9 @@ aicli 通过 `App.Shortcuts`（根级名词）、`App.ShortFlags`（`-p`）、`A
  "meta":{"duration_ms":2}}
 ```
 
-原因：查一个命令约花 130–200 个 token，而完整的 `reference` 要 4,000–28,000 个。
+原因：查一个命令约花 130–200 个 token，而完整的 `reference` 要 4,000–28,000 个。预算定为 6,000，是因为在 gitlab-cli 试点（2026-10）中，一个有 15 个标志的写命令（`mr create`）需要 4,552 个字符，大部分是它的参数和错误码。
 
-检查：`R01`（合法，且不超过 4,000 个字符）。
+检查：`R01`（合法，且不超过 6,000 个字符）。
 
 ### CLI-033 完整的 reference
 
@@ -574,9 +574,9 @@ aicli 依据 `App.Identity`、状态目录、授权范围文件和设置文件�
 
 ### CLI-040 默认字段
 
-每个列表命令都必须声明默认字段，依据用户会问的问题来选，而不是照搬 API schema：Agent 选择和核对条目所需的字段（`ref`、标题或名称、状态、`updated_at`、`url`）；常见任务会问到的字段（对合并请求而言：指派人、评审人、标签、流水线状态）。`--fields a,b` 替换默认字段，`--fields +a` 在默认字段上追加，`--fields all` 返回全部字段。未知字段返回 `E_USAGE`（`invalid_value`，`parameter: "--fields"`，`expected` 列出可用字段）。投影作用于每个条目、`get` 返回的对象，或已确认写操作的 `data.result`（绝不作用于回执）；完整性键（CLI-041）始终保留。投影由 aicli 完成；默认字段由工具选定（`Meta.DefaultFields` 或 schema 的 `default_fields`）。
+每个列表命令都必须声明默认字段，依据用户会问的问题来选，而不是照搬 API schema：Agent 选择和核对条目所需的字段（`ref`、标题或名称、状态、`updated_at`、`url`）；常见任务会问到的字段（对合并请求而言：指派人、评审人、标签、流水线状态）。`--fields a,b` 替换默认字段，`--fields +a` 在默认字段上追加，`--fields all` 返回全部字段。未知字段返回 `E_USAGE`（`invalid_value`，`parameter: "--fields"`，`expected` 列出可用字段）。投影作用于每个条目、`get` 返回的对象，以及已确认写操作的 `data.result`：没有 `--fields` 时，它像读取结果一样被裁剪到默认字段（绝不作用于回执）；完整性键（CLI-041）始终保留。每个条目都要多一次上游读取的默认字段，在任务需要时可以保留：工具只在响应会显示它时才读取（`aicli.WantsField(cmd, name)`），并行读取，并设一个由 `scope` 写明的上限；不值得这个开销的字段不放进默认字段。投影由 aicli 完成；默认字段由工具选定（单个命令用 `Meta.DefaultFields`，否则用 schema 的 `default_fields`），`--help` 和 `reference` 显示命令自己的默认字段：这时命令的 `output` 指向一份 schema 的副本，名为 `<output>_for_<command words joined by _>`，里面带着这些默认字段。
 
-原因：在 Skill 保持不变的条件下，给 MR 条目加上指派人、标签和流水线状态，并在工具内计算流水线过滤之后，「哪些 MR 的流水线失败了」（T02）从 13.6 次调用降到 6.1 次；「指派 MR 并打标签」（T07）从 13.0 次降到 9.5 次。
+原因：在 Skill 保持不变的条件下，给 MR 条目加上指派人、标签和流水线状态，并在工具内计算流水线过滤之后，「哪些 MR 的流水线失败了」（T02）从 13.6 次调用降到 6.1 次；「指派 MR 并打标签」（T07）从 13.0 次降到 9.5 次。这个默认字段每个合并请求要多一次 GitLab 读取，因为 GitLab 的合并请求列表不带流水线状态（gitlab-cli 试点，2026-10）。
 
 检查：aicli 的投影测试；对所选默认字段做人工评审。
 
@@ -585,34 +585,34 @@ aicli 依据 `App.Identity`、状态目录、授权范围文件和设置文件�
 每个列表都必须返回 `items`、`count`（本次响应中的条目数）和 `has_more`；上游报告总数时，应当返回 `total`，即整个列表的条目数，这样问数量的问题就不需要翻页（CLI-044）。`has_more` 为 true 时，`next_cursor`、`next_offset` 和 `continuation_reason` 恰好出现其中一个（`offset` 可以回显当前位置）。被工具截断的列表带 `truncated: true` 和 `truncated_reason`。每个列表都应当说明 `sort` 和 `scope`（contract.json 中的可选键）；`scope` 说明列表覆盖了什么：容器、实际应用的过滤条件和解析后的时间。如果列表的覆盖范围比读者默认的要窄（只有直接成员；在单页上做的客户端过滤），必须在 `scope` 中说明；扇出到多个容器的读取，要在 `scope` 中列出无法读取的容器，绝不静默丢弃。
 
 ```json
-{"ok":true,"schema_version":"2.0","data":{"items":[{"ref":"@carol","username":"carol","access":"developer","via":"group acme"}],"count":1,"has_more":false,"scope":{"project":"acme/payments-service","membership":"effective: direct and inherited from groups"},"sort":"username_asc"},"meta":{"duration_ms":41}}
+{"ok":true,"schema_version":"2.0","data":{"items":[{"ref":"@carol","username":"carol","access":"developer","membership":"inherited"}],"count":1,"has_more":false,"scope":{"project":"acme/payments-service","membership":"effective: direct and inherited from groups"},"sort":"username_asc"},"meta":{"duration_ms":41}}
 ```
 
-原因：gitlab-cli 1.2.17 的 `project members` 只列直接成员，对一个成员全部经由所属组加入的项目，返回了 `items: []` 和 `hasMore: false`。于是有个 Agent 告诉用户，机器人账号「能看到这个项目……但成员列表里没有它」，而这并不属实。
+原因：gitlab-cli 1.2.17 的 `project members` 只列直接成员，对一个成员全部经由所属组加入的项目，返回了 `items: []` 和 `hasMore: false`。于是有个 Agent 告诉用户，机器人账号「能看到这个项目……但成员列表里没有它」，而这并不属实。条目写的是 `membership: inherited`，而不是成员经由哪个组加入，因为 GitLab 的 REST API 不提供这个组的名字（gitlab-cli 试点，2026-10）。
 
 检查：aicli 的 `Page` 强制执行这些键的规则，`R04` 校验每一页；人工评审检查 `scope` 是否属实。
 
 ### CLI-042 大小预算
 
-使用默认标志时，成功响应必须控制在 8,000 个字符以内，每个错误响应控制在 2,000 个字符以内（按整个信封计）。完整的 `reference`（CLI-033）和 `raw` 输出不受成功响应预算约束（contract.json `size_budgets.exempt`）；`reference --index` 和 `reference --command` 保留各自的预算（CLI-031、CLI-032）。更大的结果改用分页、专门的获取命令（CLI-043），或者用一个命令把结果写到 `--output <file>`，只返回汇总信息和路径。写本地文件属于 `artifact` 或 `persist` 效果，所以这样的命令是受写入门控管辖的写命令，授权范围的 `outputs` 或 `roots` 必须允许该路径（SEC-012）；aicli 的 `--output` 辅助函数让这次写入经过写入门控。
+使用默认标志时，成功响应必须控制在 8,000 个字符以内，每个错误响应控制在 2,000 个字符以内（按整个信封计）。成功响应预算针对默认调用：要求更多内容的调用（`--limit 100`、`--fields all`）可以超出；默认一页就可能超出预算的列表（标题很长、默认字段很多），要调低默认的 `--limit` 或减少默认字段。完整的 `reference`（CLI-033）和 `raw` 输出不受成功响应预算约束（contract.json `size_budgets.exempt`）；`reference --index` 和 `reference --command` 保留各自的预算（CLI-031、CLI-032）。更大的结果改用分页、专门的获取命令（CLI-043），或者用一个命令把结果写到 `--output <file>`，只返回汇总信息和路径。写新的本地文件属于 `artifact` 效果，覆盖已有文件属于 `persist`，所以这样的命令是受写入门控管辖的写命令：新文件的路径必须在授权范围的 `outputs` 之内，已有文件的路径必须在 `roots` 之内（SEC-012）。只声明 `artifact`、没有声明 `persist` 的命令从不覆盖文件：路径已存在时返回 `E_VALIDATION`（`invalid_value`，`details.path`），而不是授权范围拒绝。aicli 提供两种写法：`App.WriteOutput` 让内存中的小结果单独经过写入门控，以文件为目标；以上游资源为目标的 `App.Write`（例如要获取其产物的作业，文件列在 `Preview.Outputs` 中），在它的 `Apply` 里用 `App.OpenOutput(path, overwrite)` 把数据流写进目标旁边的临时文件，由 `Commit` 移到位。两者在写入时都会再检查一次授权范围。
 
-原因：运行框架只把约 30,000 个字符以内的成功结果、约 10,000 个字符以内的失败结果内联显示，超出后 Agent 只能拿到预览，或者丢掉中间部分。一个 50 项的列表，只带三个默认字段约 4,000 个字符，带全部字段并缩进则约 14,000 个。
+原因：运行框架只把约 30,000 个字符以内的成功结果、约 10,000 个字符以内的失败结果内联显示，超出后 Agent 只能拿到预览，或者丢掉中间部分。一个 50 项的列表，只带三个默认字段约 4,000 个字符，带全部字段并缩进则约 14,000 个。在 gitlab-cli 试点（2026-10）中，一次下载的输出文件已经存在，得到的拒绝却是缺少 `roots` 授予，而这个授予帮不上忙；整个产物归档还必须全部放进内存。
 
-检查：`R01`（reference 的预算）和 `R04`（错误）；基于测试夹具的响应大小测试（VER-004）。
+检查：`R01`（reference 的预算）；`R04`（对套件的默认调用检查成功响应预算，对每个信封检查错误响应预算；`ValidateEnvelope` 只检查错误响应预算）；基于测试夹具的响应大小测试（VER-004）。
 
 ### CLI-043 重型子资源
 
-diff、日志、文件内容和附件必须由单独的命令提供，绝不内联在列表或默认的 `get` 输出中；列表只带有界的概要（数量、路径、大小）。这些重型命令返回结构化数据（diff 按文件拆成条目，带路径和行数），这样 `--fields` 就能把它们投影成一份清单。
+diff、日志、文件内容和附件必须由单独的命令提供，绝不内联在列表或默认的 `get` 输出中；列表只带有界的概要（数量、路径、大小）。这些重型命令返回结构化数据（diff 按文件拆成条目，带路径和行数），这样 `--fields` 就能把它们投影成一份清单。单个正文仍可能超出成功响应预算：很长的文件、很大的 diff、贴了日志的描述。这时它的 JSON 形式只带一个有界的窗口：用 `--offset` 和 `--limit` 按行或按文件分页，或者在写明的长度处截断文本，带上 `<field>_truncated: true` 和一条点出获取其余部分的命令的通知。`--format raw`（`Meta.RawOutput`）返回完整的正文；长的文本字段不放进默认字段，需要时用 `--fields +description` 加上。
 
-原因：Agent 只为它选中的那个条目承担重型载荷的开销，而且可以先要一份清单。
+原因：Agent 只为它选中的那个条目承担重型载荷的开销，而且可以先要一份清单。在 gitlab-cli 试点（2026-10）中，单个文件、单个 diff 和单份发布说明都超过过 8,000 个字符。
 
 检查：人工评审。
 
 ### CLI-044 在工具内计算
 
-计数、分组、过滤以及找出最新或排名第一的条目，都必须在工具内完成，能在服务端做就在服务端做；命令绝不把列表交给模型去数。客户端过滤要先翻完整个集合，并在 `scope` 中说明；做不到时，列表标为 `truncated`。
+计数、分组、过滤以及找出最新或排名第一的条目，都必须在工具内完成，能在服务端做就在服务端做；命令绝不把列表交给模型去数。客户端过滤要先翻完整个集合，并在 `scope` 中说明；做不到时，列表标为 `truncated`。上游报告了总数时，列表返回 `total`，这样计数就不需要翻页（CLI-041）；分组计数（谁开的 issue 最多）是一页 `{<key>, count}` 条目，按 `count_desc` 排序，由 `scope` 说明统计了什么；工具没能读完整个集合时，标为 `truncated`。
 
-原因：在「哪些打开状态的 MR 流水线失败了」（T02）中，使用 1.2.17 的 Agent 先列出 MR，再逐个获取。改为在工具内计算 `mr list --pipeline-status failed` 后，这个任务只需 6.1 次调用而不是 13.6 次；Skill 点明这个过滤条件后降到 2.8 次。
+原因：在「哪些打开状态的 MR 流水线失败了」（T02）中，使用 1.2.17 的 Agent 先列出 MR，再逐个获取。改为在工具内计算 `mr list --pipeline-status failed` 后，这个任务只需 6.1 次调用而不是 13.6 次；Skill 点明这个过滤条件后降到 2.8 次。在 gitlab-cli 试点（2026-10）中，要找出 46 个 issue 里开得最多的作者，Agent 仍然得自己去数一页 46 个条目。
 
 检查：人工评审；Agent 评测（VER-006）。
 
@@ -626,11 +626,11 @@ diff、日志、文件内容和附件必须由单独的命令提供，绝不内�
 
 ### CLI-046 不可信内容的路径
 
-响应如果携带外部内容（由人或其他系统写的文本：标题、描述、评论、邮件正文、文件内容、上游错误文本），必须在 `meta.untrusted` 中列出这些内容的位置，每个响应列一次。位置以路径表示：从信封根开始、以点分隔的键，数组的每个元素用 `[]` 表示（`data.items[].title`、`data.description`、`error.details.upstream_message`）。这个列表在 `--fields` 投影后依然保留。1.6.3 中每个对象上的 `_untrusted` 键已取消。
+响应如果携带外部内容（由人或其他系统写的文本：标题、描述、评论、邮件正文、文件内容、上游错误文本，以及嵌入了这类文本的 `ref`，例如 `acme/web/-/branches/<name>` 中的分支名、标签名或文件名），必须在 `meta.untrusted` 中列出这些内容的位置，每个响应列一次。位置以路径表示：从信封根开始、以点分隔的键，数组的每个元素用 `[]` 表示（`data.items[].title`、`data.description`、`error.details.upstream_message`）。这个列表跟随 `--fields`：保留仍在响应中的字段的路径，去掉被投影删掉的字段的路径。1.6.3 中每个对象上的 `_untrusted` 键已取消。
 
-aicli 从输出 schema 的 `untrusted_fields`、`App.OK(cmd, data, untrusted...)`、`Page.Untrusted` 和 `Error.Untrusted` 收集这些路径，并在投影后保留它们。Agent 和工具应如何对待这些内容，见 SEC-002。
+aicli 从输出 schema 的 `untrusted_fields`、`App.OK(cmd, data, untrusted...)`、`Page.Untrusted` 和 `Error.Untrusted` 收集这些路径，并去掉被投影删掉的字段的路径。Agent 和工具应如何对待这些内容，见 SEC-002。
 
-原因：在每个条目上重复 `_untrusted`，会让一个 50 项列表的响应多出约 16% 的字符；一份路径列表就能表达同样的信息。
+原因：在每个条目上重复 `_untrusted`，会让一个 50 项列表的响应多出约 16% 的字符；一份路径列表就能表达同样的信息。ref 是 Agent 会复制进下一条命令的东西；在 gitlab-cli 试点（2026-10）中，分支、标签和文件的 ref 都带着人写的文本。
 
 检查：`R04`；Agent 评测中的注入指令场景（VER-006）。
 
@@ -645,6 +645,7 @@ stderr 不是终端时，工具不得向它写进度条、加载动画、横幅�
 ### CLI-048 接受 Agent 手上已有的东西
 
 - 输出中的每个资源都必须带一个 `ref` 字符串（`acme/web!5`、`acme/web#12`），每个接收该资源的命令都必须接受这个 ref，也必须接受该资源的网页 URL。
+- 子资源的 ref 是父资源的 ref，再接上集合名和它的 ID：`acme/web#12/notes/99`、`acme/web!5/discussions/<id>`，这样对父资源的授予就能覆盖它（SEC-012）。网页 URL 及其锚点（`…/-/issues/12#note_99`）仍然作为输入接受。
 - 在名称是自然输入的地方（项目、用户、看板），有歧义的名称必须返回 `E_AMBIGUOUS`（退出码 2），附带 `candidates`，每项为 `{ref, label}`，绝不静默挑一个。
 - 应当接受相对时间（`7d`、`24h`），并在 `scope` 中以绝对 UTC 时间回显；`--input -` 或 `--input <file>` 应当以一个 JSON 对象接收全部参数；长文本应当通过 `--<param>-file <path|->`（`Meta.FileInputs`）传入，按内容绑定（CLI-054）。
 
@@ -652,9 +653,9 @@ stderr 不是终端时，工具不得向它写进度条、加载动画、横幅�
 {"ok":false,"schema_version":"2.0","error":{"code":"E_AMBIGUOUS","message":"More than one project matches that name; choose one by ref.","retryable":false,"details":{"dispatch_state":"not_started","next_action":"Ask the user which project they mean, then re-run with its ref.","candidates":[{"ref":"acme/payments-service","label":"acme / payments-service"},{"ref":"legacy/payments","label":"legacy / payments"}]}},"meta":{"duration_ms":120,"untrusted":["error.details.candidates[].label"]}}
 ```
 
-aicli 提供 `Ambiguous` 构造函数、文件和 stdin 输入（`ReadFileInput`）以及位置参数绑定；解析 ref、URL 和名称，以及 `--input`，由工具自己的代码实现（解析出的值用 `SetResolved` 绑定，CLI-054）。
+aicli 提供 `Ambiguous` 构造函数、文件和 stdin 输入（`ReadFileInput`）以及位置参数绑定；解析 ref、URL 和名称，以及 `--input`，由工具自己的代码实现（解析出的值用 `SetResolved` 绑定，每个输入只绑定它自己那一部分，CLI-054）。
 
-原因：Agent 会从先前的输出、用户的消息和 URL 中复制标识符；命令要求一个它们手上没有的 ID 时，它们就会编一个。评测中的歧义项目任务（T04）特意设置了两个名为「payments」的项目。
+原因：Agent 会从先前的输出、用户的消息和 URL 中复制标识符；命令要求一个它们手上没有的 ID 时，它们就会编一个。评测中的歧义项目任务（T04）特意设置了两个名为「payments」的项目。在 gitlab-cli 试点（2026-10）中，issue 和合并请求的评论、讨论串和变更文件都没有 ref 形式，各个命令组只好各自发明一种。
 
 检查：对每种资源类型，测试其 ref、URL 和名称解析到同一个目标（VER-004）。
 
@@ -708,6 +709,8 @@ return app.Write(cmd, aicli.WriteSpec{
 
 `classify` 由工具实现。它用 `aicli.NotDispatched` 包装在任何东西离开本机之前产生的错误，用 `aicli.Rejected` 包装能证明什么都没改变的上游回应（经 `FromHTTP` 映射的 4xx，包括 429）。其他错误原样返回，写入门控把它们报告为 `E_OUTCOME_UNKNOWN`。要包装的是 `FromHTTP` 构造出的 `*aicli.Error`，绝不是原始的传输层错误：`aicli.NotDispatched(aicli.FromHTTP(0, msg, "", 0))` 报告 `E_NETWORK`，`aicli.Rejected(aicli.FromHTTP(status, msg, body, 0))` 报告该状态码对应的错误码；如果包装的是普通错误，写入门控拿不到错误码，就退回 `E_SERVER`（回执规则第 4 条）。Python 有同样的 API，采用 snake_case 命名（`app.write`、`WriteSpec`）。
 
+确定目标需要查询上游时（要解析的名称或 ID、变量的环境范围、账户自己的命名空间），设置 `WriteSpec.ResolveTarget`，不用 `Target`。写入门控在预演或裸调用时，于授权范围检查之前调用它；确认时，只在令牌检查之后才调用（CLI-057），所以重复的确认在任何工具代码运行之前就得到 `token_used`；它的错误作为工具自己的错误返回，什么都没有发出。`App.Write` 之前的代码在每次确认时都先于这些检查运行，所以它不读取写操作本身会改变的上游内容。
+
 原因：工具群审计发现，各工具自己实现的门控都以相同的方式失效。全部 10 个有门控的工具，绑定都漏掉了输入（gitlab-cli：59 个写命令中有 23 个；其余 9 个工具共 72 项已确认的问题）；9 个工具的令牌可以伪造，8 个在存储失败时令牌可以重复使用；2 个工具在 `--format text` 下跳过了门控。规则本身是对的，十份实现却都不对。
 
 检查：对每个写命令运行 `G00`–`G10`。
@@ -727,7 +730,7 @@ return app.Write(cmd, aicli.WriteSpec{
   "preview":{"operation_id":"op_4hx2mq7tz3b5kd6wqe2nrc7vya","command":"mr update","action":"Update merge request",
     "target":{"key":"acme/web!5","kind":"merge_request","label":"!5 Add retry"},"effects":["change"],"dangerous":false,
     "changes":[{"field":"assignees","before":["bob"],"after":["carol"]},{"field":"labels","add":["needs-review"]}],
-    "inputs":{"mr":"acme/web!5","assignee":"carol","add_labels":["needs-review"]},
+    "inputs":{"mr":"5","project":"acme/web","assignee":"carol","add_labels":["needs-review"]},
     "base":{"version":"2026-10-11T18:30:24Z","source":"updated_at"},"can_apply":true,"blocked_by":[]},
   "confirm_token":"ct2_4hx2mq7tz3b5kd6wqe2nrc7vya_9f2a61c04be87d35a0c6e1f24b7d9e03",
   "expires_at":"2026-10-12T08:15:00Z","operation_id":"op_4hx2mq7tz3b5kd6wqe2nrc7vya"},
@@ -745,7 +748,7 @@ return app.Write(cmd, aicli.WriteSpec{
 ```json
 {"ok":false,"schema_version":"2.0","error":{"code":"E_CONFIRMATION_REQUIRED","message":"This command changes data and nothing was changed; check the preview, then confirm with its token.","retryable":false,"details":{
   "dispatch_state":"not_started","problem":"confirmation_required","next_action":"If details.preview matches the request, re-run the same command with --confirm ct2_7mq2xk4vz6bn3dt5wy2hce7rpa_0c4e8a1f6b2d9e3a7c5f1b8d4e0a6c2f.",
-  "preview":{"operation_id":"op_7mq2xk4vz6bn3dt5wy2hce7rpa","command":"issue close","action":"Close issue","target":{"key":"acme/web#12","kind":"issue","label":"#12 Timeout in checkout"},"effects":["change"],"dangerous":false,"changes":[{"field":"state","before":"opened","after":"closed"}],"inputs":{"issue":"acme/web#12"},"can_apply":true,"blocked_by":[]},
+  "preview":{"operation_id":"op_7mq2xk4vz6bn3dt5wy2hce7rpa","command":"issue close","action":"Close issue","target":{"key":"acme/web#12","kind":"issue","label":"#12 Timeout in checkout"},"effects":["change"],"dangerous":false,"changes":[{"field":"state","before":"opened","after":"closed"}],"inputs":{"issue":"12","project":"acme/web"},"can_apply":true,"blocked_by":[]},
   "confirm_token":"ct2_7mq2xk4vz6bn3dt5wy2hce7rpa_0c4e8a1f6b2d9e3a7c5f1b8d4e0a6c2f",
   "expires_at":"2026-10-12T08:20:00Z","operation_id":"op_7mq2xk4vz6bn3dt5wy2hce7rpa"}},
  "meta":{"duration_ms":95,"untrusted":["error.details.preview.target.label"]}}
@@ -779,11 +782,11 @@ aicli 在绑定前做归一化：
 - 标志名取规范名（`--repo` 以 `project` 绑定）。标量以解析后值的字符串形式绑定；重复给出或逗号分隔的值按输入顺序以数组绑定。位置参数以 `args` 绑定，除非 `Meta.Positional` 把它们转成标志，所以 `branch delete x` 和 `branch delete --name x` 是同一个请求。
 - 文件或 stdin 输入只读取一次，以其内容的 `sha256:<hex>` 绑定在它所填充的参数名下；该参数的字面值以字面值的 `sha256:<hex>` 绑定。因此，在 `f` 的内容为 `X` 时，`--body X` 和 `--body-file f` 是同一个请求。
 - 机密值以确认密钥计算的 HMAC 绑定，绝不以明文绑定（SEC-021）。
-- 工具以多种形式接受的值（ID、ref、URL、名称）按给定的原样绑定，除非工具先解析它：工具在 `App.Write` 之前调用 `aicli.SetResolved(cmd, flag, canonical)`，这样每种形式都绑定到同一个值。
+- 工具以多种形式接受的值（ID、ref、URL、名称）按给定的原样绑定，除非工具先解析它：工具在 `App.Write` 之前调用 `aicli.SetResolved(cmd, flag, canonical)`，这样每种形式都绑定到同一个值。用户没有给出的标志，如果它的值包含在另一个输入里（`acme/web!5` 中的项目），也可以这样设置。每个输入只绑定它自己那一部分：iid 绑定为 `mr`，项目绑定为 `project`，绝不绑定同时包含两者的 ref；这样改动了 `--project`，点出的就是 `--project`，而不是 `--mr`（G03）。在结构化的值里指明文件的（`--action 'update:path=a;content_file=b'`），只有工具在 `App.Write` 之前把文件读一次，并用 `SetResolved` 绑定一个含有内容 SHA-256 的形式，才算绑定了文件的内容。
 
 这些声明（claims）保存在操作记录里，而不在令牌里：`{v, tool, tool_version, op, cmd, inv, inputs, account, host, target, scope, base, idem, exp}`，其中 `v` 为 2，其余每个值都是字符串或摘要。`inputs` 为每个输入名保存一个摘要，因此不匹配时能点出是哪个输入；`inv` 是规范化输入的 SHA-256。规范 JSON 指键已排序、没有空白、使用 UTF-8。
 
-原因：工具群审计发现，每个有门控的工具，其绑定都漏掉了输入：文件内容只按路径绑定（jira 的 `issue attach`、outlook 的附件）；批量路径只绑定了目标列表（archery 的一个 `query run` 令牌接受了不同的 `--sql`）；从环境变量或配置中解析出的账号没有纳入绑定；gitlab-cli 为 `--assignee alice` 签发的一个令牌，结果把 MR 指派给了 dave。
+原因：工具群审计发现，每个有门控的工具，其绑定都漏掉了输入：文件内容只按路径绑定（jira 的 `issue attach`、outlook 的附件）；批量路径只绑定了目标列表（archery 的一个 `query run` 令牌接受了不同的 `--sql`）；从环境变量或配置中解析出的账号没有纳入绑定；gitlab-cli 为 `--assignee alice` 签发的一个令牌，结果把 MR 指派给了 dave。在 gitlab-cli 试点（2026-10）中，issue 以整个 ref（`acme/web#12`）绑定，又和它的项目并列，结果改动 `--project` 被当成了改动 `--issue`。
 
 检查：`G03`。
 
@@ -803,19 +806,19 @@ aicli 在绑定前做归一化：
 
 ### CLI-056 危险命令
 
-危险命令的两步都必须带 `--dangerous`：预演（或裸调用）和确认。不带它时，写入门控在做任何其他事情之前就返回带 `problem: dangerous_flag_required` 的 `E_CONFIRMATION_REQUIRED`。授权范围还必须授予 `dangerous: true`（SEC-012）。
+危险命令的两步都必须带 `--dangerous`：预演（或裸调用）和确认。不带它时，写入门控在做任何其他事情之前就返回带 `problem: dangerous_flag_required` 的 `E_CONFIRMATION_REQUIRED`。授权范围还必须授予 `dangerous: true`（SEC-012）。命令本身不危险时，一次计划也可能是危险的（一次删除文件的 `commit create`）：`Preview.Dangerous` 让写入门控把这一次运行当作危险操作，两步都要带 `--dangerous`，预览中为 `preview.dangerous: true`，授权范围也要授予 `dangerous: true`。绑定包含这一项，所以在预演和确认之间变成危险的计划属于 `state_drift`。
 
 ```json
 {"ok":false,"schema_version":"2.0","error":{"code":"E_CONFIRMATION_REQUIRED","message":"This command is dangerous and needs --dangerous in both the dry-run and the confirm step.","retryable":false,"details":{"dispatch_state":"not_started","next_action":"Re-run with --dangerous --dry-run, check the preview, then repeat the command with --dangerous --confirm <confirm_token>.","problem":"dangerous_flag_required"}},"meta":{"duration_ms":2}}
 ```
 
-原因：两次输入 `--dangerous` 是一种意图声明，复制来的命令或注入的指令不会碰巧带上它；忘了带只多花一次调用（评测 D 组 813 次调用中有 10 次）。
+原因：两次输入 `--dangerous` 是一种意图声明，复制来的命令或注入的指令不会碰巧带上它；忘了带只多花一次调用（评测 D 组 813 次调用中有 10 次）。在 gitlab-cli 试点（2026-10）中，只含删除动作的 `repo commit create` 不带 `--dangerous` 就删掉了文件，而 `repo file delete` 却需要它。
 
 检查：`G09`。
 
 ### CLI-057 确认时按固定顺序复查
 
-确认时，写入门控必须重新运行命令的 `Preview` 并比较：基准版本变了，返回 `E_CONFLICT` `state_drift`；授权范围文件变了，返回 `scope_changed`；账号、主机或目标变了，返回 `token_mismatch`，`parameter` 为 `account`、`host` 或 `target`。重新运行的预览还必须计划同样的改动：`action`、`changes`、`destinations` 或 `outputs` 不同，或者 `can_apply: false`，同样是 `state_drift`，所以 `Preview` 必须是确定性的：不含时间戳，`Changes` 和列表值的顺序稳定。aicli 按下面的顺序运行每项检查，遇到第一个失败就停止。
+确认时，写入门控必须重新运行命令的 `Preview` 并比较：基准版本变了，返回 `E_CONFLICT` `state_drift`；授权范围文件变了，返回 `scope_changed`；账号、主机或目标变了，返回 `token_mismatch`，`parameter` 为 `account`、`host` 或 `target`。重新运行的预览还必须计划同样的改动：`action`、`changes`、`destinations`、`outputs` 或 `dangerous` 不同，或者 `can_apply: false`，同样是 `state_drift`，所以 `Preview` 必须是确定性的：不含时间戳，`Changes` 和列表值的顺序稳定。aicli 按下面的顺序运行每项检查，遇到第一个失败就停止。
 
 确认（`--confirm <token>`）：
 
@@ -826,7 +829,7 @@ aicli 在绑定前做归一化：
 5. 已存在已消费标记，或记录已不是 `planned` → `token_used`，无论令牌多旧。
 6. 已过 `expires_at` → `token_expired`，并附上同一命令的新计划。
 7. 重新计算输入摘要；不同 → `token_mismatch`，点出第一个不同的参数。
-8. 危险命令缺少 `--dangerous` → `E_CONFIRMATION_REQUIRED`（`dangerous_flag_required`）。
+8. 危险命令，或者预演时被判定为危险的计划（`Preview.Dangerous`），缺少 `--dangerous` → `E_CONFIRMATION_REQUIRED`（`dangerous_flag_required`）。直到这时才运行工具代码：设置了 `WriteSpec.ResolveTarget`（批量为 `BatchSpec.ResolveItems`）时，由它确定目标，它的错误就是工具自己的错误。
 9. 取得目标的锁（状态目录中的 `locks/<hash>.lock`；批量操作按排序后的顺序取得每个条目的锁），最多等待 10 s → `lock_held`。第 10 至 15 步都在锁内运行，所以同一目标上的两次确认绝不交错。再检查一次已消费标记 → `token_used`。
 10. 授权范围：缺失或不足 → 带 `details.scope` 的 `E_FORBIDDEN`；摘要变化 → `scope_changed`；操作预算已用完 → `E_FORBIDDEN`（`scope.status: budget_spent`）。
 11. 同一目标上有未解决的操作 → `unresolved_operation`。重新运行 `Preview`：基准版本或计划变化，或者 `can_apply: false` → `state_drift`。重新计算账号、主机和目标：不同 → `token_mismatch`（`parameter` 为 `account`、`host` 或 `target`）。
@@ -844,15 +847,15 @@ aicli 在绑定前做归一化：
 预演和裸调用：
 
 1. 危险命令缺少 `--dangerous` → `dangerous_flag_required`。
-2. 检查授权范围；拒绝时返回带 `details.scope` 的 `E_FORBIDDEN`，能构造出预览时还带 `details.preview`。
+2. 命令设置了 `ResolveTarget` 时，先用它确定目标（它的错误就是工具自己的错误），再检查授权范围；拒绝时返回带 `details.scope` 的 `E_FORBIDDEN`，能构造出预览时还带 `details.preview`。
 3. 同一目标上有未解决的操作 → `unresolved_operation`。
-4. 运行 `Preview`。
+4. 运行 `Preview`；对它判定为危险的计划（`Preview.Dangerous`），缺少 `--dangerous` → `dangerous_flag_required`，授权范围没有授予 `dangerous: true` → `E_FORBIDDEN`。
 5. 分配操作 ID。
 6. 把记录写为 `planned`；失败 → `E_IO`。
 7. 签发令牌，除非 `can_apply` 为 false。
 8. 输出：`--dry-run` 返回带 `data` 的 `ok: true`；裸调用返回 `E_CONFIRMATION_REQUIRED`，`details` 中是同样的内容。
 
-原因：绑定基准版本，能阻止依据旧状态计划的写操作在新状态上运行；固定的顺序让每个工具以同样的方式拒绝，而且总是在发出任何东西之前。顺序很重要。在 2.0 的发布评审中，先检查过期的已用令牌在 10 分钟后返回了 `token_expired` 和一个新令牌，照着做就把写操作发了两次。没有锁时，两次按同一版本计划的确认都通过了漂移检查，后一次覆盖了前一次。
+原因：绑定基准版本，能阻止依据旧状态计划的写操作在新状态上运行；固定的顺序让每个工具以同样的方式拒绝，而且总是在发出任何东西之前。顺序很重要。在 2.0 的发布评审中，先检查过期的已用令牌在 10 分钟后返回了 `token_expired` 和一个新令牌，照着做就把写操作发了两次。没有锁时，两次按同一版本计划的确认都通过了漂移检查，后一次覆盖了前一次。在 gitlab-cli 试点（2026-10）中，工具在 `App.Write` 之前做的一次查询，对重复确认的 `variable delete` 回答了 `E_NOT_FOUND`，掩盖了 `token_used`；`ResolveTarget` 正是为此放在令牌检查之后运行。
 
 检查：`G10`（授权范围文件在预演和确认之间发生变化 → `scope_changed`，什么都不发出）；其他步骤由 aicli 的写入门控测试覆盖。
 
@@ -885,7 +888,7 @@ aicli 把操作记录保存在状态目录中：优先 `App.StateDir`，其次 `
 
 - 执行失败或被中断时带 `failed_stage`（`apply`、`deliver`、`persist`、`verify`）。
 - `observed` 是对本次写操作打算修改的字段的回读，来自写操作的响应或一次重新读取。只有 `observed` 与请求一致时，`verification` 才是 `passed`；`mismatched` 列出不一致的字段。
-- `result` 是命令自己的载荷；对创建操作而言，其中带有新资源的 `ref` 和 `url`。
+- `result` 是命令自己的载荷，除非 `--fields` 另有要求，否则裁剪到默认字段（CLI-040）；对创建操作而言，其中带有新资源的 `ref` 和 `url`。
 
 `ok` 和错误码由回执推导得出，绝不是任意选定的：由 contract.json `receipt_rules` 中第一条匹配的规则决定。
 
@@ -955,11 +958,12 @@ aicli 添加了三个内置命令，它们只读取或写入操作记录：
 
 作用于多个目标的命令必须通过一个复数标志接收它们（`--ids 1,2,3`，或重复给出 `--ids`），去重并保持输入顺序；空列表返回 `E_USAGE`（`missing_parameter`）。它经由 `App.WriteBatch` 运行：
 
-- **预览。** 列出每个目标：`targets`、`total` 和 `items`，每个条目为 `{target, operation_id, changes, can_apply, blocked_by}`，都挂在整批自己的 `opb_` ID 之下。任何一个条目不能执行，整批也就不能执行。一个令牌覆盖整批。如果完整预览会超出大小预算（CLI-042），`targets` 和 `items` 按输入顺序只保留前面的条目，由 `omitted` 计数其余的（`total` = 列出的目标数 + `omitted`）；输入和令牌仍然覆盖每个目标。
+- **预览。** 列出每个目标：`targets`、`total` 和 `items`，每个条目为 `{target, operation_id, changes, can_apply, blocked_by}`，都挂在整批自己的 `opb_` ID 之下。任何一个条目不能执行，整批也就不能执行。一个令牌覆盖整批。如果完整预览会超出大小预算（CLI-042），`targets` 和 `items` 按输入顺序只保留前面的条目，由 `omitted` 计数其余的（`total` = 列出的目标数 + `omitted`）；输入和令牌仍然覆盖每个目标。预览的 `action` 取 `BatchSpec.Action`；它为空时取第一个条目的。
 - **结果。** 每个目标一个条目 `{target, operation_id, ok}`，其中 `target` 是目标的键，另加 `receipt`、`error`（`{code, retryable, message}`）或 `result`；再加 `summary` `{total, succeeded, failed, unknown, skipped}`，其中每个目标恰好计数一次。
 - **ok。** 只有每个条目都成功时，整批才是 `ok: true`。否则：有任何条目结果未知，以 `E_OUTCOME_UNKNOWN` 失败；不然，有任何条目已生效，以 `E_PARTIAL` 失败；再不然，以第一个失败条目的错误码失败。其 details 带 `operation_id`（批量 ID）、`items` 和 `summary`。如果完整的条目列表会超出大小预算（CLI-042），结果（无论在 `data` 还是 `details` 中）先去掉成功条目的 `receipt` 和 `result`，再减少列出的条目；所有 `ok: false` 的条目排在成功条目之前，由 `omitted` 计数被省略的条目；`summary` 仍然计数每个目标，`operation list --batch <batch id>` 则列出全部条目（CLI-061）。
 - **停止。** `--continue-on-error` 默认为 true，危险命令默认为 false。停止之后，剩余条目为 `skipped`：`ok: false`，不带 `error`。
-- **上游上限。** 对每次调用有数量上限的原生批量接口，在同一契约之下分块调用：一个令牌、一个结果，每一块的结果映射到它所含的条目上。批量操作绝不声称上游并不提供的原子性。
+- **上游上限。** 对每次调用有数量上限的原生批量接口，在同一契约之下分块调用：一个令牌、一个结果，每一块的结果映射到它所含的条目上。批量操作绝不声称上游并不提供的原子性。使用 aicli 时，`BatchSpec.ApplyAll` 每块调用一次，每块最多 `MaxPerCall` 个条目（为 0 时一次全部发出），并按条目顺序为每个条目返回一个 `ItemOutcome{Result, Err}`，由写入门控映射到对应的条目上。少了或多出结果属于缺陷，这一块的条目都成为 `unknown`；整次调用出错时也是这样，除非这个错误是 `NotDispatched` 或 `Rejected`，那时它适用于每个条目。
+- **共享的输入。** 每个条目共有的东西（要指派的用户、项目）只解析一次，放在 `BatchSpec.ResolveItems` 中，它在 `ResolveTarget` 运行的位置运行（CLI-057）：所有条目共有的输入问题于是只报一个错误，带上 `parameter` 和 `next_action`，而不是每个条目各有一个阻止项。
 
 ```json
 {"ok":false,"schema_version":"2.0","error":{"code":"E_PARTIAL","message":"Three of the four issues were labelled; one was refused.","retryable":false,"details":{
@@ -974,7 +978,7 @@ aicli 添加了三个内置命令，它们只读取或写入操作记录：
  "meta":{"duration_ms":930}}
 ```
 
-原因：1.6.3 允许一个所有条目都失败的批量操作报告 `ok: true`；审计发现了只绑定目标列表的批量路径（archery 的一个 `workflow audit --ids` 令牌接受了不同的 `--action`）；评测中，逐个给四个 issue 打标签的 Agent 有时会把每个令牌都重新签发一遍，多花 4 次调用。
+原因：1.6.3 允许一个所有条目都失败的批量操作报告 `ok: true`；审计发现了只绑定目标列表的批量路径（archery 的一个 `workflow audit --ids` 令牌接受了不同的 `--action`）；评测中，逐个给四个 issue 打标签的 Agent 有时会把每个令牌都重新签发一遍，多花 4 次调用。在 gitlab-cli 试点（2026-10）中，`repo commit create` 用一次 GitLab 请求提交所有文件，第一个条目之后的每个条目都只能报告第一个条目的结果；批量指派时，一个未知的指派人让每个 issue 都被单独阻止。
 
 检查：aicli 的批量测试；`G00`–`G10` 也在批量命令上运行；`R04`。
 
@@ -1093,7 +1097,7 @@ aicli 只在两处访问发布源：`update`（包括 `--check`），以及设�
 
 ### CLI-081 弃用
 
-将要移除的命令或标志必须先标为弃用，并在移除之前一直可用。使用 aicli 时，`Meta.Deprecated` 存放命令的替代说明，例如「use `mr update --label`」，`Meta.DeprecatedFlags` 把标志名映射到它的替代说明。随后 aicli 会：
+将要移除的命令或标志必须先标为弃用，并在移除之前一直可用。使用 aicli 时，`Meta.Deprecated` 存放命令的替代说明，例如「use `mr update --label`」，`Meta.DeprecatedFlags` 把标志名映射到它的替代说明；`Meta.RenamedFlags` 把改了名的标志的旧名映射到新名（`search` 映射到 `query`），aicli 在解析之前把旧名改写为新名，所以它按新名绑定；两个名字都给出时返回 `E_USAGE` `conflicting_flags`，`--help` 不列出旧名，`reference` 把它列为一个参数，说明以 ``Deprecated: use `--<new>`.`` 开头。随后 aicli 会：
 
 - 在帮助和 `reference` 中，让命令的简介以 `Deprecated: <text>.` 开头，已弃用标志的描述也这样处理；
 - 每次运行已弃用的命令，都附加一条 `deprecated` 通知（`severity: warning`，CLI-047），写明哪个版本会移除它；每次运行用到已弃用的标志，也附加一条；
@@ -1105,7 +1109,7 @@ aicli 只在两处访问发布源：`update`（包括 `--check`），以及设�
 
 已弃用的命令或标志至少要在一个 MINOR 版本中、并且至少在 90 天内保持可用，只能在 MAJOR 版本中移除（REPO-030）。`CHANGELOG.md` 在标为弃用的那个版本中把它列在 `Deprecated` 之下，在移除它的那个版本中列在 `Removed` 之下（CLI-037）。已弃用的输出字段在同样的期限内保留其键。
 
-原因：Agent 会一直沿用 Skill、README 或更早的对话记录教给它们的用法。在 MINOR 版本中突然消失的命令，会让这些调用毫无预警地失败；每次使用都附带的通知，会在旧写法仍然可用时点出替代写法，更新之后 `changelog` 也会说明同样的内容。
+原因：Agent 会一直沿用 Skill、README 或更早的对话记录教给它们的用法。在 MINOR 版本中突然消失的命令，会让这些调用毫无预警地失败；每次使用都附带的通知，会在旧写法仍然可用时点出替代写法，更新之后 `changelog` 也会说明同样的内容。在 gitlab-cli 试点（2026-10）中，要让 `mr list --search` 在 `--query` 之外继续可用，工具自己的代码里得写一个隐藏标志、一次复制和一个冲突检查。
 
 检查：aicli 的弃用测试；评审每项弃用都写进了 `CHANGELOG.md`，并且没有在 MAJOR 版本之外移除任何东西。
 
@@ -1135,7 +1139,7 @@ aicli 只在两处访问发布源：`update`（包括 `--check`），以及设�
 
 设置文件不存机密：机密放在操作系统钥匙串中，或来自环境变量（SEC-040）。设置文件由人来写，或者由一个经过写入门控的 `configure` 命令来写（CLI-025、CLI-101）；除此之外什么都不写它。
 
-使用 aicli 时，工具声明 `App.Settings`，每项为一个 `Setting{Name, Env, Flag, Default, Secret, Description}`。`Name` 用 snake_case；`Env` 默认为大写的 `Name`，按 `<PREFIX>_<Env>` 读取；`Flag` 指定一个命令标志，在当前运行的命令上给出这个标志时，由它覆盖该设置；`Secret` 让这个值不进入设置文件，也不出现在诊断输出和错误中（CLI-102、SEC-021），并且让 `Flag` 在所有地方都成为机密标志，如同它列在 `Meta.Secrets` 中。`App.Setting(cmd, name)`（Python 为 `app.setting(name)`）返回值及其来源：`flag`、`env`、`profile` 或 `default`。`App.Profile()`（Python 为 `app.profile()`）返回当前配置档的名称和来源，`App.SettingsPath()`（Python 为 `app.settings_path()`）返回设置文件，这样工具就能按配置档区分钥匙串条目，并写入配置档的设置。`context` 报告配置档（CLI-035），`doctor` 的 `settings` 检查校验设置文件（CLI-036）。
+使用 aicli 时，工具声明 `App.Settings`，每项为一个 `Setting{Name, Env, Flag, Default, Secret, Description}`。`Name` 用 snake_case；`Env` 默认为大写的 `Name`，按 `<PREFIX>_<Env>` 读取；`Flag` 指定一个命令标志，在当前运行的命令上给出这个标志时，由它覆盖该设置；`Secret` 让这个值不进入设置文件，也不出现在诊断输出和错误中（CLI-102、SEC-021），并且让 `Flag` 在所有地方都成为机密标志，如同它列在 `Meta.Secrets` 中。`App.Setting(cmd, name)`（Python 为 `app.setting(name)`）返回值及其来源：`flag`、`env`、`profile` 或 `default`。`App.Profile()`（Python 为 `app.profile()`）返回当前配置档的名称和来源，`App.Profiles()`（Python 为 `app.profiles()`）按文件中的顺序返回各配置档的名称，`App.SettingsPath()`（Python 为 `app.settings_path()`）返回设置文件，这样工具就能按配置档区分钥匙串条目，并写入配置档的设置。`context` 报告配置档（CLI-035），`doctor` 的 `settings` 检查校验设置文件（CLI-036）。
 
 原因：只有每个工具都以同样的方式解析设置，Agent 和人才能预知某个命令会用哪个主机或账户；也只有由同一个解析器产生值，`context` 才能说明它从哪里来。2026-10 的工具群审计发现，有的写入路径里会从环境变量或配置文件读取账户、区域和时区（SEC-020）；把设置声明出来，这些读取就一目了然。设置文件拒收机密，是因为把它拷出本机，不该得到任何可用的东西（SEC-040）。它用了一个单独的名字，是因为工具群中的工具在同一个目录里保留着 1.x 的 `config.json`，而 aicli 不读取那个文件。
 
@@ -1147,17 +1151,17 @@ aicli 只在两处访问发布源：`update`（包括 `--check`），以及设�
 
 有登录类命令的工具，必须这样命名它们：
 
-- `auth login` 保存凭证：机密放进操作系统钥匙串，配置档的其他设置放进设置文件（SEC-040）。它声明 `configure`（CLI-025）和 `Meta.NewProfile`，所以能在文件中还没有的配置档下运行；它用 `App.SetProfileSettings`（Python 为 `app.set_profile_settings`）写入设置，这个函数像读取时一样校验设置，以原子方式写入，出错时什么都不写，所以 `Apply` 把这个错误作为 `NotDispatched` 返回。对这样的命令，`App.Profile()` 返回所要求的配置档及其来源。需要人来操作时（浏览器登录、一次性验证码），它返回带 `action: sign_in` 的 `E_HUMAN_REQUIRED`（CLI-065）。
+- `auth login` 保存凭证：机密放进操作系统钥匙串，配置档的其他设置放进设置文件（SEC-040）。它声明 `configure`（CLI-025）和 `Meta.AllowUnknownProfile`，所以能在文件中还没有的配置档下运行；它用 `App.SetProfileSettings`（Python 为 `app.set_profile_settings`）写入设置，这个函数像读取时一样校验设置，以原子方式写入，出错时什么都不写，所以 `Apply` 把这个错误作为 `NotDispatched` 返回；文件中没有 `default_profile` 时，它把这个配置档设为默认。对这样的命令，`App.Profile()` 返回所要求的配置档及其来源。需要人来操作时（浏览器登录、一次性验证码），它返回带 `action: sign_in` 的 `E_HUMAN_REQUIRED`（CLI-065）。
 - `auth status` 是读命令：它向上游核验凭证，报告账户、主机和凭证的过期时间，绝不包含机密。
-- `auth logout` 从钥匙串中删除凭证。它声明 `configure`。
+- `auth logout` 从钥匙串中删除凭证。它声明 `configure`，也声明 `Meta.AllowUnknownProfile`，这样配置档从设置文件中删掉之后，它仍能清理残留的凭证。
 
-原因：人们会使用多个账户和主机，例如公司的 GitLab 和 gitlab.com。没有配置档，Agent 只能在两次调用之间改环境变量来切换，切错了也没有任何提示。把 `--profile` 和解析出的账户、主机一起绑定，就能防止为一个账户制定的计划以另一个账户的身份执行：2026-10 的工具群审计发现，有的工具自己的写入门控没有把从环境变量或配置中解析出的账户纳入绑定（CLI-054）。统一的 `auth` 命名，让在一个工具上登录过的 Agent 在下一个工具上也能找到同样的命令。
+原因：人们会使用多个账户和主机，例如公司的 GitLab 和 gitlab.com。没有配置档，Agent 只能在两次调用之间改环境变量来切换，切错了也没有任何提示。把 `--profile` 和解析出的账户、主机一起绑定，就能防止为一个账户制定的计划以另一个账户的身份执行：2026-10 的工具群审计发现，有的工具自己的写入门控没有把从环境变量或配置中解析出的账户纳入绑定（CLI-054）。统一的 `auth` 命名，让在一个工具上登录过的 Agent 在下一个工具上也能找到同样的命令。在 gitlab-cli 试点（2026-10）中，第二次 `auth login` 之后没有任何配置档生效，直到有人手工设置 `default_profile`。
 
 检查：aicli 的配置档测试（来源顺序、未知名称、绑定）；评审 `auth` 命令的效果。
 
 ### CLI-102 诊断
 
-只有把 `<PREFIX>_DEBUG` 设为非空且不为 `0` 的值，诊断输出才会打开。它以 `debug:` 开头的行写到 stderr，绝不写到 stdout，也绝不改变信封或退出码。机密参数（`Meta.Secrets`，SEC-021）、机密设置（CLI-100），以及工具用 `App.AddSecret(value)`（Python 为 `app.add_secret(value)`，用于从钥匙串读出的令牌）登记的机密，其值及其 URL 转义形式都显示为 `***`；消息中的换行会被转义，所以每一行都以 `debug:` 开头。工具不得添加 `--verbose` 或 `--debug` 标志。aicli 通过 `App.Debugf(format, args...)`（Python 为 `app.debug(message)`）写出这些行；它自己只记录状态目录、授权范围文件路径、设置文件和当前生效的配置档，以及 `update` 每个阶段的开始和它跳过的发布标签。除非用户要求，Skill 绝不设置 `<PREFIX>_DEBUG`（SKL-009）。
+只有把 `<PREFIX>_DEBUG` 设为非空且不为 `0` 的值，诊断输出才会打开。它以 `debug:` 开头的行写到 stderr，绝不写到 stdout，也绝不改变信封或退出码。机密参数（`Meta.Secrets`，SEC-021）、机密设置（CLI-100），以及工具用 `App.AddSecret(value)`（Python 为 `app.add_secret(value)`，用于从钥匙串读出的令牌）登记的机密，其值及其 URL 转义形式都显示为 `***`；消息中的换行会被转义，所以每一行都以 `debug:` 开头。工具不得添加 `--verbose` 或 `--debug` 标志。aicli 通过 `App.Debugf(format, args...)`（Python 为 `app.debug(message)`）写出这些行，多个 goroutine 或线程可以同时调用它；它自己只记录状态目录、授权范围文件路径、设置文件和当前生效的配置档，以及 `update` 每个阶段的开始和它跳过的发布标签。除非用户要求，Skill 绝不设置 `<PREFIX>_DEBUG`（SKL-009）。
 
 原因：人在排查故障时需要信封以外的信息，但 stderr 上的每一行在每次调用时都要消耗 Agent 的 token（CLI-047）。由人来设置的环境变量，默认把诊断输出挡在 Agent 会话之外；换成标志，它就会出现在 Skill 和对话记录里。脱敏让调试日志可以放心地贴进 issue。
 
@@ -1169,7 +1173,7 @@ aicli 只在两处访问发布源：`update`（包括 `--check`），以及设�
 
 每个上游请求都必须有超时：默认最长 30 s，并且绝不超过 CLI-049 对命令运行时间的限制所允许的长度。工具可以在连接失败或 HTTP 429、502、503、504 之后重试幂等的读取，最多两次，并遵守 `Retry-After`，但最多等 10 s；上游要求等得更久时，工具直接返回该错误，`E_RATE_LIMITED` 带上 `retry_after_ms`（CLI-016）。它不得重发可能已经派发出去的写入（CLI-015、CLI-060）。
 
-工具必须遵守 `HTTPS_PROXY`、`HTTP_PROXY` 和 `NO_PROXY`。TLS 证书始终校验：私有 CA 来自 `<PREFIX>_CA_FILE`，这是一个加入系统根证书的 PEM 文件；没有任何标志、变量或设置能关掉校验。请求带上 `User-Agent: <tool>/<version> aicli/<spec version>`。`doctor` 的 `connectivity` 检查因证书而失败时，其消息要说明这一点，其 `fix` 要点出 `<PREFIX>_CA_FILE`（CLI-036）。aicli 自己的请求（`update`、`doctor` 的刷新）也遵守本规则；工具可以从 `App.HTTPTransport()` 得到同样的代理、CA 文件和 TLS 设置，从 `App.UserAgent()` 得到请求头（Python 为 `app.ssl_context()`、`app.user_agent()`）。
+工具必须遵守 `HTTPS_PROXY`、`HTTP_PROXY` 和 `NO_PROXY`。TLS 证书始终校验：私有 CA 来自 `<PREFIX>_CA_FILE`，这是一个加入系统根证书的 PEM 文件；没有任何标志、变量或设置能关掉校验。请求带上 `User-Agent: <tool>/<version> aicli/<spec version>`。`doctor` 的 `connectivity` 检查因证书而失败时，其消息要说明这一点，其 `fix` 要点出 `<PREFIX>_CA_FILE`（CLI-036）。aicli 自己的请求（`update`、`doctor` 的刷新）也遵守本规则；工具可以从 `App.HTTPTransport()` 得到同样的代理、CA 文件和 TLS 设置（它像读取 CA 文件一样，通过 `App.Env` 读取代理变量），从 `App.UserAgent()` 得到请求头（Python 为 `app.ssl_context()`、`app.user_agent()`）。
 
 原因：运行框架会在 2 分钟后杀掉调用，被杀掉的调用什么也报告不了（CLI-049），所以一个没有超时的请求可能让整个回答落空。重发写入，正是同一个改动被执行两次的原因：gitlab-cli 1.x 的 HTTP 客户端对所有方法的 5xx 和网络错误都会重试，所以一个超时的 POST 可能被执行两次。Agent 运行在带代理和私有 CA 的企业网络中；一个 CA 文件就能让这样的网络正常工作，而不必关掉防止拦截的那道检查。
 
@@ -1185,7 +1189,7 @@ aicli 只在两处访问发布源：`update`（包括 `--check`），以及设�
 - [ ] CLI-004 始终有 `meta.duration_ms`；此外只有 `notices` 和 `untrusted`
 - [ ] CLI-005 默认 `json`；`text` 给人看；声明过才有 `raw`；不支持的格式 → 以 JSON 输出 `E_USAGE`
 - [ ] CLI-006 流：每行一个带 `type` 的信封，以 `summary` 结尾
-- [ ] CLI-007 snake_case 键、字符串 ID、带 `Z` 的 UTC 时间、snake_case 枚举
+- [ ] CLI-007 snake_case 键、字符串 ID、`_at` 键下带 `Z` 的 UTC 时间、`_on` 键下的日期、snake_case 枚举
 
 错误
 
@@ -1203,20 +1207,20 @@ aicli 只在两处访问发布源：`update`（包括 `--check`），以及设�
 
 - [ ] CLI-020 唯一的注册表；帮助、`reference`、Skill 命令地图和覆盖率都从它生成
 - [ ] CLI-021 命令树形状；保留名称和保留标志；`<noun> <verb>` 并使用标准动词
-- [ ] CLI-022 根级快捷方式、复数形式、猜测清单、全树范围的建议
+- [ ] CLI-022 只在一个父级下的名词有根级快捷方式、复数形式、猜测清单、全树范围的建议
 - [ ] CLI-023 先匹配路径；拒绝未知标志和多余的位置参数；位置参数绑定到标志
 - [ ] CLI-024 带类型的参数；`secret`；必填参数不设默认值
-- [ ] CLI-025 如实的效果；风险档不低于效果所要求的级别
+- [ ] CLI-025 如实的效果（评论是 `change`）；无法撤销的写操作是危险的，批量命令只在它做的事危险时才是；风险档不低于效果所要求的级别
 - [ ] CLI-026 每个命令的错误码
 - [ ] CLI-027 有证据支撑的成熟度
 - [ ] CLI-028 标准标志名：`--limit`、`--cursor`、`--query`、`--since`、`--sort`、`--state`、`--wait`、`--output`、`--input`、`--profile`
-- [ ] CLI-029 标准动词含义：没有匹配的 `list` 返回一页，`update` 只改给出的内容，`delete` 的目标不存在时是 `E_NOT_FOUND`
+- [ ] CLI-029 标准动词含义：没有匹配的 `list` 返回一页，`update` 只改给出的内容，`delete` 的目标不存在时是 `E_NOT_FOUND`，`search` 写明它实际的顺序
 
 发现
 
 - [ ] CLI-030 生成的帮助；根级列出所有命令；写命令的帮助给出操作步骤；没有补全命令
 - [ ] CLI-031 `reference --index` 不超过 8,000 个字符，或已分组
-- [ ] CLI-032 `reference --command` 不超过 4,000 个字符
+- [ ] CLI-032 `reference --command` 不超过 6,000 个字符
 - [ ] CLI-033 完整的 `reference` 只供工具链使用
 - [ ] CLI-034 没有必经的第一步
 - [ ] CLI-035 `context` 依据本地状态，带授权概况；有设置时还带配置档
@@ -1232,9 +1236,9 @@ aicli 只在两处访问发布源：`update`（包括 `--check`），以及设�
 - [ ] CLI-043 重型子资源由单独的结构化命令提供
 - [ ] CLI-044 计数和过滤在工具内完成
 - [ ] CLI-045 富文本用 Markdown
-- [ ] CLI-046 `meta.untrusted` 路径
+- [ ] CLI-046 `meta.untrusted` 路径，包括带着人写的文本的 ref，并跟随 `--fields`
 - [ ] CLI-047 安静的 stderr；带类型的通知
-- [ ] CLI-048 ref、URL、名称（有歧义时 `E_AMBIGUOUS`）、相对时间、`--input`、`--<param>-file`
+- [ ] CLI-048 ref（子资源的 ref 接在父资源的 ref 之后）、URL、名称（有歧义时 `E_AMBIGUOUS`）、相对时间、`--input`、`--<param>-file`
 - [ ] CLI-049 多 ref 读取、`--wait`、有界运行时间
 
 写操作
@@ -1245,7 +1249,7 @@ aicli 只在两处访问发布源：`update`（包括 `--check`），以及设�
 - [ ] CLI-053 确认时重复同一请求
 - [ ] CLI-054 令牌绑定解析后的整个请求
 - [ ] CLI-055 规范格式、带密钥、单次使用的令牌；失败即拒绝；无法绕过
-- [ ] CLI-056 两步都带 `--dangerous`
+- [ ] CLI-056 危险命令或危险计划的两步都带 `--dangerous`
 - [ ] CLI-057 确认时按固定顺序复查
 - [ ] CLI-058 在发出任何东西之前写好操作记录
 - [ ] CLI-059 回执；`ok` 由 `receipt_rules` 决定

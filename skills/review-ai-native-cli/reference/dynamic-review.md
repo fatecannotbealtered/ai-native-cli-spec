@@ -58,7 +58,7 @@ The suite runs the App in-process against the fake upstream, so a pass proves th
 | D2 | `rawprobe help --help` | text, exit 0; every command on one line; writes marked as writes | CLI-030 |
 | D3 | `probe index reference --index` | ≤ 8000 characters (a `~ WARN` here is a CLI-031 finding), or `data.groups`; then `probe idx-<g> reference --index <group>` for every group | CLI-031, R01 |
 | D4 | `probe ref reference`, then `node "$SKILL/scripts/audit-reference.js" "$OUT/ref.json" .` | `spec_version` equals the pin; `schema_version` `"2.0"`; `risk_tier` equals `SECURITY.md`; no `release_readiness`; every `GAP` line checked in the source | CLI-020–CLI-027, CLI-033, SEC-001, VER-005 |
-| D5 | the loop below | every `reference --command` ≤ 4000 characters | CLI-032, R01 |
+| D5 | the loop below | every `reference --command` ≤ 6000 characters | CLI-032, R01 |
 | D6 | `probe ctx context` | `tool`, `version`, `spec_version`, `account`, `host`, `credentials {configured, source}`, `state {dir, available, protection}` with `dir` = the scratch path, `authorization.status` `missing`; no secret, token or hash of one; works offline | CLI-035, SEC-021, SEC-030 |
 | D7 | `probe doc doctor` | `ok: true`; checks `credentials`, `connectivity`, `state_store`, `authorization` (warns: no scope), `version`; every `fail` has a `fix`; offline, only `connectivity` fails | CLI-036 |
 | D8 | `probe chg changelog --since <an older version>` | only newer entries, as in `CHANGELOG.md` | CLI-037 |
@@ -68,7 +68,7 @@ The suite runs the App in-process against the fake upstream, so a pass proves th
 ```bash
 node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).data; for (const c of d.commands||[]) console.log(c.path)' "$OUT/index.json" > "$OUT/paths.txt"
 while IFS= read -r p; do probe "cmd-${p// /_}" reference --command "$p" | grep -v '^PASS'; done < "$OUT/paths.txt"
-node -e 'for (const f of process.argv.slice(1)) { const n = [...require("fs").readFileSync(f, "utf8")].length; if (n > 4000) console.log("CLI-032 over 4000:", f, n) }' "$OUT"/cmd-*.json
+node -e 'for (const f of process.argv.slice(1)) { const n = [...require("fs").readFileSync(f, "utf8")].length; if (n > 6000) console.log("CLI-032 over 6000:", f, n) }' "$OUT"/cmd-*.json
 ```
 
 With a grouped index, collect the paths from every `idx-<g>.json` instead.

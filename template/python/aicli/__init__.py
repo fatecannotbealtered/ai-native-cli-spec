@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from .app import App, Identity, current_app, set_resolved
 from .builtins import Check
+from .cmdhelpers import output_format, parse_duration, parse_time_arg, wants_field
 from .conformance import TB, Harness, Recorder, check_coverage, run_conformance
 from .contract_gen import SCHEMA_VERSION, SPEC_VERSION
 from .envelope import Notice
@@ -37,6 +38,7 @@ from .gate import (
     BatchSpec,
     Block,
     FieldChange,
+    ItemOutcome,
     NotDispatchedError,
     Op,
     Preview,
@@ -71,7 +73,7 @@ from .selfupdate import (
     parse_version,
 )
 from .settings import Setting
-from .stream import OutputSpec, Stream
+from .stream import OutputFile, OutputSpec, Stream
 from .update import (
     TrustRootUnavailable,
     UpdateConfig,
@@ -80,6 +82,7 @@ from .update import (
 )
 from .validate import (
     ContractViolation,
+    validate_changelog,
     validate_context,
     validate_doctor,
     validate_envelope,
@@ -116,11 +119,13 @@ __all__ = [
     "FieldChange",
     "Harness",
     "Identity",
+    "ItemOutcome",
     "Meta",
     "NotDispatchedError",
     "Notice",
     "Op",
     "Outcome",
+    "OutputFile",
     "OutputSpec",
     "Page",
     "ParamDoc",
@@ -148,7 +153,10 @@ __all__ = [
     "new_error",
     "not_dispatched",
     "not_found",
+    "output_format",
     "package_manager_args",
+    "parse_duration",
+    "parse_time_arg",
     "parse_version",
     "rejected",
     "run_conformance",
@@ -165,4 +173,5 @@ __all__ = [
     "validate_stream",
     "validation",
     "verify_sigstore_bundle",
+    "wants_field",
 ]

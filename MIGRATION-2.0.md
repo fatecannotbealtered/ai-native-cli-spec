@@ -27,11 +27,10 @@ func NewApp(env func(string) string) *aicli.App {
 		Root: newRootCmd(), Changelog: gitlabcli.ChangelogMarkdown, Env: env,
 		Identity:     gitlabIdentity,     // redacted account and host of the resolved credentials
 		DoctorChecks: gitlabDoctorChecks, // credentials, connectivity
-		Shortcuts:    map[string][]string{"branch": {"repo", "branch"}, "member": {"project", "members"}},
 		ShortFlags:   map[string]string{"p": "project", "R": "project"},
 		FlagAliases:  map[string]string{"repo": "project"},                  // accepted
 		FlagSynonyms: map[string][]string{"all": {"limit"}}}                 // suggested
-	registerCommands(app) // step 3
+	registerCommands(app) // step 3; each group adds its own root shortcuts with app.AddShortcut
 	return app
 }
 
@@ -46,6 +45,7 @@ func main() { os.Exit(cmd.NewApp(os.Getenv).Execute(os.Args[1:])) }
 | `handleAPIError(err, jsonMode)` on a read | a `readError(err)` helper returning `aicli.FromHTTP(apiErr.StatusCode, message, apiErr.Error(), 0)`, with a one-sentence `message` for the model (CLI-017); status `0` (no connection made) gives `E_NETWORK` (CLI-016) |
 | `failWithCode`, `emitError`, exit-code constants, `exitCodeForStatus` | `aicli.NewError(code, message, details)` and the constructors; the library adds the exit code, `retryable` and default `dispatch_state` and `next_action` (CLI-010, CLI-011) |
 | `--format`, `--json`, `--compact`, `--fields` handling; the agent-safe switches in `cmd/agent.go`, hand-kept aliases and suggestions | the App and the fields above (CLI-003, CLI-022); ref and URL parsing stays in the tool (CLI-048) |
+| `--show-values` and `GITLAB_CLI_ALLOW_SHOW_VALUES` (CI/CD variable values read from GitLab) | nothing: a secret the upstream returns is never output (SEC-021); commands report that a value exists, a write's read-back compares it in memory and shows `***`, and a person reads the value in GitLab |
 
 ## 3. Register every command with Meta
 
@@ -57,7 +57,7 @@ app.Register(mrUpdateCmd, aicli.Meta{
 	Output: "merge_request", ErrorCodes: []string{"E_USAGE", "E_NOT_FOUND", "E_FORBIDDEN", "E_CONFLICT", "E_OUTCOME_UNKNOWN"},
 	Examples: []string{"gitlab-cli mr update 5 --project acme/web --assignee carol --dry-run",
 		"gitlab-cli mr update 5 --project acme/web --assignee carol --confirm <confirm_token>"},
-	Positional: "iid", FileInputs: map[string]string{"description-file": "description"},
+	Positional: "mr", FileInputs: map[string]string{"description-file": "description"},
 })
 app.Schema("merge_request", aicli.SchemaDef{Shape: "object",
 	Fields:        []string{"ref", "title", "state", "assignees", "labels", "pipeline_status", "updated_at", "web_url", "description"},
@@ -65,12 +65,16 @@ app.Schema("merge_request", aicli.SchemaDef{Shape: "object",
 	Untrusted:     []string{"title", "description"}})
 ```
 
-- **Effects** replace `type` and `permissionTier` (CLI-025): reads are `observe`; upstream changes `change`; send, publish, notify, share `deliver`; permissions, settings, CI/CD variables and the tool's own login and profiles `configure`; a new local file `artifact`; an overwritten one `persist`. `deliver` and `configure` are dangerous by default; mark other irreversible commands (`repo branch delete`, `mr merge`) `Dangerous: true`. `RiskTier` must be at least what the effects require (SEC-001). Effects are per command: gitlab-cli's `job artifacts --output` writes a file, so it declares `artifact` (`persist` if it can overwrite), or the file write moves to its own command.
-- **Positional values** bind as their flag: declare `--iid` and name it in `Positional` (CLI-023). Secret flags (`auth login --token`, masked variable `--value`) go in `Secrets`; file and stdin inputs in `FileInputs`; batch commands set `BatchFlag: "ids"`; `RawOutput` marks commands that support `--format raw`.
-- **Default fields** come from the questions users ask (CLI-040). In the eval, MR items with assignees, labels and pipeline status plus `--pipeline-status` cut "which MRs have failed pipelines" from 13.6 to 6.1 calls.
+- **Effects** replace `type` and `permissionTier` (CLI-025): reads are `observe`; upstream changes `change`, a comment included, although GitLab e-mails its participants; send, publish, notify, share `deliver`; permissions, settings, CI/CD variables and the tool's own login and profiles `configure`; a new local file `artifact`; an overwritten one `persist`. `deliver` and `configure` are dangerous by default; mark other commands that cannot be undone (`repo branch delete`, `mr merge`) `Dangerous: true`. A bulk command is dangerous only when what it does is: `issue bulk close` is not, since every issue can be reopened. A plan that is dangerous although its command is not (`repo commit create` deleting files) sets `Preview.Dangerous`. `RiskTier` must be at least what the effects require (SEC-001). Effects are per command: gitlab-cli's `job artifacts --output` writes a file, so it declares `artifact` (`persist` if it can overwrite), or the file write moves to its own command. A 1.x read's `--output` (`repo file get --output`) declares `artifact` the same way; `--format raw` with shell redirection gives an agent the bytes without a gated write.
+- **Local files** (CLI-042, SEC-012): write the file through the gate, never before it. For a download, keep the target the upstream resource (the job, `acme/web/-/jobs/42`) and list the file in `Preview.Outputs`; in `Apply`, `app.OpenOutput(path, overwrite)` streams it into a temporary file beside the target, which `Commit` moves into place and `Abort` removes. `app.WriteOutput` runs a small result held in memory through the gate on its own. A new file needs the scope's `outputs`, an existing one `roots` and the `persist` effect; without `persist` an existing path is `E_VALIDATION` and nothing is overwritten. Declare `persist` only for a command that overwrites on purpose, since every grant then needs it.
+- **Positional values** bind as their flag (CLI-023), and a command binds at most one (R01 refuses a second). A 1.x command with two positionals moves the second to a flag: `issue assign <iid> <user>` becomes `issue assign <issue> --assignee <user>`, the old form gets `unexpected_argument` whose `next_action` is the corrected line, and the release notes list the change (step 10). Take a resource in a string flag named for it (`--mr`), named in `Positional`, so the ref, the web URL and the bare iid all parse (CLI-048); an `Int` `--iid` refuses `acme/web!5`. Bind each input's own part with `SetResolved`: the iid as `mr` and the project as `project`, never the whole ref beside the project, or G03's changed `--project` is reported as `--mr` (CLI-054).
+- **Secrets and inputs**: a flag is secret when any of its values can be, so `auth login --token` and the `--value` of every variable write go in `Secrets`, masked or not (SEC-021); file and stdin inputs go in `FileInputs`; batch commands set `BatchFlag: "ids"`; `RawOutput` marks commands that support `--format raw`.
+- **Default fields** come from the questions users ask (CLI-040). In the eval, MR items with assignees, labels and pipeline status plus `--pipeline-status` cut "which MRs have failed pipelines" from 13.6 to 6.1 calls. That default costs a GitLab read per merge request, since GitLab's merge request list has no pipeline status: read such a field only when the response shows it (`aicli.WantsField`), in parallel and up to a cap that `scope` states. A field not worth its cost leaves the defaults (`--fields +additions` adds it). A write's `result` uses the same default fields.
+- **Waiting**: 1.x commands that waited without limit (`pipeline wait`, `job wait`) become `--wait <duration>` on the status read (`pipeline get --wait 90s`), bounded well under the harness's 2 minutes (CLI-049), with a notice when the wait ends before the state changes; keep the old commands as deprecated forms of `get --wait` (CLI-081). A failed pipeline is data (`status: failed`), not an exit code: 1.x's exit 6 for a failure and exit 8 for a timeout are gone, and `ok` follows the read.
+- **Text that acts**: GitLab runs a line such as `/merge`, `/close` or `/assign @x` in a comment, a reply or a description as a command (quick actions), so a comment command could merge a merge request, and a line copied from untrusted content could act (SEC-002). Block such lines in `Preview` (a `quick_action` block for a line outside a code block that starts with one), or declare the effects they can cause (SEC-020).
 - **Examples**: every write shows the dry-run and confirm pair, every dangerous command includes `--dangerous` (conformance R02).
 - **Maturity** replaces `release_readiness` (CLI-027, VER-005): commands a recorded live run exercised are `verified`, mock-only ones `experimental`, untested ones `draft`; `stable` needs an agent eval (VER-006).
-- **Staged migration.** A large tool can move group by group: exclude the unmigrated files with a build tag (`go mod tidy` still reads them, so keep the packages they import until the last group is done), and add each shortcut, alias and synonym together with the group it points to, because the tree check rejects one whose target is not registered.
+- **Staged migration.** A large tool can move group by group: exclude the unmigrated files with a build tag (`go mod tidy` still reads them, so keep the packages they import until the last group is done), and add each shortcut, alias and synonym in the register function of the group it points to, because the tree check rejects one whose target is not registered. Each noun nested under exactly one parent gets a root shortcut there (`app.AddShortcut("branch", "repo", "branch")`; `branch`, `file`, `commit` and `tree` for the repo group); a noun nested under several parents (`comment` under `issue` and `mr`) gets none, or a qualified word (`issue-comment`), since `AddShortcut` refuses a word already taken (CLI-022).
 - **Tree shape** (CLI-021): built-in names (`reference`, `context`, `doctor`, `changelog`, `update`, `operation`, `help`, `version`) are reserved, and a path is a group or a command, never both (conformance R02).
 
 ## 4. Route every write through App.Write
@@ -83,16 +87,12 @@ app.Schema("merge_request", aicli.SchemaDef{Shape: "object",
 | hand-built `detail` / `confirmPayload` maps | nothing: the gate binds the parsed invocation (CLI-054) |
 | `updatedAt` or `sha` copied into the payload | `Preview.BaseVersion` and `BaseSource`, re-read at confirm (`state_drift`, CLI-057) |
 | `isDangerousCommand`, `dangerousFlagRequired` | `Meta.Dangerous` (CLI-056) |
-| `prepareBatchWrite`, `parsePluralFlag`, `batchItem` | `app.WriteBatch(cmd, aicli.BatchSpec{Items: ...})` with `Meta.BatchFlag` (CLI-063) |
+| `prepareBatchWrite`, `parsePluralFlag`, `batchItem` | `app.WriteBatch(cmd, aicli.BatchSpec{Items: ...})` with `Meta.BatchFlag` (CLI-063); `ApplyAll` and `MaxPerCall` for a native bulk call (one commit of several files) |
 | `--idempotency-key` added to the payload | declare the flag; Apply gets it as `op.IdempotencyKey` (CLI-062) |
 
 ```go
 RunE: func(cmd *cobra.Command, args []string) error {
-	project, iid, req, err := mrUpdateInputs(cmd) // flags only, no network
-	if err != nil {
-		return err
-	}
-	client, err := newClient(app)
+	project, iid, req, err := mrUpdateInputs(cmd) // flags only, no network; binds mr (the iid) and project with SetResolved
 	if err != nil {
 		return err
 	}
@@ -100,6 +100,10 @@ RunE: func(cmd *cobra.Command, args []string) error {
 	return app.Write(cmd, aicli.WriteSpec{
 		Target: aicli.Target{Key: fmt.Sprintf("%s!%d", project, iid), Kind: "merge_request"},
 		Preview: func(ctx context.Context) (aicli.Preview, error) { // read-only; runs at dry-run, refusal and confirm
+			client, err := newClient(app) // built inside the gate, after it has checked the profile
+			if err != nil {
+				return aicli.Preview{}, err
+			}
 			cur, err := client.MergeRequests.Get(ctx, project, iid)
 			if err != nil {
 				return aicli.Preview{}, readError(err)
@@ -111,23 +115,27 @@ RunE: func(cmd *cobra.Command, args []string) error {
 				BlockedBy: blockedUnlessOpen(cur), BaseVersion: cur.UpdatedAt, BaseSource: "updated_at"}, nil
 		},
 		Apply: func(ctx context.Context, op aicli.Op) (aicli.Result, error) {
+			client, err := newClient(app) // an *aicli.Error; nothing was sent
+			if err != nil {
+				return aicli.Result{}, aicli.NotDispatched(err)
+			}
 			mr, err := client.MergeRequests.Update(ctx, project, iid, req.WithAssigneeID(assigneeID))
 			if err != nil {
 				return aicli.Result{}, classifyWriteError(err)
 			}
-			observed := map[string]any{"assignees": usernames(mr.Assignees), "labels": mr.Labels}
-			mismatched := mismatches(req, observed) // requested fields the read-back disagrees with
-			return aicli.Result{Outcome: aicli.Outcome{Execution: "completed", Change: "applied", Delivery: "not_applicable",
-				Persistence: "not_applicable", Verification: verdict(mismatched)}, // "passed" or "failed"
-				Observed: observed, Mismatched: mismatched, Data: flattenMR(mr)}, nil
+			// The gate fills the outcome and compares Observed with the preview's changes.
+			return aicli.Result{Observed: map[string]any{"assignees": usernames(mr.Assignees), "labels": mr.Labels},
+				Data: flattenMR(mr)}, nil
 		},
 	})
 },
 ```
 
-- **Target keys** are canonical (SEC-012), and a scope's subtree selectors break only at `/`, `!`, `#`, `:` and `@`. Give a kind without such a sigil a path-style key that mirrors its web path, `acme/web/-/labels/bug` or `acme/web/-/milestones/3`, so a grant for `acme/web` covers it; keep accepting GitLab's `~bug` and `%3` forms as input.
+- **Target keys** are canonical (SEC-012), and a scope's subtree selectors break only at `/`, `!`, `#`, `:` and `@`. Give a kind without such a sigil a path-style key that mirrors its web path, `acme/web/-/labels/bug` or `acme/web/-/milestones/3`, so a grant for `acme/web` covers it; keep accepting GitLab's `~bug` and `%3` forms as input. A sub-resource's key continues its parent's, `<parent ref>/<collection>/<id>` (`acme/web#12/notes/99`, `acme/web!5/discussions/<id>`), so a grant for `acme/web#12` covers its comments; keep accepting the web URL with its anchor, such as `…/-/issues/12#note_99` (CLI-048).
+- **Compound keys**: a resource named by two parts that can both hold `/` (a file: its branch and its path) is keyed by its web path, `acme/web/-/blob/<branch>/<path>`, so a grant for `acme/web/-/blob/develop/docs` covers that branch's `docs/`; split an input whose branch may hold `/` by looking the branches up, in `ResolveTarget`. A write that touches several resources at once (a commit of several files) has one target per resource, sent in one call through `BatchSpec.ApplyAll`. Make key prefixes follow what a person grants: a grant for `acme/web/-/branches/<name>` covers creating and deleting that branch, not commits to it.
+- **Lookups before the write.** Code before `App.Write` runs at every confirm, ahead of the gate's own checks: a lookup there that fails once the write is done (the variable a `variable delete` removed) answers a repeated confirm with its own `E_NOT_FOUND` and hides `token_used`. Resolving a name to bind its canonical form is fine there; a lookup that finds the target (a variable's environment scope, or the account's own namespace for `project create` without `--namespace`, which `Identity` cannot supply) goes in `WriteSpec.ResolveTarget` (`BatchSpec.ResolveItems` for a batch), which the gate calls after the token checks (CLI-057). Check a value read from GitLab that goes into a key, such as the username, as you check a typed path (SEC-002).
 - **Preview** only reads. Resolve names to IDs there, so the preview shows what will be sent. `Changes` lists each field the request changes with `Before`/`After` (or `Add`/`Remove` for sets). When the write cannot apply (merged MR, protected branch), return `CanApply: false` with `BlockedBy`; the gate then returns the preview without a token. Never put secret values in `Changes`.
-- **Apply** sends the write once, then reports what it observed: the changed fields from the write response or a re-read go in `Observed`. In the eval, write results that carried the changed fields cut verification calls after the last write from 1.00 to 0.37. You never set `ok`: the gate derives it and the error code from the receipt (CLI-059).
+- **Apply** sends the write once, then reports what it observed: the changed fields from the write response or a re-read go in `Observed`. In the eval, write results that carried the changed fields cut verification calls after the last write from 1.00 to 0.37. You never set `ok`: the gate derives it and the error code from the receipt (CLI-059). Leave `Verification` empty: the gate compares `Observed` with the preview's changes. Where it cannot (a field cleared to null; a state that may end as one of several values, such as `pending` or `running` after a retry), give the change a `Note` instead of an `After`, and set `Outcome.Verification` from the read-back yourself.
 - **Classify Apply errors** by what reached the upstream (CLI-015). When unsure, return the error unwrapped: an unknown outcome is safe, a wrong "not applied" invites a duplicate write.
 
 ```go
@@ -158,21 +166,23 @@ The old state files `~/.gitlab-cli/confirm.secret` and `confirm-consumed.json` a
 func TestConformance(t *testing.T) {
 	gl := newFakeGitLab(t)   // httptest server that counts non-GET requests
 	artifacts := t.TempDir() // where the artifact-writing sample puts its file
+	output := filepath.Join(artifacts, "artifacts.zip")
 	aicli.RunConformance(t, aicli.Harness{
 		NewApp: func(env map[string]string) *aicli.App { return newTestApp(t, gl.URL, env) }, // fresh App, state in t.TempDir()
 		Writes: gl.Writes,
-		Reset:  gl.Reset,
+		Reset:  func() { gl.Reset(); os.Remove(output) }, // job artifacts never overwrites: each check starts without its file
 		Samples: map[string][]string{ // one valid invocation per write command, without gate flags
 			"mr update":          {"5", "--project", "acme/web", "--assignee", "carol"},
 			"repo branch delete": {"old-experiment", "--project", "acme/web"},
 			"issue bulk update":  {"--project", "acme/web", "--ids", "1,2", "--add-labels", "needs-triage"},
-			"job artifacts":      {"42", "--project", "acme/web", "--output", filepath.Join(artifacts, "artifacts.zip")},
+			"job artifacts":      {"42", "--project", "acme/web", "--output", output},
 		},
 		// Every effect your writes declare, plus outputs for artifact and persist
-		// commands and destinations for deliver commands (SEC-012).
+		// commands, roots only when a sample overwrites a file (persist), and
+		// destinations for deliver commands (SEC-012).
 		Scope: map[string]any{"scope_id": "scp_conformance", "tool": "gitlab-cli", "granted_by": "conformance",
 			"granted_at": "2026-10-12T00:00:00Z", "expires_at": nil,
-			"effects": []string{"change", "configure", "artifact"}, "dangerous": true, "outputs": []string{artifacts}, "roots": []string{artifacts}}, // roots: the checks repeat the sample, which overwrites its file
+			"effects": []string{"change", "configure", "artifact"}, "dangerous": true, "outputs": []string{artifacts}},
 	})
 }
 ```
@@ -220,7 +230,7 @@ Adopt the release layout aicli expects (gitlab-cli 1.2.17 shipped the binary onl
 
 ## 10. Settings, profiles, flag names and deprecation
 
-- **Settings** (CLI-100): declare the settings in `App.Settings` and read them with `app.Setting(cmd, name)`, which takes the flag, then `GITLAB_CLI_<SETTING>`, then the active profile, then the default; delete the tool's own config loader. aicli reads them from `~/.gitlab-cli/settings.json` (or `GITLAB_CLI_SETTINGS_FILE`) in the strict shape of CLI-100, refuses a file with unknown keys or a secret in it (`E_CONFIG` on every command that reads a setting), and never reads the 1.x `~/.gitlab-cli/config.json`. Move the 1.x values into profiles in `settings.json`, and any secret into the keyring (SEC-040): offer a gated `configure` command that does it, or give the steps in the release notes. gitlab-cli 1.x kept the token encrypted, so users sign in again with `auth login` or set `GITLAB_CLI_TOKEN`; `auth login` declares `Meta.NewProfile`, writes the host with `app.SetProfileSettings`, and, as a dangerous `configure` write, needs a scope granting `configure` and `dangerous` the first time, which the release notes must say.
+- **Settings** (CLI-100): declare the settings in `App.Settings` and read them with `app.Setting(cmd, name)`, which takes the flag, then `GITLAB_CLI_<SETTING>`, then the active profile, then the default; delete the tool's own config loader. aicli reads them from `~/.gitlab-cli/settings.json` (or `GITLAB_CLI_SETTINGS_FILE`) in the strict shape of CLI-100, refuses a file with unknown keys or a secret in it (`E_CONFIG` on every command that reads a setting), and never reads the 1.x `~/.gitlab-cli/config.json`. Move the 1.x values into profiles in `settings.json`, and any secret into the keyring (SEC-040): offer a gated `configure` command that does it, or give the steps in the release notes. gitlab-cli 1.x kept the token encrypted, so users sign in again with `auth login` or set `GITLAB_CLI_TOKEN`; `auth login` declares `Meta.AllowUnknownProfile` (so does `auth logout`, to clean up after a profile deleted from the file), writes the host with `app.SetProfileSettings`, which makes the first profile the default, and, as a dangerous `configure` write, needs a scope granting `configure` and `dangerous` the first time, which the release notes must say.
 
 ```go
 app.Settings = []aicli.Setting{
@@ -229,10 +239,10 @@ app.Settings = []aicli.Setting{
 }
 ```
 
-- **Profiles** (CLI-101): a user with a company GitLab and gitlab.com gets one profile for each instead of two shells. aicli adds `--profile` and `GITLAB_CLI_PROFILE`, binds the active profile and every setting into tokens, refuses an unknown profile before any command runs and reports the active profile in `context`, so remove any account-switching flag of the tool's own. Key keyring entries by `app.Profile()`, and write the profile's host into `app.SettingsPath()`. The sign-in commands are `auth login` (`configure`; the token goes to the keyring, the host to the profile), `auth status` (a read that checks the token with GitLab) and `auth logout` (`configure`).
-- **Flag names** (CLI-028, CLI-029): rename flags to the shared vocabulary (`--per-page` to `--limit`, `--search` to `--query`, a page token to `--cursor`) and keep each old name working as a deprecated flag (`Meta.DeprecatedFlags`) until the next MAJOR release; aicli already suggests the standard name for common synonyms. Check the standard verbs too: a `list` with no match returns an empty page, `update` changes only the fields given, and a `delete` of a missing target is `E_NOT_FOUND` at the dry-run.
+- **Profiles** (CLI-101): a user with a company GitLab and gitlab.com gets one profile for each instead of two shells. aicli adds `--profile` and `GITLAB_CLI_PROFILE`, binds the active profile and every setting into tokens, refuses an unknown profile before any command runs and reports the active profile in `context`, so remove any account-switching flag of the tool's own. Key keyring entries by `app.Profile()`, write the profile's host into `app.SettingsPath()`, and list the profiles with `app.Profiles()`. The sign-in commands are `auth login` (`configure`; the token goes to the keyring, the host to the profile), `auth status` (a read that checks the token with GitLab) and `auth logout` (`configure`).
+- **Flag names** (CLI-028, CLI-029): rename flags to the shared vocabulary (`--per-page` to `--limit`, `--search` to `--query`, a page token to `--cursor`) and keep each old name working until the next MAJOR release: `Meta.RenamedFlags` maps the old name to the new one, and aicli binds, marks and notices it for you (CLI-081). An alias that fits only some commands (`--branch` for `--name` on branch commands) goes in `Meta.FlagAliases`, not `App.FlagAliases`, which applies to every command that has the target flag. Parse durations and times with `aicli.ParseDuration` and `aicli.ParseTime`. A positional cannot be kept as deprecated the way a flag can: list each 1.x command whose shape changed in the release notes (a second positional moved to a flag, a `wait` command folded into `get --wait`). aicli already suggests the standard name for common synonyms. Check the standard verbs too: a `list` with no match returns an empty page, `update` changes only the fields given, and a `delete` of a missing target is `E_NOT_FOUND` at the dry-run.
 - **Deprecation** (CLI-081): a command that is going away gets `Meta.Deprecated` with its replacement. aicli marks it in help and `reference`, adds a `deprecated` notice to every use and leaves it out of the Skill's command map. List it under `Deprecated` in `CHANGELOG.md`, keep it for at least one MINOR release and 90 days, and remove it only in a MAJOR release.
-- **Diagnostics and network** (CLI-102, CLI-110): replace any `--verbose` or `--debug` flag with `GITLAB_CLI_DEBUG` and `app.Debugf`. Remove those flags in this release: unlike renamed flags, they are not kept as deprecated, because CLI-102 forbids them. Register the token read from the keyring with `app.AddSecret`, so aicli redacts it in errors and debug lines. Give every HTTP client a timeout of at most 30 s; retry only idempotent reads, at most twice, after a connection failure or HTTP 429, 502, 503 or 504, honouring `Retry-After` up to 10 s (step 4); send `User-Agent: gitlab-cli/<version> aicli/<spec version>`; honour `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`; and point users with a private CA at `GITLAB_CLI_CA_FILE` instead of any switch that turns TLS verification off. `app.HTTPTransport()` and `app.UserAgent()` provide all of this but the retries.
+- **Diagnostics and network** (CLI-102, CLI-110): replace any `--verbose` or `--debug` flag with `GITLAB_CLI_DEBUG` and `app.Debugf`. Remove those flags in this release: unlike renamed flags, they are not kept as deprecated, because CLI-102 forbids them. Register the token read from the keyring with `app.AddSecret`, so aicli redacts it in errors and debug lines. Give every HTTP client a timeout of at most 30 s; retry only idempotent reads, at most twice, after a connection failure or HTTP 429, 502, 503 or 504, honouring `Retry-After` up to 10 s (step 4); send `User-Agent: gitlab-cli/<version> aicli/<spec version>`; honour `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`; and point users with a private CA at `GITLAB_CLI_CA_FILE` instead of any switch that turns TLS verification off. `app.HTTPTransport()` (which reads the proxy variables through `App.Env`) and `app.UserAgent()` provide all of this but the retries.
 - **Outbound contact** (SEC-022): the tool talks only to the configured GitLab host and, in `update` and `doctor`, to its release source. Remove any telemetry, and list any other destination in `SECURITY.md`.
 - **README** (REPO-010, REPO-011): a Configuration section with the settings, the settings file and its profiles, and an Uninstall section that removes the package, `~/.gitlab-cli`, the keyring entry (`gitlab-cli auth logout`) and the Skill directories.
 
@@ -251,9 +261,12 @@ app.Settings = []aicli.Setting{
 ```
 
 - `schema_version` is `"2.0"`; JSON is compact by default, `--pretty` indents, `--compact` is still accepted (CLI-002, CLI-003).
-- Keys are snake_case (CLI-007): `webUrl` → `web_url`, `hasMore` → `has_more`, `pipelineStatus` → `pipeline_status`, `updatedAt` → `updated_at`. IDs are strings; times are UTC with `Z`.
-- `meta.untrusted` lists external-content paths once per response, from the schema's `Untrusted` fields or `app.OK(cmd, data, "data.description")`; remove `_untrusted` from objects (CLI-046). `meta` holds nothing but `duration_ms`, `notices` and `untrusted`.
+- Keys are snake_case (CLI-007): `webUrl` → `web_url`, `hasMore` → `has_more`, `pipelineStatus` → `pipeline_status`, `updatedAt` → `updated_at`. IDs are strings; times are UTC with `Z`. A key ending in `_at` holds a time, so rename one that holds a date to `_on` (GitLab's member `expires_at` of `2026-12-31` becomes `expires_on`), or R04 fails.
+- `meta.untrusted` lists external-content paths once per response, from the schema's `Untrusted` fields or `app.OK(cmd, data, "data.description")`; remove `_untrusted` from objects (CLI-046). A ref that holds people's text (a branch, tag, label or file name, as in `acme/web/-/branches/<name>`) is external content too: list `ref` among the schema's `Untrusted` fields; a commit's ref, a SHA, is not. `meta` holds nothing but `duration_ms`, `notices` and `untrusted`.
 - Lists (CLI-041) carry `items`, `count`, `has_more` with `next_cursor`, `next_offset` or `continuation_reason`, `total` when the upstream reports it, `truncated: true` with `truncated_reason` when capped, `scope` and `sort`, and no other keys but `offset` (the page schema forbids them): drop `limit`, `page` and `all`, and echo the applied limit and filters in `scope`. A list that covers less than its name says so: `project members` lists direct members only, which led an eval agent to tell the user something false.
+- Counts and top items (CLI-044): a list returns `total` when the upstream reports it, so "how many" needs no paging. Look at the aggregates agents ask of each list (the top author, a count per state, the latest failure) and compute in the tool the ones the 1.x commands lacked, as a filter or as a command of their own: a grouped count is a page of `{<key>, count}` items sorted `count_desc`, with `scope` saying what was counted. Adding a command is a product decision; returning `total` is part of the migration.
+- A `search` states in `sort` the order it really has: `relevance` only where the upstream ranks by relevance (CLI-029). GitLab does so only with advanced search, and basic search lists issues and merge requests newest first; a tool that cannot tell which search served the page says `upstream` and explains it in `scope`.
+- One file, diff or set of release notes can exceed the 8,000-character budget (CLI-042, CLI-043): its JSON form carries a bounded window (lines paged with `--offset` and `--limit`, a diff's files paged by size, a message cut at a stated length with `<field>_truncated: true` and a notice), `--format raw` carries the whole body, and a long description stays out of the default fields (`--fields +description` adds it).
 - Every resource carries one `ref` (`acme/web!5`), accepted back as input (CLI-048).
 - Every error has `dispatch_state` and `next_action`. On an upstream 403, add `details.required` when you know the role (CLI-014); in the eval, agents spent 2 to 4 calls probing after a bare 403.
 - A confirmed write returns `operation_id`, `receipt` and `result`; a partial batch is `ok: false` with `E_PARTIAL` (CLI-059, CLI-063).
@@ -299,8 +312,8 @@ app.Settings = []aicli.Setting{
 
 - [ ] `.agent/SPEC_VERSION` is `v2.0.0`; `node scripts/check-spec.js` passes
 - [ ] The tree is built per App; `main` calls `Execute`; no own envelope, exit table or format handling
-- [ ] Every leaf registered with effects, output schema, examples, maturity and evidence
-- [ ] Every write goes through `App.Write` or `App.WriteBatch`; Apply errors classified; the HTTP client never retries writes
+- [ ] Every leaf registered with effects, output schema, examples, maturity and evidence; one positional per command, refs bound by their own parts
+- [ ] Every write goes through `App.Write` or `App.WriteBatch`; Apply errors classified; the HTTP client never retries writes; target lookups in `ResolveTarget`, not before `App.Write`
 - [ ] Old confirm code, FCC guard, `release_readiness`, `contract_gen` and hand-written `reference` deleted
 - [ ] Conformance test passes with a sample for every write command; coverage enumerated from the registry
 - [ ] Release notes and README explain scope files; the Skill never writes one
@@ -309,6 +322,6 @@ app.Settings = []aicli.Setting{
 - [ ] Settings in `App.Settings`, profiles in `settings.json` with no secret in it, the 1.x `config.json` values moved there; `auth login`, `auth status`, `auth logout` where the tool signs in
 - [ ] Flags renamed to the shared vocabulary, old names deprecated; no `--verbose` or `--debug`; HTTP timeouts, read-only retries, verified TLS; no telemetry
 - [ ] README has Configuration and Uninstall sections
-- [ ] Output: `schema_version` 2.0, snake_case, `meta.untrusted`, list completeness, `ref` on every resource
+- [ ] Output: `schema_version` 2.0, snake_case, `meta.untrusted`, list completeness, `ref` on every resource; `_at` times and `_on` dates; refs with people's text untrusted
 - [ ] CI and release run tests with conformance, audits and both guards (REPO-070, REPO-071)
 - [ ] CHANGELOG lists every break; the tool's MAJOR version is bumped

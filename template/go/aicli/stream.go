@@ -10,10 +10,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -79,8 +81,10 @@ func (a *App) Stream(cmd *cobra.Command) (*Stream, error) {
 }
 
 // Item writes one line of type item now. untrusted lists paths inside data that
-// carry external content, relative to data; the command's output schema adds its
-// untrusted fields, and --fields applies as for an object.
+// carry external content, relative to data; the item schema (Meta.StreamItem, else
+// the command's output schema) adds its untrusted fields (Q23), and --fields
+// applies as for an object. With --format raw the item is written as bytes only: a
+// []byte or string as it is, anything else as its compact JSON value.
 func (s *Stream) Item(data any, untrusted ...string) error {
 	a, st := s.a, s.st
 	gen, err := toGenericData(data)
@@ -88,9 +92,13 @@ func (s *Stream) Item(data any, untrusted ...string) error {
 		return internalError("A stream item cannot be encoded as JSON.")
 	}
 	m := a.metaFor(s.cmd)
-	schema := a.schemaOf(m)
-	gen = a.project(st, m, schema, "object", gen)
-	paths := cleanPaths(append(prefixPaths("data", untrusted), schemaUntrusted(schema, "object")...))
+	schema, own := a.itemSchemaOf(m)
+	pm := m
+	if !own {
+		pm = nil // Meta.DefaultFields belong to the output schema, not to the items
+	}
+	gen = a.project(st, pm, schema, "object", gen)
+	paths := cleanPaths(presentPaths(map[string]any{"data": gen}, append(prefixPaths("data", untrusted), schemaUntrusted(schema, "object")...)))
 	s.items++
 	out := a.stdout()
 	switch st.format {
@@ -106,6 +114,12 @@ func (s *Stream) Item(data any, untrusted ...string) error {
 			_, err = io.WriteString(out, v)
 			return s.noteWrite(err)
 		}
+		b, err := encodeJSON(gen, false)
+		if err != nil {
+			return internalError("A stream item cannot be encoded as JSON.")
+		}
+		_, err = out.Write(b)
+		return s.noteWrite(err)
 	}
 	meta := metaObject{DurationMS: time.Since(st.startReal).Milliseconds(), Untrusted: paths}
 	b, err := encodeJSON(streamLine{OK: true, SchemaVersion: SchemaVersion, Type: "item", Data: gen, Meta: meta}, false)
@@ -114,6 +128,15 @@ func (s *Stream) Item(data any, untrusted ...string) error {
 	}
 	_, err = out.Write(b)
 	return s.noteWrite(err)
+}
+
+// itemSchemaOf is the schema of a stream's items (Q23): Meta.StreamItem when it is
+// set, else the command's output schema (own reports the latter).
+func (a *App) itemSchemaOf(m *Meta) (schema SchemaDef, own bool) {
+	if m != nil && m.StreamItem != "" && a.reg.schemas != nil {
+		return a.reg.schemas[m.StreamItem], false
+	}
+	return a.schemaOf(m), true
 }
 
 // noteWrite remembers a failed write to stdout (a closed pipe): the stream stops.
@@ -138,11 +161,23 @@ func (s *Stream) Summary(data any, untrusted ...string) {
 	s.summarySet = true
 }
 
-// emitStream writes the summary line of a stream and returns its exit code.
+// emitStream writes the summary line of a stream and returns its exit code. A raw
+// stream (--format raw) is the items' bytes only (Q23): no summary line; an error
+// that ends it goes to stderr as text, and the exit code reports it.
 func (a *App) emitStream(st *runState, res result) int {
 	s := st.stream
 	stdout, stderr := a.stdout(), a.stderr()
 	meta := metaObject{DurationMS: time.Since(st.startReal).Milliseconds(), Notices: st.notices}
+	if st.format == "raw" {
+		if res.err == nil {
+			return 0
+		}
+		obj, exit, errUntrusted := a.normalizeError(res.err)
+		meta.Untrusted = cleanPaths(errUntrusted)
+		writeTextError(stderr, fitErrorBudget(obj, meta, a.toolName()))
+		a.textNotices(st, stderr)
+		return exit
+	}
 	if res.err == nil {
 		// The summary is what Summary recorded, else what the command reported with
 		// OK, else the number of items.
@@ -164,7 +199,7 @@ func (a *App) emitStream(st *runState, res result) int {
 				a.textNotices(st, stderr)
 				return 0
 			}
-			meta.Untrusted = cleanPaths(untrusted)
+			meta.Untrusted = cleanPaths(presentPaths(map[string]any{"data": data}, untrusted))
 			if b, err := encodeJSON(streamLine{OK: true, SchemaVersion: SchemaVersion, Type: "summary", Data: data, Meta: meta}, false); err == nil {
 				_, _ = stdout.Write(b)
 				return 0
@@ -173,8 +208,9 @@ func (a *App) emitStream(st *runState, res result) int {
 		}
 	}
 	obj, exit, errUntrusted := a.normalizeError(res.err)
-	meta.Untrusted = cleanPaths(errUntrusted)
+	meta.Untrusted = cleanPaths(presentPaths(errorRoot(obj), errUntrusted))
 	obj = fitErrorBudget(obj, meta, a.toolName())
+	meta.Untrusted = cleanPaths(presentPaths(errorRoot(obj), meta.Untrusted))
 	if st.format == "text" {
 		writeTextError(stderr, obj)
 		a.textNotices(st, stderr)
@@ -283,19 +319,20 @@ func (a *App) WriteOutput(cmd *cobra.Command, spec OutputSpec) error {
 		if err != nil {
 			return Result{}, NotDispatched(err)
 		}
-		// Checked again at write time (C1): a file that appeared since the confirm's
-		// checks is an overwrite, which the scope's roots must allow.
+		// Checked again at write time (C1, Q9): a file that appeared since the
+		// confirm's checks is an overwrite, which only a persist command may do and
+		// the scope's roots must allow.
 		exists, version := state()
-		if exists && !a.overwriteAllowed(path) {
-			return Result{}, NotDispatched(a.overwriteRefused(cmd, path))
+		if e := a.existingOutputAllowed(cmd, path, exists, overwrites); e != nil {
+			return Result{}, NotDispatched(e)
 		}
-		if version != planned || (exists && !overwrites) {
+		if version != planned {
 			return Result{}, appeared()
 		}
 		if err := writeOutputFile(path, content, exists); err != nil {
 			if errors.Is(err, fs.ErrExist) {
-				if !a.overwriteAllowed(path) {
-					return Result{}, NotDispatched(a.overwriteRefused(cmd, path))
+				if e := a.existingOutputAllowed(cmd, path, true, overwrites); e != nil {
+					return Result{}, NotDispatched(e)
 				}
 				return Result{}, appeared()
 			}
@@ -348,6 +385,200 @@ func (a *App) overwriteRefused(cmd *cobra.Command, path string) *Error {
 	e.Message = "The output file already exists and the scope does not allow overwriting it; nothing was written."
 	e.Details["next_action"] = "Ask the user to add the directory to the scope's roots, or choose a new file name."
 	return e
+}
+
+// existingOutputAllowed is the write-time check of an output file that exists (C1,
+// Q9): a command that only creates files refuses it with Q9's E_VALIDATION, and an
+// overwrite needs the scope's roots. A file that does not exist passes.
+func (a *App) existingOutputAllowed(cmd *cobra.Command, path string, exists, overwrites bool) *Error {
+	switch {
+	case !exists:
+		return nil
+	case !overwrites:
+		return createOnlyExists(path)
+	case !a.overwriteAllowed(path):
+		return a.overwriteRefused(cmd, path)
+	}
+	return nil
+}
+
+// newOutputAllowed is the write-time scope check of a new output file (Q8): links
+// resolved, a junction refused (C2), the directory inside the scope's outputs.
+func (a *App) newOutputAllowed(cmd *cobra.Command, path string) *Error {
+	state, e := a.stateDirPath()
+	if e != nil {
+		return e
+	}
+	need := scopeNeed{outputs: []string{path}}
+	if m := a.metaFor(cmd); m != nil {
+		need.effects, need.dangerous = m.effectStrings(), m.dangerous()
+	}
+	return a.checkScope(a.loadScope(state), need, "")
+}
+
+// OutputFile is a local output file written in pieces inside a write's Apply
+// (App.OpenOutput, Q8). It is an io.Writer onto a temporary file beside the target;
+// Commit moves the file into place and Abort removes it.
+type OutputFile struct {
+	a         *App
+	cmd       *cobra.Command
+	path      string
+	tmp       *os.File
+	overwrite bool
+	size      int64
+	sum       hash.Hash
+	done      bool
+}
+
+// OpenOutput starts a local output file inside the running write's Apply (Q8,
+// CLI-042), for content too large to hold in memory (an artifacts archive): a
+// temporary file in the target's directory, mode 0600 on POSIX. Commit moves it into
+// place, never over an existing file unless overwrite is true and the command
+// declares persist (otherwise Q9's E_VALIDATION), with the scope checked as
+// WriteOutput checks it at write time: links and junctions resolved, the scope's
+// outputs for a new file and its roots for an existing one. Abort, or a failed
+// Commit, removes the temporary file; return Commit's error wrapped in
+// NotDispatched, since nothing was written. Name the path in Preview.Outputs so the
+// gate checks it at the dry-run and the confirm. WriteOutput stays for small
+// results built in memory.
+func (a *App) OpenOutput(path string, overwrite bool) (*OutputFile, *Error) {
+	st := a.run
+	if st == nil || st.cmd == nil {
+		return nil, internalError("App.OpenOutput must be called from a write's Apply, inside App.Execute.")
+	}
+	if m := a.metaFor(st.cmd); m == nil || !m.hasEffect(Artifact, Persist) {
+		return nil, internalError("App.OpenOutput needs a command that declares the artifact or persist effect.")
+	}
+	if strings.TrimSpace(path) == "" {
+		e := Usage("missing_parameter", "--output", "Give the file to write with --output.")
+		e.Details["next_action"] = "Add --output <file> and run the command again."
+		return nil, e
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, Usage("invalid_value", "--output", "The --output path is not a valid path.")
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(abs), ".aicli-output-*")
+	if err != nil {
+		return nil, ioError("The output file could not be started; nothing was written.",
+			fmt.Sprintf("Check that %s exists and is writable.", filepath.Dir(abs)), err)
+	}
+	return &OutputFile{a: a, cmd: st.cmd, path: abs, tmp: tmp, overwrite: overwrite, sum: sha256.New()}, nil
+}
+
+// Write writes to the temporary file.
+func (o *OutputFile) Write(p []byte) (int, error) {
+	if o.done {
+		return 0, errors.New("the output file was already committed or aborted")
+	}
+	n, err := o.tmp.Write(p)
+	o.size += int64(n)
+	o.sum.Write(p[:n])
+	return n, err
+}
+
+// Path is the absolute path the file is committed to.
+func (o *OutputFile) Path() string { return o.path }
+
+// Size is the number of bytes written so far.
+func (o *OutputFile) Size() int64 { return o.size }
+
+// SHA256 is the hex SHA-256 of the bytes written so far.
+func (o *OutputFile) SHA256() string { return hex.EncodeToString(o.sum.Sum(nil)) }
+
+// Abort removes the temporary file; the target is left as it was. It is safe to
+// call after Commit.
+func (o *OutputFile) Abort() {
+	if o.done {
+		return
+	}
+	o.done = true
+	_ = o.tmp.Close()
+	_ = os.Remove(o.tmp.Name())
+}
+
+// Commit moves the written file into place (Q8): new files only, unless the file
+// was opened with overwrite and the command declares persist, and with the scope's
+// outputs (new) or roots (existing) checked at this moment. On any error nothing
+// was written and the temporary file is gone.
+func (o *OutputFile) Commit() *Error {
+	if o.done {
+		return internalError("The output file was already committed or aborted.")
+	}
+	defer o.Abort()
+	tmpName := o.tmp.Name()
+	if err := o.tmp.Sync(); err != nil {
+		return o.writeFailed(err)
+	}
+	if err := o.tmp.Close(); err != nil {
+		return o.writeFailed(err)
+	}
+	m := o.a.metaFor(o.cmd)
+	overwrite := o.overwrite && m != nil && m.hasEffect(Persist)
+	exists := outputExists(o.path)
+	if e := o.a.existingOutputAllowed(o.cmd, o.path, exists, overwrite); e != nil {
+		return e
+	}
+	if !exists {
+		if e := o.a.newOutputAllowed(o.cmd, o.path); e != nil {
+			return e
+		}
+	}
+	if exists {
+		if err := renameRetry(tmpName, o.path); err != nil {
+			return o.writeFailed(err)
+		}
+		o.done = true
+		return nil
+	}
+	if err := linkNew(tmpName, o.path); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			// The file appeared since the check: the same rules apply to it.
+			if e := o.a.existingOutputAllowed(o.cmd, o.path, true, overwrite); e != nil {
+				return e
+			}
+			if err := renameRetry(tmpName, o.path); err == nil {
+				o.done = true
+				return nil
+			}
+		}
+		return o.writeFailed(err)
+	}
+	return nil
+}
+
+func (o *OutputFile) writeFailed(err error) *Error {
+	return ioError("The output file could not be written; nothing was saved.",
+		fmt.Sprintf("Check that %s is writable.", filepath.Dir(o.path)), err)
+}
+
+// linkNew puts the file tmp at path without replacing anything: a hard link, or,
+// where the file system has none, an exclusive create and a copy. It fails with
+// fs.ErrExist when path exists.
+func linkNew(tmp, path string) error {
+	err := os.Link(tmp, path)
+	if err == nil || errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	src, err := os.Open(tmp)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = src.Close() }()
+	dst, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		_ = dst.Close()
+		_ = os.Remove(path)
+		return err
+	}
+	if err := dst.Sync(); err != nil {
+		_ = dst.Close()
+		return err
+	}
+	return dst.Close()
 }
 
 // writeOutputFile writes content to path atomically: a synced temporary file in the

@@ -6,7 +6,7 @@
 
 MUST、MUST NOT、SHOULD 和 MAY 取 RFC 2119 中的含义；本文把它们分别译作「必须」「不得」「应当」「可以」。*模拟上游*（fake upstream）指任何代替真实服务的替身：进程内的假实现、mock 服务器、录制的响应。*真实上游*（real upstream）指真实产品的一个实例，包括在 Docker 里起的一次性实例。
 
-> **库提供什么**：aicli 提供 `RunConformance(t, aicli.Harness{…})`（Python 为 `run_conformance`，harness 字段相同，改用 snake_case），它对每个写命令运行检查 G00–G10，对整个工具运行 R01–R05（VER-001）；`ValidateEnvelope(raw)`（Python 为 `validate_envelope`），它校验一份 stdout 文档：信封和 `meta`、按错误码区分的错误详情，以及其中的预演（dry-run）、回执、批量和分页结构（VER-002）；还有覆盖率记录器和 `CheckCoverage(t, h)`（Python 为 `check_coverage`），后者在工具自己的测试跑完之后运行 R06（VER-003）。库自己的测试在规范仓库里运行，覆盖单个工具的运行覆盖不到的情况：同一个令牌的并发确认（恰好只写入一次）、租约过期、损坏的操作记录。
+> **库提供什么**：aicli 提供 `RunConformance(t, aicli.Harness{…})`（Python 为 `run_conformance`，harness 字段相同，改用 snake_case），它对每个写命令运行检查 G00–G10，对整个工具运行 R01–R05（VER-001）；`ValidateEnvelope(raw)`（Python 为 `validate_envelope`），它校验一份 stdout 文档：信封和 `meta`、按错误码区分的错误详情、其中的预演（dry-run）、回执、批量和分页结构，以及错误响应的大小预算（VER-002；成功响应的预算由 R04 在默认调用上检查）；还有覆盖率记录器和 `CheckCoverage(t, h)`（Python 为 `check_coverage`），后者在工具自己的测试跑完之后运行 R06（VER-003）。库自己的测试在规范仓库里运行，覆盖单个工具的运行覆盖不到的情况：同一个令牌的并发确认（恰好只写入一次）、租约过期、损坏的操作记录。
 >
 > **仍然要你做的**：`Harness`（一个统计写入次数的模拟上游、每个写命令一个样例、一份授权范围）、每个命令的行为矩阵测试（VER-004）、证据记录（VER-005）、Agent 评测（VER-006）和发布路径的检查对等（VER-008）。
 
@@ -17,9 +17,9 @@ MUST、MUST NOT、SHOULD 和 MAY 取 RFC 2119 中的含义；本文把它们分�
 每个工具都必须在 CI 中、在每次合并和每次发布时运行 aicli 的符合性测试套件，并提供一个 `Harness`，其中给出模拟上游、每个写命令的样例和一份授权范围。工具不得跳过、过滤或削弱任何一项检查；缺少样例的写命令会让套件失败（G00）。
 
 - `NewApp(env)` 返回一个全新的 `App` 和命令树；套件把 `env` 叠加到 `App.Env` 上。工具必须通过 `App.Env` 读取环境变量，绝不能用 `os.Getenv`，否则套件的隔离会失效；`main` 要设置 `Env: os.Getenv`，因为这个字段没有默认值。
-- `Writes()` 统计模拟上游收到的每一个改变状态的请求，被拒绝的也算在内；对 `artifact` 和 `persist` 命令，它还统计在样例输出路径上新建或覆盖的文件。`Reset()` 在两项检查之间把模拟上游恢复原状。
+- `Writes()` 统计模拟上游收到的每一个改变状态的请求，被拒绝的也算在内；对 `artifact` 和 `persist` 命令，它还统计在样例输出路径上新建或覆盖的文件。`Reset()` 在两项检查之间把模拟上游恢复原状；对新建输出文件、从不覆盖文件的命令（只有 `artifact`、没有 `persist`），它还要删掉那个文件，因为各项检查会重复运行样例。
 - `Samples` 把每个写命令的路径映射到一次有效写入的参数，不带写入门控（write gate）的 flag（`--dry-run`、`--confirm` 和 `--dangerous` 由套件添加）。样例应当给出所有会改变效果的输入（目标、内容、收件人、文件输入），因为 G03 只能改动样例给出的输入。
-- `Scope` 是为正向检查授予的授权范围；套件把它写进一个临时文件。
+- `Scope` 是为正向检查授予的授权范围（只有样例会覆盖文件时才授予 `roots`）；套件把它写进一个临时文件。
 
 | 检查 | 套件做什么 | 通过说明什么 |
 |---|---|---|
@@ -34,10 +34,10 @@ MUST、MUST NOT、SHOULD 和 MAY 取 RFC 2119 中的含义；本文把它们分�
 | G08 | 损坏密钥；在操作记录目录的位置放一个文件 | `E_IO`；0 次写入：写入门控失败即拒绝（fail closed；CLI-055、CLI-058） |
 | G09 | 不带 `--dangerous` 运行危险命令 | 退出码 5，`dangerous_flag_required`；0 次写入（CLI-056） |
 | G10 | 在预演和确认之间修改授权范围文件 | `E_CONFLICT` `scope_changed`；0 次写入（CLI-057） |
-| R01 | 校验完整的 `reference`、`--index` 和 `--command` | 结构有效；索引 ≤ 8000 字符或已分组；单个命令 ≤ 4000 字符（CLI-031、CLI-032） |
-| R02 | 遍历命令树 | 命令树规则成立；每个叶子命令都有摘要、输出 schema 和示例；写命令的示例展示预演和确认，危险命令的示例带 `--dangerous`（CLI-020、CLI-021、CLI-030） |
+| R01 | 校验完整的 `reference`、`--index` 和 `--command` | 结构有效；索引 ≤ 8000 字符或已分组；单个命令 ≤ 6000 字符；示例按解析器的方式解析，快捷方式和别名也照样解析（CLI-030、CLI-031、CLI-032） |
+| R02 | 遍历命令树 | 命令树规则成立；只嵌套在一个父级下的每个名词都有根级快捷方式，没有一个快捷方式词指向两条路径；每个叶子命令都有摘要、输出 schema 和示例；写命令的示例展示预演和确认，危险命令的示例带 `--dangerous`（CLI-020、CLI-021、CLI-022、CLI-030） |
 | R03 | 发送未知命令、未知 flag、多余的位置参数 | `E_USAGE`，分别带 `unknown_command` 和建议、`unknown_flag`、`unexpected_argument`（CLI-012、CLI-022、CLI-023） |
-| R04 | 校验它见过的每一个信封 | 符合契约，键名为 snake_case，错误 ≤ 2000 字符（CLI-002、CLI-007、CLI-042） |
+| R04 | 校验它见过的每一个信封 | 符合契约，键名为 snake_case，`_at` 键的值为 UTC 时间；默认调用 ≤ 8000 字符，错误 ≤ 2000 字符（CLI-002、CLI-007、CLI-042） |
 | R05 | 运行 `context`、`doctor`、`operation list` | 输出有效；`doctor` 包含必需的检查项；操作记录为空时也能正常工作（CLI-035、CLI-036、CLI-061） |
 | R06 | 工具自己的测试跑完后，`CheckCoverage` 读取覆盖率记录 | 注册表里的每个命令都在工具自己的测试中运行过（VER-003） |
 
@@ -90,9 +90,11 @@ MUST、MUST NOT、SHOULD 和 MAY 取 RFC 2119 中的含义；本文把它们分�
 
 aicli 提供 `FromHTTP` 做状态码映射，并对 `Apply` 的错误分类（`NotDispatched`、`Rejected`，其余一律视为结果未知），但只有工具知道自己的上游会怎样失败，所以这些行要由工具自己写测试。
 
+批量命令（CLI-063）每个条目各有一份回执，所以它的成功行、写入门控行和 Apply 失败行要检查每个条目的回执和 `summary`；对危险的批量命令，还要检查它在第一次失败之后停下。
+
 内置命令属于 aicli，它们的行为由库自己的测试覆盖：`update` 的每个阶段和每种安装方式、设置和配置档的解析、`context` 和 `doctor`。工具测试的是自己提供的东西：它的 `UpdateConfig` 写对了仓库和包名（例如，通过 `UpdateConfig.APIBase` 指向一个模拟的发布服务器，运行 `update --check`，就能看到每种安装方式会运行的 `command`），以及每个声明的设置都能像 README 写的那样，从它的标志、它的环境变量和配置档中解析出来（CLI-070、CLI-100）。
 
-原因：v1.6.3 就要求这样的覆盖面（见它的 CLI-SPEC §13）。设无副作用这一行，是因为工具群审计发现了一个被 `reference` 报成读命令的写命令（kibana-cli `patterns infer --write`）。空结果这一行要断言 `scope`，是因为在 2026-10 的评测中，某个项目的成员全部来自它所属的群组，`project members` 却对它返回 `[]` 并标为完整，一个 Agent 因此把错误的信息告诉了用户。
+原因：v1.6.3 就要求这样的覆盖面（见它的 CLI-SPEC §13）。设无副作用这一行，是因为工具群审计发现了一个被 `reference` 报成读命令的写命令（kibana-cli `patterns infer --write`）。空结果这一行要断言 `scope`，是因为在 2026-10 的评测中，某个项目的成员全部来自它所属的群组，`project members` 却对它返回 `[]` 并标为完整，一个 Agent 因此把错误的信息告诉了用户。在 gitlab-cli 试点（2026-10）中，一套只读取一份回执的共用测试矩阵，让每个批量命令的写入行都失败了。
 
 检查：子测试名带上所属的行；`go test -v` 或 `pytest -rs` 会列出 `not applicable:` 的跳过项；评审者抽查若干命令，对照此表核对。
 

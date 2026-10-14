@@ -68,6 +68,7 @@ type settingsFile struct {
 	defaultProfile string
 	profiles       map[string]map[string]string
 	names          []string // profile names, sorted
+	order          []string // profile names in file order (App.Profiles, Q3)
 }
 
 // profileState is the active profile and where it came from (context.profile).
@@ -103,12 +104,13 @@ func (a *App) SettingsPath() string { return a.settingsPath() }
 
 // Profile returns the active profile's name and where it came from: flag, env,
 // config (default_profile) or single (the only profile); "" and none when no profile
-// is active (CLI-101). Tools key their keyring entries by it. For a command that
-// creates a profile (Meta.NewProfile, P6), a requested profile the settings file
-// does not have yet is the one returned, with its source (flag or env).
+// is active (CLI-101). Tools key their keyring entries by it. For a command that may
+// run under an unknown profile (Meta.AllowUnknownProfile, P6, Q4), a requested
+// profile the settings file does not have is the one returned, with its source
+// (flag or env).
 func (a *App) Profile() (name, source string) {
 	ps := a.profileState()
-	if ps.name == "" && ps.requested != "" && a.createsProfile(nil) {
+	if ps.name == "" && ps.requested != "" && a.allowsUnknownProfile(nil) {
 		return ps.requested, ps.requestedFrom
 	}
 	return ps.name, ps.source
@@ -168,6 +170,14 @@ func (a *App) loadSettings(path string) settingsFile {
 	}
 	sf.defaultProfile, sf.profiles = def, profiles
 	sf.names = sortedKeys(profiles)
+	sf.order = sf.names
+	if top, err := readOrderedObject(raw); err == nil {
+		if v, ok := top.vals["profiles"]; ok && !isJSONNull(v) {
+			if p, err := readOrderedObject(v); err == nil && len(p.keys) == len(profiles) {
+				sf.order = p.keys
+			}
+		}
+	}
 	return sf
 }
 
@@ -366,9 +376,9 @@ func (a *App) unknownProfileError(ps profileState) *Error {
 // <PREFIX>_PROFILE) is not in the settings file (CLI-101, D4): E_CONFIG before the
 // command's own code runs, whether or not it reads a setting. The built-ins keep
 // working, so context and doctor can report the problem, and so does a command that
-// creates the profile (Meta.NewProfile, P6).
+// may run under an unknown profile (Meta.AllowUnknownProfile, P6, Q4).
 func (a *App) checkProfile(c *cobra.Command) error {
-	if a.Settings == nil || a.reg.builtin[c] || a.createsProfile(c) {
+	if a.Settings == nil || a.reg.builtin[c] || a.allowsUnknownProfile(c) {
 		return nil
 	}
 	if ps := a.profileState(); ps.file.reason == "" && ps.requested != "" {
@@ -377,14 +387,14 @@ func (a *App) checkProfile(c *cobra.Command) error {
 	return nil
 }
 
-// createsProfile reports a command declared with Meta.NewProfile (P6); nil means the
-// running command.
-func (a *App) createsProfile(c *cobra.Command) bool {
+// allowsUnknownProfile reports a command declared with Meta.AllowUnknownProfile (P6,
+// Q4); nil means the running command.
+func (a *App) allowsUnknownProfile(c *cobra.Command) bool {
 	if c == nil && a.run != nil {
 		c = a.run.cmd
 	}
 	m := a.metaFor(c)
-	return m != nil && m.NewProfile
+	return m != nil && m.AllowUnknownProfile
 }
 
 // SetProfileSettings writes values into one profile of the settings file (CLI-101,
@@ -393,10 +403,13 @@ func (a *App) createsProfile(c *cobra.Command) bool {
 // that is not secret (secrets go in the OS keyring, SEC-040). The current file is
 // read with the same strict parser, and an invalid file is E_CONFIG and never
 // overwritten. The profile is created when missing; every other key, profile and
-// default_profile is kept. The file is written atomically (a temporary file in the
-// same directory, fsync, rename) with mode 0600; the state directory is created
-// 0700 when the file lives there. A failure to write is E_IO. On any error nothing
-// was written, so Apply returns it wrapped in NotDispatched.
+// default_profile is kept, and a file without default_profile gets this profile as
+// its default (Q3). The file keeps its order: default_profile first, then the
+// profiles in file order (a new one last), each with its keys in file order (new
+// keys last, sorted), indented by two spaces. It is written atomically (a temporary
+// file in the same directory, fsync, rename) with mode 0600; the state directory is
+// created 0700 when the file lives there. A failure to write is E_IO. On any error
+// nothing was written, so Apply returns it wrapped in NotDispatched.
 func (a *App) SetProfileSettings(profile string, values map[string]string) *Error {
 	if !profileNamePattern.MatchString(profile) {
 		e := Validation("--profile", "a profile name: a-z, 0-9, _ and -, up to 64 characters", "The profile name is not allowed; nothing was written.")
@@ -423,31 +436,16 @@ func (a *App) SetProfileSettings(profile string, values map[string]string) *Erro
 	if sf.reason != "" {
 		return a.settingsError(sf)
 	}
-	top := map[string]any{}
+	var raw []byte
 	if sf.exists {
-		raw, err := readLimited(path, maxSettingsBytes)
-		dec := json.NewDecoder(bytes.NewReader(raw))
-		dec.UseNumber()
-		if err != nil || dec.Decode(&top) != nil {
+		var err error
+		if raw, err = readLimited(path, maxSettingsBytes); err != nil {
 			return ioError("The settings file cannot be read; nothing was written.", fmt.Sprintf("Check %s.", path), err)
 		}
 	}
-	profiles, _ := top["profiles"].(map[string]any)
-	if profiles == nil {
-		profiles = map[string]any{}
-	}
-	entry, _ := profiles[profile].(map[string]any)
-	if entry == nil {
-		entry = map[string]any{}
-	}
-	for k, v := range values {
-		entry[k] = v
-	}
-	profiles[profile] = entry
-	top["profiles"] = profiles
-	data, err := encodeJSON(top, true)
+	data, err := settingsWithValues(raw, profile, values)
 	if err != nil {
-		return internalError("The settings file cannot be encoded.")
+		return ioError("The settings file cannot be read; nothing was written.", fmt.Sprintf("Check %s.", path), err)
 	}
 	dir := filepath.Dir(path)
 	if state, e := a.stateDirPath(); e == nil && strings.EqualFold(filepath.Clean(state), filepath.Clean(dir)) {
@@ -462,6 +460,142 @@ func (a *App) SetProfileSettings(profile string, values map[string]string) *Erro
 		st.profile = nil // read again on the next Setting
 	}
 	return nil
+}
+
+// settingsWithValues is the settings file raw (nil: none yet) with values set in
+// profile, in the order SetProfileSettings writes (Q3).
+func settingsWithValues(raw []byte, profile string, values map[string]string) ([]byte, error) {
+	top, profiles, entry := newOrderedObject(), newOrderedObject(), newOrderedObject()
+	var err error
+	if raw != nil {
+		if top, err = readOrderedObject(raw); err != nil {
+			return nil, err
+		}
+	}
+	if v, ok := top.vals["profiles"]; ok && !isJSONNull(v) {
+		if profiles, err = readOrderedObject(v); err != nil {
+			return nil, err
+		}
+	}
+	if v, ok := profiles.vals[profile]; ok {
+		if entry, err = readOrderedObject(v); err != nil {
+			return nil, err
+		}
+	}
+	for _, k := range sortedKeys(values) {
+		entry.set(k, compactJSON(values[k]))
+	}
+	profiles.set(profile, compactJSON(entry))
+	out := newOrderedObject()
+	def, ok := top.vals["default_profile"]
+	if !ok || isJSONNull(def) {
+		def = compactJSON(profile) // the first profile written becomes the default (Q3)
+	}
+	out.set("default_profile", def)
+	out.set("profiles", compactJSON(profiles))
+	var b bytes.Buffer
+	if err := json.Indent(&b, compactJSON(out), "", "  "); err != nil {
+		return nil, err
+	}
+	b.WriteByte('\n')
+	return b.Bytes(), nil
+}
+
+// orderedObject is a JSON object whose keys keep their order (the settings file is
+// rewritten in place, Q3). Values are compact JSON.
+type orderedObject struct {
+	keys []string
+	vals map[string]json.RawMessage
+}
+
+func newOrderedObject() orderedObject { return orderedObject{vals: map[string]json.RawMessage{}} }
+
+func (o *orderedObject) set(k string, v json.RawMessage) {
+	if _, has := o.vals[k]; !has {
+		o.keys = append(o.keys, k)
+	}
+	o.vals[k] = v
+}
+
+// MarshalJSON writes the object compactly in its key order.
+func (o orderedObject) MarshalJSON() ([]byte, error) {
+	var b bytes.Buffer
+	b.WriteByte('{')
+	for i, k := range o.keys {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.Write(compactJSON(k))
+		b.WriteByte(':')
+		b.Write(o.vals[k])
+	}
+	b.WriteByte('}')
+	return b.Bytes(), nil
+}
+
+// readOrderedObject reads a JSON object's keys in order, each value re-encoded
+// compactly (numbers kept as written).
+func readOrderedObject(raw []byte) (orderedObject, error) {
+	o := newOrderedObject()
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	t, err := dec.Token()
+	if err != nil {
+		return o, err
+	}
+	if d, ok := t.(json.Delim); !ok || d != '{' {
+		return o, errors.New("not a JSON object")
+	}
+	for dec.More() {
+		t, err := dec.Token()
+		if err != nil {
+			return o, err
+		}
+		k, _ := t.(string)
+		var v json.RawMessage
+		if err := dec.Decode(&v); err != nil {
+			return o, err
+		}
+		o.set(k, compactRaw(v))
+	}
+	return o, nil
+}
+
+// compactRaw re-encodes a scalar compactly (strings without HTML escaping,
+// numbers as written); objects and arrays are compacted as they are.
+func compactRaw(v json.RawMessage) json.RawMessage {
+	t := bytes.TrimSpace(v)
+	if len(t) > 0 && (t[0] == '{' || t[0] == '[') {
+		var b bytes.Buffer
+		if json.Compact(&b, t) == nil {
+			return b.Bytes()
+		}
+		return t
+	}
+	dec := json.NewDecoder(bytes.NewReader(t))
+	dec.UseNumber()
+	var x any
+	if dec.Decode(&x) != nil {
+		return t
+	}
+	return compactJSON(x)
+}
+
+// compactJSON is v's compact JSON encoding without HTML escaping or a newline.
+func compactJSON(v any) json.RawMessage {
+	b, err := encodeJSON(v, false)
+	if err != nil {
+		return json.RawMessage("null")
+	}
+	return bytes.TrimRight(b, "\n")
+}
+
+func isJSONNull(v json.RawMessage) bool { return string(bytes.TrimSpace(v)) == "null" }
+
+// Profiles returns the profile names of the settings file in file order (Q3): empty
+// without a file, and for an invalid one, whose E_CONFIG App.Setting reports.
+func (a *App) Profiles() []string {
+	return append([]string{}, a.profileState().file.order...)
 }
 
 // Setting returns the value of a declared setting and where it came from (CLI-100):
@@ -481,10 +615,10 @@ func (a *App) Setting(cmd *cobra.Command, name string) (value, source string, er
 	if cmd == nil && a.run != nil {
 		cmd = a.run.cmd
 	}
-	// A requested profile that does not exist yet stops every setting, except for a
-	// command that creates it (Meta.NewProfile, P6): it reads the flag, the
-	// environment and the default.
-	if ps.requested != "" && !a.createsProfile(cmd) {
+	// A requested profile that does not exist stops every setting, except for a
+	// command that may run under it (Meta.AllowUnknownProfile, P6, Q4): it reads the
+	// flag, the environment and the default.
+	if ps.requested != "" && !a.allowsUnknownProfile(cmd) {
 		return "", "", a.unknownProfileError(ps)
 	}
 	if s.Flag != "" && cmd != nil {

@@ -65,7 +65,6 @@ from .contract_gen import (
     SCHEMA_VERSION,
     SCOPE_REFUSAL_STATUS,
     STATE_PROTECTION_VALUES,
-    SUCCESS_BUDGET_CHARS,
     TOKEN_MAX_TTL_SECONDS,
     UPDATE_INSTALL_METHODS,
     UPDATE_OPTIONAL_KEYS,
@@ -1770,6 +1769,18 @@ def _success_data(v: _V, data: Any) -> None:
         _page(v, "data", data)
 
 
+def compact_size(doc: Any) -> int:
+    """Characters of a document's compact JSON (CLI-042 measures budgets so)."""
+    return len(json.dumps(doc, ensure_ascii=False, separators=(",", ":")))
+
+
+def is_full_reference(data: Any) -> bool:
+    """Whether success data is the full reference (CLI-033), which the success
+    budget exempts (contract.json size_budgets.exempt): it has every key the full
+    reference requires."""
+    return isinstance(data, dict) and all(k in data for k in REFERENCE_REQUIRED_KEYS)
+
+
 def _reference_kind(data: Any) -> str:
     """Which reference output data is, by its exact key set: reference (full),
     index, command or ""."""
@@ -1805,11 +1816,14 @@ def _envelope(v: _V, env: Any, stream: bool) -> None:
     if env.get("schema_version") != SCHEMA_VERSION:
         v.add("schema_version", f'must be "{SCHEMA_VERSION}"')
     _meta(v, env.get("meta"), ok)
-    size = len(json.dumps(env, ensure_ascii=False, separators=(",", ":")))
+    size = compact_size(env)
     if ok:
         if "data" in env:
             _success_data(v, env["data"])
         kind = _reference_kind(env.get("data"))
+        # The 8,000-character success budget holds for default invocations only
+        # (CLI-042), which the envelope cannot tell: conformance R04 checks it on its
+        # own (Q24).
         if stream:
             pass  # NDJSON stream lines are not budgeted
         elif kind == "index" and size > INDEX_BUDGET_CHARS:
@@ -1823,13 +1837,6 @@ def _envelope(v: _V, env: Any, stream: bool) -> None:
                 "$",
                 f"the reference --command response is {size} characters; the budget is "
                 f"{COMMAND_BUDGET_CHARS} (CLI-032)",
-            )
-        elif not kind and size > SUCCESS_BUDGET_CHARS:
-            # the full reference (CLI-033) is exempt (contract.json size_budgets.exempt)
-            v.add(
-                "$",
-                f"the response is {size} characters, over the {SUCCESS_BUDGET_CHARS} budget "
-                "(CLI-042)",
             )
     else:
         _error_object(v, "error", env.get("error"))
@@ -1850,9 +1857,11 @@ def validate_envelope(raw: bytes | str) -> None:
     """Check one stdout document in JSON mode against the contract: a single UTF-8
     JSON object with a trailing newline and no BOM; the exact envelope keys;
     schema_version; meta; the error object, its details per code and the error
-    size budget; the success budget; and, for success data, the dry-run, receipt,
-    batch, page and operation shapes with their semantic rules. Raises
-    ContractViolation listing every problem."""
+    size budget; and, for success data, the dry-run, receipt, batch, page and
+    operation shapes with their semantic rules. The 8,000-character success budget
+    applies to default invocations only (CLI-042), so conformance R04 checks it
+    there, not this function (Q24). Raises ContractViolation listing every
+    problem."""
     if isinstance(raw, str):
         raw = raw.encode("utf-8")
     v = _V()
@@ -2181,7 +2190,9 @@ def _command_entry(v: _V, p: str, x: Any, tool: Any, schemas: Any, table: Any) -
     if len(set(names)) != len(names):
         v.add(p + ".params", f"{path}: parameter names are unique")
     if isinstance(tool, str):
-        prefixes = [f"{tool} {q}" for q in [path, *aliases]]
+        # An alias replaces the last word of the path (aliases are per parent, P1).
+        parent = path[: path.rfind(" ") + 1]
+        prefixes = [f"{tool} {q}" for q in [path, *(parent + al for al in aliases)]]
         for i, e in enumerate(examples):
             if not any(e == q or e.startswith(q + " ") for q in prefixes):
                 v.add(

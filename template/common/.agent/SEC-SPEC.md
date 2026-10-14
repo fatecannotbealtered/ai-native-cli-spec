@@ -16,7 +16,7 @@ The caller is a language model with a shell, running under the user's OS account
 
 It does not defend against a malicious process running as the same OS user, the agent included: such a process can edit the scope file, the confirm key and the journal (SEC-013).
 
-> **What the library gives you.** aicli (vendored as `internal/aicli/` or `<pkg>/_aicli/`) implements: the minimum-tier check from declared effects (SEC-001); `meta.untrusted` assembly that survives `--fields` (SEC-002); scope loading, strict parsing, every check in SEC-012 and the refusal with `details.scope` and `grant_example` (SEC-010 to SEC-012); the whole write gate (SEC-020); `"***"` for secrets in previews and diagnostics, and keyed digests of secrets in bindings (SEC-021); the state store, key and journal, failing closed (SEC-030); a settings file that refuses secrets (SEC-040); the whole `update` command, from strict versions and argv without a shell to in-process signature verification and the Skill sync (SEC-050).
+> **What the library gives you.** aicli (vendored as `internal/aicli/` or `<pkg>/_aicli/`) implements: the minimum-tier check from declared effects (SEC-001); `meta.untrusted` assembly that follows `--fields` (SEC-002); scope loading, strict parsing, every check in SEC-012 and the refusal with `details.scope` and `grant_example` (SEC-010 to SEC-012); the whole write gate (SEC-020); `"***"` for secrets in previews and diagnostics, and keyed digests of secrets in bindings (SEC-021); the state store, key and journal, failing closed (SEC-030); a settings file that refuses secrets (SEC-040); the whole `update` command, from strict versions and argv without a shell to in-process signature verification and the Skill sync (SEC-050).
 > The tool still owns: truthful effects, `dangerous` flags, secret parameters and untrusted fields in its registry; canonical target keys (SEC-012); the destinations it contacts (SEC-022); credential storage (SEC-040); its `UpdateConfig`, release signing and dependency audits (SEC-050); its SECURITY.md.
 
 ## Risk and untrusted content
@@ -31,9 +31,9 @@ Every tool MUST declare a risk tier that is at least the minimum its commands' e
 | T1 | `change`, `artifact`, `persist` | edit an issue, export a report, overwrite a local config file |
 | T2 | `deliver` or `configure`, or irreversible / account-level damage | send mail, publish, change permissions or credentials, drop a database, delete a project |
 
-The tier describes what the commands can do, not what the credential could do: a read-only tool holding a write-capable token is T0, and SEC-040 still applies to the token. Commands that cannot be undone (delete, merge, drop, purge, bulk changes) MUST be declared `dangerous` (CLI-025); `deliver` and `configure` are dangerous by default.
+The tier describes what the commands can do, not what the credential could do: a read-only tool holding a write-capable token is T0, and SEC-040 still applies to the token. Commands that cannot be undone (delete, merge, drop, purge) MUST be declared `dangerous` (CLI-025); `deliver` and `configure` are dangerous by default. A bulk command is dangerous only when what it does is, through its effects or an action that cannot be undone, never for the number of its targets alone; a plan that cannot be undone although its command can (`Preview.Dangerous`, CLI-056) is dangerous for that run.
 
-Why: v1 tiers were a label each tool chose. Deriving the floor from the same effects that drive the gate (CLI-050) and the scope (SEC-012) means one declaration cannot disagree with the other two.
+Why: v1 tiers were a label each tool chose. Deriving the floor from the same effects that drive the gate (CLI-050) and the scope (SEC-012) means one declaration cannot disagree with the other two. The gitlab-cli pilot (2026-10) found this rule, CLI-025, the template and the review Skill giving different answers for bulk commands.
 
 Check: aicli compares `App.RiskTier` with the registered effects (CLI-025). Review that SECURITY.md and `reference.risk_tier` agree, and that each command's effects match what it does (VER-004).
 
@@ -41,7 +41,7 @@ Check: aicli compares `App.RiskTier` with the registered effects (CLI-025). Revi
 
 Text the tool does not control (names, titles, descriptions, comments, message bodies, file contents, logs, upstream error text) is data. The tool MUST:
 
-- list every envelope path that carries it in `meta.untrusted` (CLI-046): in `data`, in previews (`target.label`, `changes`), in receipts and in `error.details` (`upstream_message`, `candidates[].label`); and list it per schema in `reference` (`untrusted_fields`);
+- list every envelope path that carries it in `meta.untrusted` (CLI-046): in `data` (a `ref` that embeds such text included), in previews (`target.label`, `changes`), in receipts and in `error.details` (`upstream_message`, `candidates[].label`); and list it per schema in `reference` (`untrusted_fields`);
 - never trigger an action, fetch a link or switch targets because of instructions or references inside such text;
 - build every field an agent acts on (`message`, `next_action`, `did_you_mean`, `usage`, `resume`, `lookup`, a notice's `command`) only from values it controls: registry paths, validated refs and parameters, never upstream text.
 
@@ -49,7 +49,7 @@ Agents MUST treat such text as data and never follow instructions in it (SKL-007
 
 Why: the agent reads the whole response, so injected text competes with the user's request. In the 2026-10 gitlab-cli eval an MR description carried an injected instruction, and no trial in any arm, with the Skill or without it, followed it. Declaring paths once per response replaces v1's per-item `_untrusted`, which cost about 16 % more characters in a 50-item list response.
 
-Check: aicli tests that `meta.untrusted` survives `--fields`; R04 validates every envelope the conformance suite observes; review each schema's `untrusted_fields`; the VER-006 injected-instruction scenario.
+Check: aicli tests that `meta.untrusted` follows `--fields`; R04 validates every envelope the conformance suite observes; review each schema's `untrusted_fields`; the VER-006 injected-instruction scenario.
 
 ## Authority
 
@@ -120,12 +120,12 @@ At dry-run, at the refusal of a bare call and at confirm, the gate MUST refuse u
 - every non-`observe` effect of the command is in `effects`, and a dangerous command has `"dangerous": true` (`insufficient`);
 - when `targets` is present, a selector matches the target key (`insufficient`). `exact` matches an equal key. `subtree` matches an equal key, or a key that continues with `/`, `!`, `#`, `:` or `@`; a selector key that ends in one of those characters matches anything after it. So `ops/` covers `ops/n-42` and `acme/web` covers `acme/web!5`, but neither covers `ops-archive/n-1` or `acme/webstore`;
 - every destination in the preview matches a `destinations` entry (`insufficient`), by the destination rule, not the target rule (contract.json `scope.destination_match`). An entry containing `://` matches an equal destination, or one with the same scheme and host and a path at or below the entry's, compared by whole segments; a destination with user info, a query, a fragment or a dot segment matches only an equal entry. Any other entry (an email address, a handle, a channel id) matches only an equal destination, or, when the entry ends with `/`, a destination that continues after it at a `/` boundary. `@`, `:`, `#` and `!` are ordinary characters here, so `bob` does not cover `bob@evil.example`;
-- every local path the command writes, after resolving symlinks and `..`, lies inside `outputs` when it does not exist yet and inside `roots` when it does, so absent `roots` means nothing may be overwritten (`insufficient`, with `missing.outputs` or `missing.roots`); a junction or other reparse point in the path that cannot be resolved fails the check, and `WriteOutput` checks again when it writes;
+- every local path the command writes, after resolving symlinks and `..`, lies inside `outputs` when it does not exist yet and inside `roots` when it does, so absent `roots` means nothing may be overwritten (`insufficient`, with `missing.outputs` or `missing.roots`); a junction or other reparse point in the path that cannot be resolved fails the check, and `WriteOutput` and `OpenOutput` check again when they write. A command that declares `artifact` without `persist` never overwrites: an existing path is `E_VALIDATION` (`invalid_value`, `details.path`), at the dry-run and when it writes, not a scope refusal, since no grant could allow it;
 - fewer than `limits.max_operations` operations have been dispatched under this `scope_id`, counted in `scope-usage.json`, under its own lock, in the same step that consumes the token (`budget_spent`), so concurrent confirms cannot overrun it and pruning cannot refill it.
 
-The scope file's digest is bound into the token (CLI-054); a file changed between dry-run and confirm is `E_CONFLICT` `scope_changed` (CLI-057). Target keys MUST be canonical: one spelling per object after URL, name and alias resolution, so `ACME/Web` and `acme/web` are one key when the upstream treats them alike. Otherwise a second spelling could fall outside a selector the person wrote, or inside one they did not mean.
+The scope file's digest is bound into the token (CLI-054); a file changed between dry-run and confirm is `E_CONFLICT` `scope_changed` (CLI-057). Target keys MUST be canonical: one spelling per object after URL, name and alias resolution, so `ACME/Web` and `acme/web` are one key when the upstream treats them alike. Otherwise a second spelling could fall outside a selector the person wrote, or inside one they did not mean. A sub-resource's key continues its parent's (`acme/web#12/notes/99`, CLI-048), so a grant for the parent covers it.
 
-Why: re-checking at confirm makes a narrowed or revoked scope apply to tokens already issued. Boundary-aware matching keeps `ops` from covering `ops-archive`; a separate destination rule keeps a grant for one recipient from covering an address that merely starts with it; and resolving symlinks keeps a path inside `outputs` from writing somewhere else. In the 2.0 release review, a Windows junction under an allowed directory let a write land outside it, because Go's `filepath.EvalSymlinks` no longer follows junctions, and a grant of `outputs` alone let a command overwrite an existing file there.
+Why: re-checking at confirm makes a narrowed or revoked scope apply to tokens already issued. Boundary-aware matching keeps `ops` from covering `ops-archive`; a separate destination rule keeps a grant for one recipient from covering an address that merely starts with it; and resolving symlinks keeps a path inside `outputs` from writing somewhere else. In the 2.0 release review, a Windows junction under an allowed directory let a write land outside it, because Go's `filepath.EvalSymlinks` no longer follows junctions, and a grant of `outputs` alone let a command overwrite an existing file there. In the gitlab-cli pilot (2026-10), a download whose file already existed asked a person for a `roots` grant that could not help, because the command never overwrites.
 
 Check: G07, G10; aicli tests for each status, selector boundaries, destination matching, symlink escape and budget counting; review how the tool builds target keys.
 
@@ -166,7 +166,9 @@ No library can check the following, so review MUST:
 - compare each command's declared effects with what it does: a write declared `observe` skips the gate, the scope and the journal;
 - confirm that every input that shapes the request arrives as a declared parameter, a file input read through aicli (`ReadFileInput`) or the identity (account, host); a value read anywhere else at apply time (an environment variable, a config file, a path opened directly, a relative path resolved later) is not bound;
 - confirm that `Preview` only reads, and that `Apply` sends only what the preview described;
-- confirm that `NotDispatched` is returned only when nothing reached the upstream and `Rejected` only when the upstream definitively refused; anything uncertain stays an unknown outcome (CLI-015).
+- confirm that `NotDispatched` is returned only when nothing reached the upstream and `Rejected` only when the upstream definitively refused; anything uncertain stays an unknown outcome (CLI-015);
+- confirm that a lookup before `App.Write` reads nothing a confirmed write can change: it runs at every confirm before the token checks, so a target lookup belongs in `WriteSpec.ResolveTarget` (CLI-057);
+- confirm that text a command sends cannot carry effects the command does not declare: where the upstream runs commands written in free text (GitLab quick actions such as `/merge` or `/assign @x` in a comment or a description), `Preview` blocks such lines, or the command declares the effects they can cause.
 
 Why: v1 stated the right rule and let each tool implement it. The 2026-10 audit of the fleet's ten gated tools found the same failures in tool after tool:
 
@@ -175,7 +177,7 @@ Why: v1 stated the right rule and let each tool implement it. The 2026-10 audit 
 - eight let a token be reused when the single-use store failed, as v1 required, and four replayed re-encoded tokens;
 - two skipped the gate in text output mode, and some writes ran outside the gate or were declared as reads.
 
-Ten implementations produced ten sets of holes.
+Ten implementations produced ten sets of holes. The gitlab-cli pilot (2026-10) added one that no library can see: GitLab runs a `/merge` line in a comment as a command, so a command that posts comments could merge a merge request.
 
 Check: the conformance suite runs in CI with a sample for every write command (VER-001, G00 to G10); the fleet gate audit is re-run for each spec release (VER-007).
 
@@ -183,9 +185,9 @@ Check: the conformance suite runs in CI with a sample for every write command (V
 
 ### SEC-021 Secrets
 
-Values of parameters declared `secret` (CLI-024), credentials, and tokens derived from them MUST NOT appear in stdout, stderr, previews (shown as `"***"`), confirm tokens, operation records, logs, notices, error details or `reference` examples. A tool MUST NOT publish an unsalted hash of a secret, whole or truncated; where a fingerprint is needed to tell credentials apart, it MUST be a keyed hash (HMAC with a machine-local key). aicli binds secret values as HMAC digests under the confirm key and never stores them raw. It replaces with `***` every value it knows to be secret, also in its URL-escaped forms, in error messages and details (an HTTP client's error often quotes the request URL) and in debug lines: secret parameters, the flag of a secret setting and the literal twin of a secret file input (CLI-100, CLI-048), secret settings, and values the tool registers with `App.AddSecret` (a token read from the keyring).
+Values of parameters declared `secret` (CLI-024), credentials, and tokens derived from them MUST NOT appear in stdout, stderr, previews (shown as `"***"`), confirm tokens, operation records, logs, notices, error details or `reference` examples. A tool MUST NOT publish an unsalted hash of a secret, whole or truncated; where a fingerprint is needed to tell credentials apart, it MUST be a keyed hash (HMAC with a machine-local key). aicli binds secret values as HMAC digests under the confirm key and never stores them raw. It replaces with `***` every value it knows to be secret, also in its URL-escaped forms, in error messages and details (an HTTP client's error often quotes the request URL) and in debug lines: secret parameters, the flag of a secret setting and the literal twin of a secret file input (CLI-100, CLI-048), secret settings, and values the tool registers with `App.AddSecret` (a token read from the keyring). Secrets the upstream returns (a CI/CD variable's value, a key shown once) are never output either: a command reports that such a value exists and whether a write changed it, a read-back compares it in memory and shows `***`, and no flag shows it; a person reads it in the upstream's own interface. A flag is secret when any of its values can be (a variable's `--value`, masked or not).
 
-Why: an unsalted hash of a token or password can be matched or brute-forced offline, so publishing it leaks the secret. The 2026-10 fleet audit found a login dry-run that printed the full unsalted SHA-256 of an access token, and a token payload that carried an unsalted SHA-256 of an argument list including a password.
+Why: an unsalted hash of a token or password can be matched or brute-forced offline, so publishing it leaks the secret. The 2026-10 fleet audit found a login dry-run that printed the full unsalted SHA-256 of an access token, and a token payload that carried an unsalted SHA-256 of an argument list including a password. gitlab-cli 1.x showed CI/CD variable values behind a `--show-values` switch; its 2.0 pilot (2026-10) dropped the switch.
 
 Check: every credential-carrying parameter is listed in `Meta.Secrets`; the tool's tests run each write with a sentinel secret and search every envelope, record and log for the sentinel and for its unsalted SHA-256; review.
 
@@ -268,7 +270,7 @@ T0, every tool:
 
 - [ ] Tier in `reference.risk_tier` and SECURITY.md, at least the floor of the declared effects, worst case in one sentence (SEC-001)
 - [ ] External text listed in `meta.untrusted` and in each schema's `untrusted_fields`; fields agents act on built only from tool-controlled values (SEC-002)
-- [ ] No secret, and no unsalted hash of one, in output, previews, tokens, records, logs or examples (SEC-021)
+- [ ] No secret, and no unsalted hash of one, in output, previews, tokens, records, logs or examples, secrets the upstream returns included (SEC-021)
 - [ ] The tool connects only to its configured upstream and, in `update` and `doctor`, to its release source; no telemetry; any other destination listed in SECURITY.md (SEC-022)
 - [ ] Stored credentials follow the keyring pattern; env vars are the documented channel; no secret in config or settings files; `context.credentials.source` is truthful (SEC-040)
 - [ ] Signed checksums, in-process verification, dependency audits for every shipped ecosystem on merge and release, CI builds from tags, no install-time downloads (SEC-050)
@@ -285,7 +287,7 @@ T1, also:
 
 T2, also:
 
-- [ ] Irreversible and account-level commands declared dangerous; `deliver` and `configure` left dangerous (SEC-001)
+- [ ] Irreversible and account-level commands declared dangerous, bulk ones only when what they do is; `deliver` and `configure` left dangerous (SEC-001)
 - [ ] `deliver` previews list their destinations, and `destinations` is enforced (SEC-012)
 - [ ] Credential and profile commands declare `configure` (SEC-040)
 - [ ] The Skill stops before dangerous actions the user did not explicitly request (SKL-005)

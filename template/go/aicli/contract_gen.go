@@ -48,7 +48,7 @@ const (
 	// indexBudgetChars: reference --index budget.
 	indexBudgetChars = 8000
 	// commandBudgetChars: reference --command budget.
-	commandBudgetChars = 4000
+	commandBudgetChars = 6000
 )
 
 // codeSpec is one row of the core error-code table (contract.json error_codes.core).

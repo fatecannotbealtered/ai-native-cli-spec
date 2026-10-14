@@ -158,7 +158,7 @@ import (
 func main() { os.Exit(cmd.NewApp(cmd.NewClient()).Execute(os.Args[1:])) }
 ```
 
-`Execute` 会加上 `reference`、`context`、`doctor`、`changelog` 和 `operation`，设置了 `Update` 时还会加上 `update`；它恰好写出一个信封并返回退出码。`Update` 启用 aicli 的内置命令 `update`：`Repo` 填第 2 步中 `{{REPO_SLUG}}` 的值，`NPMPackage` 填 `{{NPM_PKG}}` 的值；通过其他渠道分发时设置 `GoPackage`、`PyPIPackage` 或 `BrewFormula`，发布工作流不是 `release.yml` 时设置 `Workflow`。绝不要自己编写 `update` 命令（CLI-070、CLI-071）。`Settings` 声明工具的设置，`app.Setting(cmd, name)` 依次从标志、`NOTES_CLI_<SETTING>`、`settings.json` 中当前生效的配置档和默认值解析它们；声明了设置时，aicli 还会加上 `--profile`（CLI-100、CLI-101）。可选的钩子：`Identity`（账号和主机，会绑定进令牌）、`DoctorChecks`、`ContextExtra`、`SkillDirs`（`doctor` 的 `version` 检查到哪里找已安装的 Skill，`update` 也同步那里的 Skill；默认是标准的 Agent Skill 目录）、`Shortcuts`、`ShortFlags`、`FlagAliases`、`FlagSynonyms` 和 `VerbSynonyms`（Agent 会做的那些猜测，CLI-022）、`ExtCodes`（扩展错误码，CLI-018）。
+`Execute` 会加上 `reference`、`context`、`doctor`、`changelog` 和 `operation`，设置了 `Update` 时还会加上 `update`；它恰好写出一个信封并返回退出码。`Update` 启用 aicli 的内置命令 `update`：`Repo` 填第 2 步中 `{{REPO_SLUG}}` 的值，`NPMPackage` 填 `{{NPM_PKG}}` 的值；通过其他渠道分发时设置 `GoPackage`、`PyPIPackage` 或 `BrewFormula`，发布工作流不是 `release.yml` 时设置 `Workflow`。绝不要自己编写 `update` 命令（CLI-070、CLI-071）。`Settings` 声明工具的设置，`app.Setting(cmd, name)` 依次从标志、`NOTES_CLI_<SETTING>`、`settings.json` 中当前生效的配置档和默认值解析它们；声明了设置时，aicli 还会加上 `--profile`（CLI-100、CLI-101）。可选的钩子：`Identity`（账号和主机，会绑定进令牌）、`DoctorChecks`、`ContextExtra`、`SkillDirs`（`doctor` 的 `version` 检查到哪里找已安装的 Skill，`update` 也同步那里的 Skill；默认是标准的 Agent Skill 目录）、`ShortFlags`、`FlagAliases`、`FlagSynonyms` 和 `VerbSynonyms`（Agent 会做的那些猜测，CLI-022；根级快捷方式用 `app.AddShortcut` 添加，只嵌套在一个父级下的名词每个一个）、`ExtCodes`（扩展错误码，CLI-018）。
 
 ### 6. 注册命令，写第一个读命令
 
@@ -204,7 +204,7 @@ func addNoteCommands(app *aicli.App, store Store) {
 
 ### 7. 写第一个写命令
 
-写命令声明一个非 `observe` 的效果，并经过 `app.Write`：预演（dry-run）、拒绝响应、令牌、授权范围检查、操作记录和回执都由库处理。你提供只读的 `Preview`、`Apply`，以及目标的规范化键：把 Agent 输入的内容（ref、网页 URL、名字）解析成每个对象唯一的一种写法，再用 `aicli.SetResolved` 绑定这种形式。这样一来，`note update <url>` 和 `note update <ref>` 就是同一个请求（CLI-054），也是同一个授权范围目标（SEC-012）。`cmd/notes.go` 现在还要导入 `context`。
+写命令声明一个非 `observe` 的效果，并经过 `app.Write`：预演（dry-run）、拒绝响应、令牌、授权范围检查、操作记录和回执都由库处理。你提供只读的 `Preview`、`Apply`，以及目标的规范化键：把 Agent 输入的内容（ref、网页 URL、名字）解析成每个对象唯一的一种写法，再用 `aicli.SetResolved` 绑定这种形式。这样一来，`note update <url>` 和 `note update <ref>` 就是同一个请求（CLI-054），也是同一个授权范围目标（SEC-012）。一个 ref 带着几个输入时（项目和 iid），每个输入只把它自己那一部分绑定到它自己的标志上。`cmd/notes.go` 现在还要导入 `context`。
 
 ```go
 	update := &cobra.Command{Use: "update <ref>", Short: "Change a note's title", RunE: func(c *cobra.Command, _ []string) error {
@@ -248,7 +248,7 @@ func addNoteCommands(app *aicli.App, store Store) {
 			"notes-cli note update ops/n-42 --title Done --confirm <confirm_token>"}})
 ```
 
-`Apply` 返回错误就意味着结果未知（`E_OUTCOME_UNKNOWN`），除非你把它包装起来：什么都没发出去时用 `aicli.NotDispatched(err)`，上游拒绝且什么都没改时用 `aicli.Rejected(err)`。危险命令设置 `Dangerous: true`（删除、发送、共享；`deliver` 和 `configure` 效果默认就是危险的），它的示例要带 `--dangerous`。绝不要自己实现令牌、密钥或操作记录（CLI-050）。
+`Apply` 返回错误就意味着结果未知（`E_OUTCOME_UNKNOWN`），除非你把它包装起来：什么都没发出去时用 `aicli.NotDispatched(err)`，上游拒绝且什么都没改时用 `aicli.Rejected(err)`。危险命令设置 `Dangerous: true`（删除、发送、共享；`deliver` 和 `configure` 效果默认就是危险的），它的示例要带 `--dangerous`。绝不要自己实现令牌、密钥或操作记录（CLI-050）。`app.Write` 之前的查询（例如上面的 `store.Resolve`）在每次确认时都会再运行一次，而且先于写入门控自己的检查；如果它在写入完成后可能失败（`note delete` 删掉的笔记的 ref），就改为设置 `WriteSpec.ResolveTarget`，写入门控在令牌检查之后才调用它，这样重复的确认仍然得到 `token_used`（CLI-057）。
 
 ### 8. 添加符合性测试和 Skill
 
@@ -316,7 +316,7 @@ func (m *mainTB) Fatalf(format string, args ...any) { m.Errorf(format, args...) 
 func (m *mainTB) Logf(string, ...any)               {}
 ```
 
-套件对每个写命令运行写入门控检查（缺少样例的写命令会让它失败），校验每个信封，并检查 `reference`、命令树形状、用法错误、`context`、`doctor` 和 `operation`（VER-001、VER-002）。只要有命令没被你的任何测试执行过，`TestMain` 里的 `CheckCoverage` 就会失败（R06、VER-003）。它只在完整运行之后执行，所以 `make conformance`（`go test -run Conformance`）和其他带过滤的运行会跳过它，而不是让它失败；`template/go/example/notes_test.go` 的接法相同。`Scope` 为 nil 时，正向检查会被授予所有效果；有 `deliver`、`artifact` 或 `persist` 命令的工具要设置 `Scope`，写明其样例用到的 `destinations` 或 `outputs`（SEC-012）。每个命令的行为矩阵由你自己补上（VER-004），并在这些测试里把 `App.StateDir` 设为 `t.TempDir()`，这样没有测试会碰到用户的密钥、操作记录或授权范围文件（REPO-073）。
+套件对每个写命令运行写入门控检查（缺少样例的写命令会让它失败），校验每个信封，并检查 `reference`、命令树形状、用法错误、`context`、`doctor` 和 `operation`（VER-001、VER-002）。只要有命令没被你的任何测试执行过，`TestMain` 里的 `CheckCoverage` 就会失败（R06、VER-003）。它只在完整运行之后执行，所以 `make conformance`（`go test -run Conformance`）和其他带过滤的运行会跳过它，而不是让它失败；`template/go/example/notes_test.go` 的接法相同。`Scope` 为 nil 时，正向检查会被授予所有效果；有 `deliver`、`artifact` 或 `persist` 命令的工具要设置 `Scope`，写明其样例用到的 `destinations` 或 `outputs`，只有样例会覆盖文件时才加上 `roots`；从不覆盖文件的样例，由 `Reset` 删掉它的输出文件（SEC-012、VER-001）。每个命令的行为矩阵由你自己补上（VER-004），并在这些测试里把 `App.StateDir` 设为 `t.TempDir()`，这样没有测试会碰到用户的密钥、操作记录或授权范围文件（REPO-073）。
 
 然后是 Skill：
 

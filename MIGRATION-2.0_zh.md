@@ -27,11 +27,10 @@ func NewApp(env func(string) string) *aicli.App {
 		Root: newRootCmd(), Changelog: gitlabcli.ChangelogMarkdown, Env: env,
 		Identity:     gitlabIdentity,     // redacted account and host of the resolved credentials
 		DoctorChecks: gitlabDoctorChecks, // credentials, connectivity
-		Shortcuts:    map[string][]string{"branch": {"repo", "branch"}, "member": {"project", "members"}},
 		ShortFlags:   map[string]string{"p": "project", "R": "project"},
 		FlagAliases:  map[string]string{"repo": "project"},                  // accepted
 		FlagSynonyms: map[string][]string{"all": {"limit"}}}                 // suggested
-	registerCommands(app) // step 3
+	registerCommands(app) // step 3; each group adds its own root shortcuts with app.AddShortcut
 	return app
 }
 
@@ -46,6 +45,7 @@ func main() { os.Exit(cmd.NewApp(os.Getenv).Execute(os.Args[1:])) }
 | 读命令里的 `handleAPIError(err, jsonMode)` | 一个 `readError(err)` 辅助函数，返回 `aicli.FromHTTP(apiErr.StatusCode, message, apiErr.Error(), 0)`，其中的 `message` 是写给模型的一句话（CLI-017）；状态码 `0`（没有建立连接）得到 `E_NETWORK`（CLI-016） |
 | `failWithCode`、`emitError`、退出码常量、`exitCodeForStatus` | `aicli.NewError(code, message, details)` 及各个构造函数；库会补上退出码、`retryable`，以及默认的 `dispatch_state` 和 `next_action`（CLI-010、CLI-011） |
 | `--format`、`--json`、`--compact`、`--fields` 的处理；`cmd/agent.go` 中的 Agent 安全开关、手工维护的别名和建议 | App 和上面那些字段（CLI-003、CLI-022）；ref 和 URL 的解析仍留在工具里（CLI-048） |
+| `--show-values` 和 `GITLAB_CLI_ALLOW_SHOW_VALUES`（从 GitLab 读出的 CI/CD 变量值） | 不需要：上游返回的机密绝不输出（SEC-021）；命令只报告值是否存在，写操作的回读在内存中比较并显示 `***`，要看值的人到 GitLab 里去看 |
 
 ## 3. 用 Meta 注册每个命令
 
@@ -57,7 +57,7 @@ app.Register(mrUpdateCmd, aicli.Meta{
 	Output: "merge_request", ErrorCodes: []string{"E_USAGE", "E_NOT_FOUND", "E_FORBIDDEN", "E_CONFLICT", "E_OUTCOME_UNKNOWN"},
 	Examples: []string{"gitlab-cli mr update 5 --project acme/web --assignee carol --dry-run",
 		"gitlab-cli mr update 5 --project acme/web --assignee carol --confirm <confirm_token>"},
-	Positional: "iid", FileInputs: map[string]string{"description-file": "description"},
+	Positional: "mr", FileInputs: map[string]string{"description-file": "description"},
 })
 app.Schema("merge_request", aicli.SchemaDef{Shape: "object",
 	Fields:        []string{"ref", "title", "state", "assignees", "labels", "pipeline_status", "updated_at", "web_url", "description"},
@@ -65,12 +65,16 @@ app.Schema("merge_request", aicli.SchemaDef{Shape: "object",
 	Untrusted:     []string{"title", "description"}})
 ```
 
-- **效果**（Effects）取代 `type` 和 `permissionTier`（CLI-025）：读是 `observe`；改动上游是 `change`；发送、发布、通知、共享是 `deliver`；权限、设置、CI/CD 变量以及工具自己的登录和配置档是 `configure`；新建本地文件是 `artifact`；覆盖已有文件是 `persist`。`deliver` 和 `configure` 默认是危险的；其他不可逆的命令（`repo branch delete`、`mr merge`）要标上 `Dangerous: true`。`RiskTier` 至少要达到这些效果所要求的风险档（SEC-001）。效果按命令声明：gitlab-cli 的 `job artifacts --output` 会写文件，所以它要声明 `artifact`（能覆盖文件时声明 `persist`），或者把写文件挪到单独的命令里。
-- **位置参数**按对应的 flag 绑定：声明 `--iid`，并在 `Positional` 中写上它的名字（CLI-023）。机密 flag（`auth login --token`、掩码变量的 `--value`）放进 `Secrets`；文件和 stdin 输入放进 `FileInputs`；批量命令设置 `BatchFlag: "ids"`；`RawOutput` 标记支持 `--format raw` 的命令。
-- **默认字段**来自用户会问的问题（CLI-040）。评测中，MR 列表项带上指派人、标签和流水线状态，再加上 `--pipeline-status`，把「哪些 MR 的流水线失败了」的调用次数从 13.6 降到了 6.1。
+- **效果**（Effects）取代 `type` 和 `permissionTier`（CLI-025）：读是 `observe`；改动上游是 `change`，评论也是，尽管 GitLab 会给参与者发邮件；发送、发布、通知、共享是 `deliver`；权限、设置、CI/CD 变量以及工具自己的登录和配置档是 `configure`；新建本地文件是 `artifact`；覆盖已有文件是 `persist`。`deliver` 和 `configure` 默认是危险的；其他无法撤销的命令（`repo branch delete`、`mr merge`）要标上 `Dangerous: true`。批量命令只有在它做的事危险时才是危险的：`issue bulk close` 不是，因为每个 issue 都能重新打开。命令本身不危险、某次计划却危险时（`repo commit create` 删除文件），设置 `Preview.Dangerous`。`RiskTier` 至少要达到这些效果所要求的风险档（SEC-001）。效果按命令声明：gitlab-cli 的 `job artifacts --output` 会写文件，所以它要声明 `artifact`（能覆盖文件时声明 `persist`），或者把写文件挪到单独的命令里。1.x 读命令的 `--output`（`repo file get --output`）同样要声明 `artifact`；Agent 想不经写入门控拿到字节，就用 `--format raw` 加 shell 重定向。
+- **本地文件**（CLI-042、SEC-012）：经过写入门控写文件，绝不在门控之前写。下载时，目标仍是上游资源（作业，`acme/web/-/jobs/42`），文件列在 `Preview.Outputs` 中；在 `Apply` 中，`app.OpenOutput(path, overwrite)` 把数据流写进目标旁边的临时文件，由 `Commit` 移到位，由 `Abort` 删除。`app.WriteOutput` 让内存中的小结果单独经过写入门控。新文件需要授权范围的 `outputs`，已有文件需要 `roots` 和 `persist` 效果；没有 `persist` 时，路径已存在就返回 `E_VALIDATION`，什么都不覆盖。只有确实要覆盖文件的命令才声明 `persist`，因为声明之后每次授予都得包含它。
+- **位置参数**按对应的 flag 绑定（CLI-023），而且一个命令最多绑定一个位置参数（R01 会拒绝第二个）。1.x 中带两个位置参数的命令，要把第二个改成 flag：`issue assign <iid> <user>` 改为 `issue assign <issue> --assignee <user>`，旧写法得到 `unexpected_argument`，其 `next_action` 是改正后的命令行，发布说明要列出这项变化（第 10 步）。资源用一个以它命名的字符串 flag 接收（`--mr`），并写在 `Positional` 中，这样 ref、网页 URL 和单独的 iid 都能解析（CLI-048）；`Int` 类型的 `--iid` 会拒绝 `acme/web!5`。用 `SetResolved` 让每个输入只绑定它自己那一部分：iid 绑定为 `mr`，项目绑定为 `project`，绝不把整个 ref 和项目并列绑定，否则 G03 改动 `--project` 时，报告出来的是 `--mr`（CLI-054）。
+- **机密和输入**：只要一个 flag 的某些取值可能是机密，它就是机密 flag，所以 `auth login --token` 和每个变量写命令的 `--value`，无论是否掩码，都放进 `Secrets`（SEC-021）；文件和 stdin 输入放进 `FileInputs`；批量命令设置 `BatchFlag: "ids"`；`RawOutput` 标记支持 `--format raw` 的命令。
+- **默认字段**来自用户会问的问题（CLI-040）。评测中，MR 列表项带上指派人、标签和流水线状态，再加上 `--pipeline-status`，把「哪些 MR 的流水线失败了」的调用次数从 13.6 降到了 6.1。这个默认字段每个合并请求要多一次 GitLab 读取，因为 GitLab 的合并请求列表没有流水线状态：这样的字段只在响应会显示它时才读取（`aicli.WantsField`），并行读取，并设一个由 `scope` 写明的上限。不值得这个开销的字段移出默认字段（用 `--fields +additions` 加上）。写操作的 `result` 使用同样的默认字段。
+- **等待**：1.x 中无限期等待的命令（`pipeline wait`、`job wait`），改为状态读取命令上的 `--wait <duration>`（`pipeline get --wait 90s`），时长远低于运行框架的 2 分钟上限（CLI-049），等待结束时状态还没变化，就附一条通知；旧命令保留为 `get --wait` 的弃用形式（CLI-081）。失败的流水线是数据（`status: failed`），不是退出码：1.x 中失败时的退出码 6 和超时时的退出码 8 都已去掉，`ok` 跟随这次读取。
+- **会起作用的文本**：GitLab 会把评论、回复或描述中 `/merge`、`/close` 或 `/assign @x` 这样的行当作命令执行（quick action），所以发评论的命令可能合并一个合并请求，从不可信内容里复制来的一行也可能起作用（SEC-002）。在 `Preview` 中阻止这样的行（代码块以外、以这类命令开头的行，给出 `quick_action` 阻止项），或者声明它们可能造成的效果（SEC-020）。
 - **示例**：每个写命令都展示预演（dry-run）和确认这一对，每个危险命令都带 `--dangerous`（符合性检查 R02）。
 - **成熟度**取代 `release_readiness`（CLI-027、VER-005）：有录制的真实运行覆盖过的命令是 `verified`，只用 mock 测过的是 `experimental`，没测过的是 `draft`；`stable` 需要 Agent 评测（VER-006）。
-- **分批迁移。** 大的工具可以一组一组地迁移：用构建标签排除尚未迁移的文件（`go mod tidy` 仍会读取它们，所以在最后一组完成之前，保留它们导入的包），并且每个快捷方式、别名和同义词都与它指向的那一组一起加入，因为命令树检查会拒绝目标尚未注册的快捷方式。
+- **分批迁移。** 大的工具可以一组一组地迁移：用构建标签排除尚未迁移的文件（`go mod tidy` 仍会读取它们，所以在最后一组完成之前，保留它们导入的包），并且每个快捷方式、别名和同义词都在它指向的那一组的注册函数里加入，因为命令树检查会拒绝目标尚未注册的快捷方式。只嵌套在一个父级下的每个名词，都在那里加一个根级快捷方式（`app.AddShortcut("branch", "repo", "branch")`；repo 组是 `branch`、`file`、`commit` 和 `tree`）；嵌套在多个父级下的名词（`comment` 同时在 `issue` 和 `mr` 之下）不加，或者加一个带限定的词（`issue-comment`），因为 `AddShortcut` 会拒绝已被占用的词（CLI-022）。
 - **命令树形状**（CLI-021）：内置名称（`reference`、`context`、`doctor`、`changelog`、`update`、`operation`、`help`、`version`）是保留的；一个路径要么是命令组，要么是命令，不能两者都是（符合性检查 R02）。
 
 ## 4. 让每个写入都经过 App.Write
@@ -83,16 +87,12 @@ app.Schema("merge_request", aicli.SchemaDef{Shape: "object",
 | 手工拼装的 `detail` / `confirmPayload` map | 不需要：写入门控绑定解析后的调用（CLI-054） |
 | 复制进 payload 的 `updatedAt` 或 `sha` | `Preview.BaseVersion` 和 `BaseSource`，确认时重新读取（`state_drift`，CLI-057） |
 | `isDangerousCommand`、`dangerousFlagRequired` | `Meta.Dangerous`（CLI-056） |
-| `prepareBatchWrite`、`parsePluralFlag`、`batchItem` | `app.WriteBatch(cmd, aicli.BatchSpec{Items: ...})` 配合 `Meta.BatchFlag`（CLI-063） |
+| `prepareBatchWrite`、`parsePluralFlag`、`batchItem` | `app.WriteBatch(cmd, aicli.BatchSpec{Items: ...})` 配合 `Meta.BatchFlag`（CLI-063）；原生批量调用（一次提交多个文件）用 `ApplyAll` 和 `MaxPerCall` |
 | 加进 payload 的 `--idempotency-key` | 声明这个 flag；Apply 通过 `op.IdempotencyKey` 拿到它（CLI-062） |
 
 ```go
 RunE: func(cmd *cobra.Command, args []string) error {
-	project, iid, req, err := mrUpdateInputs(cmd) // flags only, no network
-	if err != nil {
-		return err
-	}
-	client, err := newClient(app)
+	project, iid, req, err := mrUpdateInputs(cmd) // flags only, no network; binds mr (the iid) and project with SetResolved
 	if err != nil {
 		return err
 	}
@@ -100,6 +100,10 @@ RunE: func(cmd *cobra.Command, args []string) error {
 	return app.Write(cmd, aicli.WriteSpec{
 		Target: aicli.Target{Key: fmt.Sprintf("%s!%d", project, iid), Kind: "merge_request"},
 		Preview: func(ctx context.Context) (aicli.Preview, error) { // read-only; runs at dry-run, refusal and confirm
+			client, err := newClient(app) // built inside the gate, after it has checked the profile
+			if err != nil {
+				return aicli.Preview{}, err
+			}
 			cur, err := client.MergeRequests.Get(ctx, project, iid)
 			if err != nil {
 				return aicli.Preview{}, readError(err)
@@ -111,23 +115,27 @@ RunE: func(cmd *cobra.Command, args []string) error {
 				BlockedBy: blockedUnlessOpen(cur), BaseVersion: cur.UpdatedAt, BaseSource: "updated_at"}, nil
 		},
 		Apply: func(ctx context.Context, op aicli.Op) (aicli.Result, error) {
+			client, err := newClient(app) // an *aicli.Error; nothing was sent
+			if err != nil {
+				return aicli.Result{}, aicli.NotDispatched(err)
+			}
 			mr, err := client.MergeRequests.Update(ctx, project, iid, req.WithAssigneeID(assigneeID))
 			if err != nil {
 				return aicli.Result{}, classifyWriteError(err)
 			}
-			observed := map[string]any{"assignees": usernames(mr.Assignees), "labels": mr.Labels}
-			mismatched := mismatches(req, observed) // requested fields the read-back disagrees with
-			return aicli.Result{Outcome: aicli.Outcome{Execution: "completed", Change: "applied", Delivery: "not_applicable",
-				Persistence: "not_applicable", Verification: verdict(mismatched)}, // "passed" or "failed"
-				Observed: observed, Mismatched: mismatched, Data: flattenMR(mr)}, nil
+			// The gate fills the outcome and compares Observed with the preview's changes.
+			return aicli.Result{Observed: map[string]any{"assignees": usernames(mr.Assignees), "labels": mr.Labels},
+				Data: flattenMR(mr)}, nil
 		},
 	})
 },
 ```
 
-- **目标键**是规范化的（SEC-012），而授权范围的子树选择器只在 `/`、`!`、`#`、`:` 和 `@` 处断开。没有这类符号的对象，给它一个与网页路径对应的路径式键，例如 `acme/web/-/labels/bug` 或 `acme/web/-/milestones/3`，这样对 `acme/web` 的授予就能覆盖它；输入时仍然接受 GitLab 的 `~bug` 和 `%3` 形式。
+- **目标键**是规范化的（SEC-012），而授权范围的子树选择器只在 `/`、`!`、`#`、`:` 和 `@` 处断开。没有这类符号的对象，给它一个与网页路径对应的路径式键，例如 `acme/web/-/labels/bug` 或 `acme/web/-/milestones/3`，这样对 `acme/web` 的授予就能覆盖它；输入时仍然接受 GitLab 的 `~bug` 和 `%3` 形式。子资源的键接在父资源的键之后，写作 `<parent ref>/<collection>/<id>`（`acme/web#12/notes/99`、`acme/web!5/discussions/<id>`），这样对 `acme/web#12` 的授予就能覆盖它的评论；输入时仍然接受带锚点的网页 URL，例如 `…/-/issues/12#note_99`（CLI-048）。
+- **复合键**：由两部分命名、两部分都可能含 `/` 的资源（文件：它的分支和路径），以它的网页路径为键，即 `acme/web/-/blob/<branch>/<path>`，这样对 `acme/web/-/blob/develop/docs` 的授予覆盖的是那个分支的 `docs/`；分支名可能含 `/` 的输入，在 `ResolveTarget` 中查询分支列表来拆分。一次同时改动多个资源的写操作（一次提交多个文件），每个资源一个目标，通过 `BatchSpec.ApplyAll` 一次调用发出。让键的前缀与人授予的范围一致：对 `acme/web/-/branches/<name>` 的授予覆盖创建和删除这个分支，不覆盖向它提交。
+- **写入之前的查询。** `App.Write` 之前的代码在每次确认时都会运行，而且先于写入门控自己的检查：如果那里的查询在写入完成后会失败（`variable delete` 删掉的变量），重复的确认就会得到它自己的 `E_NOT_FOUND`，把 `token_used` 掩盖掉。在那里把名称解析成规范形式再绑定是可以的；用来确定目标的查询（变量的环境范围，或者没有 `--namespace` 的 `project create` 所需的账户自己的命名空间，这是 `Identity` 提供不了的）要放进 `WriteSpec.ResolveTarget`（批量为 `BatchSpec.ResolveItems`），写入门控在令牌检查之后才调用它（CLI-057）。从 GitLab 读出、又要放进键里的值（例如用户名），要像检查用户输入的路径一样检查它（SEC-002）。
 - **Preview** 只读。在这里把名字解析成 ID，这样预览展示的就是将要发送的内容。`Changes` 列出请求要改的每个字段，带 `Before`/`After`（集合用 `Add`/`Remove`）。写入无法执行时（MR 已合并、分支受保护），返回 `CanApply: false` 并附上 `BlockedBy`；写入门控随后返回不带令牌的预览。绝不要把机密值放进 `Changes`。
-- **Apply** 只发送一次写入，然后报告它观察到的结果：来自写入响应或重新读取的已改字段放进 `Observed`。评测中，写入结果带上已改字段之后，最后一次写入之后的核实调用从 1.00 次降到了 0.37 次。你永远不用自己设置 `ok`：写入门控会根据回执推导出它和错误码（CLI-059）。
+- **Apply** 只发送一次写入，然后报告它观察到的结果：来自写入响应或重新读取的已改字段放进 `Observed`。评测中，写入结果带上已改字段之后，最后一次写入之后的核实调用从 1.00 次降到了 0.37 次。你永远不用自己设置 `ok`：写入门控会根据回执推导出它和错误码（CLI-059）。`Verification` 留空：写入门控会拿 `Observed` 和预览中的变更比较。它比较不了的时候（字段被清空为 null；状态可能是几个值之一，例如重试后的 `pending` 或 `running`），给这项变更写 `Note` 而不写 `After`，再根据回读自己设置 `Outcome.Verification`。
 - **对 Apply 的错误分类**，依据是什么到达了上游（CLI-015）。拿不准时，原样返回错误、不做包装：结果未知是安全的，错报「未执行」则会招来重复写入。
 
 ```go
@@ -158,21 +166,23 @@ func classifyWriteError(err error) error {
 func TestConformance(t *testing.T) {
 	gl := newFakeGitLab(t)   // httptest server that counts non-GET requests
 	artifacts := t.TempDir() // where the artifact-writing sample puts its file
+	output := filepath.Join(artifacts, "artifacts.zip")
 	aicli.RunConformance(t, aicli.Harness{
 		NewApp: func(env map[string]string) *aicli.App { return newTestApp(t, gl.URL, env) }, // fresh App, state in t.TempDir()
 		Writes: gl.Writes,
-		Reset:  gl.Reset,
+		Reset:  func() { gl.Reset(); os.Remove(output) }, // job artifacts never overwrites: each check starts without its file
 		Samples: map[string][]string{ // one valid invocation per write command, without gate flags
 			"mr update":          {"5", "--project", "acme/web", "--assignee", "carol"},
 			"repo branch delete": {"old-experiment", "--project", "acme/web"},
 			"issue bulk update":  {"--project", "acme/web", "--ids", "1,2", "--add-labels", "needs-triage"},
-			"job artifacts":      {"42", "--project", "acme/web", "--output", filepath.Join(artifacts, "artifacts.zip")},
+			"job artifacts":      {"42", "--project", "acme/web", "--output", output},
 		},
 		// Every effect your writes declare, plus outputs for artifact and persist
-		// commands and destinations for deliver commands (SEC-012).
+		// commands, roots only when a sample overwrites a file (persist), and
+		// destinations for deliver commands (SEC-012).
 		Scope: map[string]any{"scope_id": "scp_conformance", "tool": "gitlab-cli", "granted_by": "conformance",
 			"granted_at": "2026-10-12T00:00:00Z", "expires_at": nil,
-			"effects": []string{"change", "configure", "artifact"}, "dangerous": true, "outputs": []string{artifacts}, "roots": []string{artifacts}}, // roots: the checks repeat the sample, which overwrites its file
+			"effects": []string{"change", "configure", "artifact"}, "dangerous": true, "outputs": []string{artifacts}},
 	})
 }
 ```
@@ -220,7 +230,7 @@ app.Update = &aicli.UpdateConfig{
 
 ## 10. 设置、配置档、标志名和弃用
 
-- **设置**（CLI-100）：在 `App.Settings` 中声明设置，用 `app.Setting(cmd, name)` 读取，它依次取标志、`GITLAB_CLI_<SETTING>`、当前生效的配置档和默认值；删掉工具自己的配置加载代码。aicli 从 `~/.gitlab-cli/settings.json`（或 `GITLAB_CLI_SETTINGS_FILE`）读取设置，采用 CLI-100 规定的严格结构，拒绝含有未知键或机密的文件（每个读取设置的命令都返回 `E_CONFIG`），并且绝不读取 1.x 的 `~/.gitlab-cli/config.json`。把 1.x 中的值迁移到 `settings.json` 的配置档里，其中的机密挪进钥匙串（SEC-040）：提供一个经过写入门控、负责迁移的 `configure` 命令，或者在发布说明中写明迁移步骤。gitlab-cli 1.x 把令牌加密保存，所以用户要用 `auth login` 重新登录，或者设置 `GITLAB_CLI_TOKEN`；`auth login` 声明 `Meta.NewProfile`，用 `app.SetProfileSettings` 写入主机，并且作为危险的 `configure` 写操作，第一次需要一个授予 `configure` 和 `dangerous` 的授权范围，发布说明必须写明这一点。
+- **设置**（CLI-100）：在 `App.Settings` 中声明设置，用 `app.Setting(cmd, name)` 读取，它依次取标志、`GITLAB_CLI_<SETTING>`、当前生效的配置档和默认值；删掉工具自己的配置加载代码。aicli 从 `~/.gitlab-cli/settings.json`（或 `GITLAB_CLI_SETTINGS_FILE`）读取设置，采用 CLI-100 规定的严格结构，拒绝含有未知键或机密的文件（每个读取设置的命令都返回 `E_CONFIG`），并且绝不读取 1.x 的 `~/.gitlab-cli/config.json`。把 1.x 中的值迁移到 `settings.json` 的配置档里，其中的机密挪进钥匙串（SEC-040）：提供一个经过写入门控、负责迁移的 `configure` 命令，或者在发布说明中写明迁移步骤。gitlab-cli 1.x 把令牌加密保存，所以用户要用 `auth login` 重新登录，或者设置 `GITLAB_CLI_TOKEN`；`auth login` 声明 `Meta.AllowUnknownProfile`（`auth logout` 也声明它，以便配置档从文件中删掉之后清理残留），用 `app.SetProfileSettings` 写入主机，这个函数会把第一个配置档设为默认，并且作为危险的 `configure` 写操作，第一次需要一个授予 `configure` 和 `dangerous` 的授权范围，发布说明必须写明这一点。
 
 ```go
 app.Settings = []aicli.Setting{
@@ -229,10 +239,10 @@ app.Settings = []aicli.Setting{
 }
 ```
 
-- **配置档**（CLI-101）：同时使用公司 GitLab 和 gitlab.com 的用户，每个各用一个配置档，不必开两个 shell。aicli 会加上 `--profile` 和 `GITLAB_CLI_PROFILE`，把当前配置档和每个设置绑定进令牌，在任何命令运行之前拒绝未知的配置档，并在 `context` 中报告当前生效的配置档，所以删掉工具自己用来切换账户的标志。钥匙串条目按 `app.Profile()` 区分，配置档的主机写进 `app.SettingsPath()`。登录类命令是 `auth login`（`configure`；令牌放进钥匙串，主机写进配置档）、`auth status`（向 GitLab 核验令牌的读命令）和 `auth logout`（`configure`）。
-- **标志名**（CLI-028、CLI-029）：把标志改成共享词汇中的名称（`--per-page` 改为 `--limit`，`--search` 改为 `--query`，分页令牌改为 `--cursor`），每个旧名称都作为已弃用的标志（`Meta.DeprecatedFlags`）继续可用，直到下一个 MAJOR 版本；对常见的同义写法，aicli 已经会建议标准名称。标准动词也要核对：没有匹配的 `list` 返回空页，`update` 只修改给出的字段，`delete` 的目标不存在时在预演阶段返回 `E_NOT_FOUND`。
+- **配置档**（CLI-101）：同时使用公司 GitLab 和 gitlab.com 的用户，每个各用一个配置档，不必开两个 shell。aicli 会加上 `--profile` 和 `GITLAB_CLI_PROFILE`，把当前配置档和每个设置绑定进令牌，在任何命令运行之前拒绝未知的配置档，并在 `context` 中报告当前生效的配置档，所以删掉工具自己用来切换账户的标志。钥匙串条目按 `app.Profile()` 区分，配置档的主机写进 `app.SettingsPath()`，用 `app.Profiles()` 列出配置档。登录类命令是 `auth login`（`configure`；令牌放进钥匙串，主机写进配置档）、`auth status`（向 GitLab 核验令牌的读命令）和 `auth logout`（`configure`）。
+- **标志名**（CLI-028、CLI-029）：把标志改成共享词汇中的名称（`--per-page` 改为 `--limit`，`--search` 改为 `--query`，分页令牌改为 `--cursor`），每个旧名称都继续可用，直到下一个 MAJOR 版本：`Meta.RenamedFlags` 把旧名映射到新名，绑定、标记和通知都由 aicli 替你完成（CLI-081）。只适合部分命令的别名（在分支命令上用 `--branch` 表示 `--name`）放进 `Meta.FlagAliases`，不要放进 `App.FlagAliases`，后者对所有带目标标志的命令都生效。用 `aicli.ParseDuration` 和 `aicli.ParseTime` 解析时长和时间。位置参数不能像标志那样保留为弃用形式：发布说明要列出 1.x 中形状变了的每个命令（第二个位置参数改成了标志，`wait` 命令并进了 `get --wait`）。对常见的同义写法，aicli 已经会建议标准名称。标准动词也要核对：没有匹配的 `list` 返回空页，`update` 只修改给出的字段，`delete` 的目标不存在时在预演阶段返回 `E_NOT_FOUND`。
 - **弃用**（CLI-081）：将要移除的命令设置 `Meta.Deprecated`，写明替代写法。aicli 会在帮助和 `reference` 中标出它，每次使用都附加一条 `deprecated` 通知，并把它从 Skill 的命令地图中略去。在 `CHANGELOG.md` 中把它列在 `Deprecated` 之下，至少保留一个 MINOR 版本和 90 天，只在 MAJOR 版本中移除。
-- **诊断与网络**（CLI-102、CLI-110）：把任何 `--verbose` 或 `--debug` 标志换成 `GITLAB_CLI_DEBUG` 和 `app.Debugf`。这些标志在这次发布中直接删除：与改名的标志不同，它们不保留为弃用标志，因为 CLI-102 禁止它们。把从钥匙串读出的令牌用 `app.AddSecret` 登记，aicli 就会在错误和调试行中把它脱敏。给每个 HTTP 客户端设置最长 30 s 的超时；只重试幂等的读取，最多两次，只在连接失败或 HTTP 429、502、503、504 之后重试，并遵守 `Retry-After`，但最多等 10 s（第 4 步）；发送 `User-Agent: gitlab-cli/<version> aicli/<spec version>`；遵守 `HTTPS_PROXY`、`HTTP_PROXY` 和 `NO_PROXY`；用私有 CA 的用户改用 `GITLAB_CLI_CA_FILE`，不再提供任何关闭 TLS 校验的开关。除重试之外，这些都由 `app.HTTPTransport()` 和 `app.UserAgent()` 提供。
+- **诊断与网络**（CLI-102、CLI-110）：把任何 `--verbose` 或 `--debug` 标志换成 `GITLAB_CLI_DEBUG` 和 `app.Debugf`。这些标志在这次发布中直接删除：与改名的标志不同，它们不保留为弃用标志，因为 CLI-102 禁止它们。把从钥匙串读出的令牌用 `app.AddSecret` 登记，aicli 就会在错误和调试行中把它脱敏。给每个 HTTP 客户端设置最长 30 s 的超时；只重试幂等的读取，最多两次，只在连接失败或 HTTP 429、502、503、504 之后重试，并遵守 `Retry-After`，但最多等 10 s（第 4 步）；发送 `User-Agent: gitlab-cli/<version> aicli/<spec version>`；遵守 `HTTPS_PROXY`、`HTTP_PROXY` 和 `NO_PROXY`；用私有 CA 的用户改用 `GITLAB_CLI_CA_FILE`，不再提供任何关闭 TLS 校验的开关。除重试之外，这些都由 `app.HTTPTransport()`（它通过 `App.Env` 读取代理变量）和 `app.UserAgent()` 提供。
 - **对外连接**（SEC-022）：工具只连接配置的 GitLab 主机，以及在 `update` 和 `doctor` 中连接它的发布源。删掉任何遥测，并把其他目的地列进 `SECURITY.md`。
 - **README**（REPO-010、REPO-011）：加上 Configuration 一节，写明各项设置、设置文件及其配置档；再加上 Uninstall 一节，说明怎样移除包、`~/.gitlab-cli`、钥匙串条目（`gitlab-cli auth logout`）和 Skill 目录。
 
@@ -251,9 +261,12 @@ app.Settings = []aicli.Setting{
 ```
 
 - `schema_version` 是 `"2.0"`；JSON 默认紧凑输出，`--pretty` 输出缩进格式，`--compact` 仍然可用（CLI-002、CLI-003）。
-- 键名用 snake_case（CLI-007）：`webUrl` → `web_url`，`hasMore` → `has_more`，`pipelineStatus` → `pipeline_status`，`updatedAt` → `updated_at`。ID 是字符串；时间用带 `Z` 的 UTC。
-- `meta.untrusted` 在每个响应中列出一次外部内容的路径，来源是 schema 的 `Untrusted` 字段或 `app.OK(cmd, data, "data.description")`；从对象里删掉 `_untrusted`（CLI-046）。`meta` 里只有 `duration_ms`、`notices` 和 `untrusted`。
+- 键名用 snake_case（CLI-007）：`webUrl` → `web_url`，`hasMore` → `has_more`，`pipelineStatus` → `pipeline_status`，`updatedAt` → `updated_at`。ID 是字符串；时间用带 `Z` 的 UTC。以 `_at` 结尾的键放的是时间，所以放日期的键要改成 `_on`（GitLab 成员的 `expires_at` 为 `2026-12-31` 时，改为 `expires_on`），否则 R04 会失败。
+- `meta.untrusted` 在每个响应中列出一次外部内容的路径，来源是 schema 的 `Untrusted` 字段或 `app.OK(cmd, data, "data.description")`；从对象里删掉 `_untrusted`（CLI-046）。带着人写的文本的 ref（分支、tag、标签或文件名，例如 `acme/web/-/branches/<name>`）也是外部内容：把 `ref` 列进 schema 的 `Untrusted` 字段；提交的 ref 只是一个 SHA，不算。`meta` 里只有 `duration_ms`、`notices` 和 `untrusted`。
 - 列表（CLI-041）带 `items`、`count`、`has_more`，并配上 `next_cursor`、`next_offset` 或 `continuation_reason`，上游报告了总数时带 `total`，被截断时带 `truncated: true` 和 `truncated_reason`，还有 `scope` 和 `sort`，除 `offset` 外没有别的键（分页 schema 禁止其他键）：去掉 `limit`、`page` 和 `all`，把实际生效的上限和过滤条件放进 `scope` 回显。覆盖范围比名字所示更窄的列表要说明这一点：`project members` 只列直接成员，这曾导致一个参与评测的 Agent 把错误的信息告诉了用户。
+- 计数和排名第一的条目（CLI-044）：上游报告了总数时，列表返回 `total`，这样问「有多少」就不需要翻页。看看 Agent 会对每个列表问哪些汇总问题（开得最多的作者、按状态的计数、最近一次失败），把 1.x 命令缺少的那些放到工具里计算，做成过滤条件或单独的命令：分组计数是一页 `{<key>, count}` 条目，按 `count_desc` 排序，由 `scope` 说明统计了什么。新增命令是产品决定；返回 `total` 则是迁移的一部分。
+- `search` 在 `sort` 中写明它实际的顺序：只有上游按相关度排序时才写 `relevance`（CLI-029）。GitLab 只在启用高级搜索时这样排序，基础搜索按从新到旧列出 issue 和合并请求；工具判断不了这一页来自哪种搜索时，写 `upstream`，并在 `scope` 中说明。
+- 单个文件、单个 diff 或一份发布说明都可能超出 8,000 个字符的预算（CLI-042、CLI-043）：它的 JSON 形式只带一个有界的窗口（按行用 `--offset` 和 `--limit` 分页，diff 的文件按大小分页，消息在写明的长度处截断，并带 `<field>_truncated: true` 和一条通知），`--format raw` 带上完整的正文，长的描述不放进默认字段（用 `--fields +description` 加上）。
 - 每个资源都带一个 `ref`（`acme/web!5`），它也可以作为输入传回（CLI-048）。
 - 每个错误都有 `dispatch_state` 和 `next_action`。上游返回 403 时，如果知道所需角色，就加上 `details.required`（CLI-014）；评测中，拿到一个不带任何说明的 403 之后，Agent 要花 2 到 4 次调用去试探。
 - 已确认的写入返回 `operation_id`、`receipt` 和 `result`；部分成功的批量操作是 `ok: false`，并带 `E_PARTIAL`（CLI-059、CLI-063）。
@@ -299,8 +312,8 @@ app.Settings = []aicli.Setting{
 
 - [ ] `.agent/SPEC_VERSION` 是 `v2.0.0`；`node scripts/check-spec.js` 通过
 - [ ] 命令树按 App 构建；`main` 调用 `Execute`；没有自己的信封、退出码表或格式处理
-- [ ] 每个叶子命令都已注册，并带有效果、输出 schema、示例、成熟度和证据
-- [ ] 每个写入都经过 `App.Write` 或 `App.WriteBatch`；Apply 错误已分类；HTTP 客户端从不重试写入
+- [ ] 每个叶子命令都已注册，并带有效果、输出 schema、示例、成熟度和证据；每个命令一个位置参数，ref 的各部分各自绑定
+- [ ] 每个写入都经过 `App.Write` 或 `App.WriteBatch`；Apply 错误已分类；HTTP 客户端从不重试写入；对目标的查询放在 `ResolveTarget` 中，而不是 `App.Write` 之前
 - [ ] 旧的确认代码、FCC 守卫测试、`release_readiness`、`contract_gen` 和手写的 `reference` 已删除
 - [ ] 符合性测试通过，且每个写命令都有样例；覆盖率从注册表枚举
 - [ ] 发布说明和 README 解释了授权范围文件；Skill 从不写授权范围文件
@@ -309,6 +322,6 @@ app.Settings = []aicli.Setting{
 - [ ] 设置在 `App.Settings` 中，配置档在 `settings.json` 中，其中没有机密，1.x 的 `config.json` 中的值已迁入；工具有登录时提供 `auth login`、`auth status`、`auth logout`
 - [ ] 标志已改成共享词汇中的名称，旧名称已标为弃用；没有 `--verbose` 或 `--debug`；HTTP 有超时、只重试读取、校验 TLS；没有遥测
 - [ ] README 有 Configuration 和 Uninstall 两节
-- [ ] 输出：`schema_version` 2.0，snake_case，`meta.untrusted`，列表完整性，每个资源都有 `ref`
+- [ ] 输出：`schema_version` 2.0，snake_case，`meta.untrusted`，列表完整性，每个资源都有 `ref`；`_at` 是时间，`_on` 是日期；带着人写的文本的 ref 列为不可信
 - [ ] CI 和发布流程都运行包含符合性检查的测试、审计和两项守卫检查（REPO-070、REPO-071）
 - [ ] CHANGELOG 列出了每一处破坏性变更；工具的 MAJOR 版本号已升级

@@ -38,14 +38,14 @@ The primary caller is a language model working through a harness such as Claude 
 >
 > | Rules | aicli does | The tool still does |
 > |---|---|---|
-> | Output: CLI-001–006, 046, 047 | one envelope writer (a panic becomes `E_UNKNOWN`); compact JSON and `--pretty`; `--fields` projection; `meta`; format checks; quiet stderr; notices; an NDJSON stream writer (CLI-006) | declare `raw` and streaming commands; name the paths of external text |
+> | Output: CLI-001–006, 046, 047 | one envelope writer (a panic becomes `E_UNKNOWN`); compact JSON and `--pretty`; `--fields` projection; `meta`; format checks and `OutputFormat`; quiet stderr; notices; an NDJSON stream writer (CLI-006) | declare `raw` and streaming commands; name the paths of external text |
 > | Errors: CLI-010–018 | the contract's code table; constructors for every details shape; enriched usage errors; `FromHTTP`; extension codes declared in `App.ExtCodes` (`CodeSpec`), checked and published | messages written for the model (CLI-017); `next_action` on its own errors; the role on a 403; `contract-ext.json` |
-> | Command model: CLI-020–029 | the registry (cobra or click tree plus `aicli.Meta`, with `Meta.Params` (`ParamDoc`) for types, enums and units); tree checks; path-first parsing; positionals; accepted guesses (`Shortcuts`, `ShortFlags`, `FlagAliases`, `Meta.Aliases`), suggested ones (`FlagSynonyms`, `VerbSynonyms`, and default synonyms of the shared flag names) and whole-tree suggestions; the Skill's command map (`App.CommandMap`) | true `Meta`: effects, output schema, error codes, examples, maturity, evidence; its guess list; the shared flag names and verb meanings (CLI-028, CLI-029) |
+> | Command model: CLI-020–029 | the registry (cobra or click tree plus `aicli.Meta`, with `Meta.Params` (`ParamDoc`) for types, enums and units); tree checks; path-first parsing; positionals; accepted guesses (`AddShortcut`, `ShortFlags`, `FlagAliases`, `Meta.FlagAliases`, `Meta.Aliases`), suggested ones (`FlagSynonyms`, `VerbSynonyms`, and default synonyms of the shared flag names) and whole-tree suggestions; the Skill's command map (`App.CommandMap`) | true `Meta`: effects, output schema, error codes, examples, maturity, evidence; its guess list; the shared flag names and verb meanings (CLI-028, CLI-029) |
 > | Discovery: CLI-030–037 | `--help`, `reference` (full, `--index`, `--command`), `context` (with `profile` when the tool declares settings), `doctor` (its `version` check reads the installed Skill from `App.SkillDirs`; a `settings` check when the tool declares settings), `changelog` | the `Identity`, `DoctorChecks` and `ContextExtra` hooks; the embedded `CHANGELOG.md` |
-> | Reads: CLI-040–049 | projection; `Page` with the completeness rules; `Ambiguous`; file and stdin inputs; an `--output <file>` helper (CLI-042) | default fields, a true `scope`, server-side filters, refs, URLs and names, size (CLI-040–045); `--input` (CLI-048); multi-ref reads and `--wait` (CLI-049) |
-> | Writes: CLI-050–065 | the whole gate: binding (`SetResolved` binds a value resolved from another form), tokens, key, journal, scope checks, receipts and `ok`, batches, `operation show/list/resolve`, `HumanRequired` | the `Target`; a read-only, deterministic `Preview` with the base version; an `Apply` that classifies failures honestly and reads back what it changed; long-running jobs (CLI-064) |
+> | Reads: CLI-040–049 | projection and `WantsField`; `Page` with the completeness rules; `Ambiguous`; file and stdin inputs; `ParseTime` and `ParseDuration`; `--output <file>` files written through the gate (`WriteOutput`, `OpenOutput`, CLI-042) | default fields, a true `scope`, server-side filters, refs, URLs and names, size (CLI-040–045); `--input` (CLI-048); multi-ref reads and `--wait` (CLI-049) |
+> | Writes: CLI-050–065 | the whole gate: binding (`SetResolved` binds a value resolved from another form), tokens, key, journal, scope checks, receipts and `ok`, batches (with native bulk calls through `ApplyAll`), `operation show/list/resolve`, `HumanRequired` | the `Target`, or `ResolveTarget` when finding it takes a lookup; a read-only, deterministic `Preview` with the base version; an `Apply` that classifies failures honestly and reads back what it changed; long-running jobs (CLI-064) |
 > | Self-update: CLI-070, 071 | the `update` built-in, set up with `App.Update` (`UpdateConfig`): release discovery, Sigstore and checksum verification, the atomic swap or the package-manager run, the Skill sync, staged errors; `RecordUpdateCheck`, the cached notice in `meta.notices` and `doctor`'s refresh | an `UpdateConfig` with the repository and the package names; release archives with `skills/` beside the binary (REPO-043) |
-> | Versions: CLI-080, 081 | `spec_version` and `schema_version` in `reference`; deprecation from `Meta.Deprecated` and `Meta.DeprecatedFlags`: the `Deprecated:` prefix, the `deprecated` notice, a command map without deprecated commands | what is deprecated and its replacement; the `CHANGELOG.md` entries |
+> | Versions: CLI-080, 081 | `spec_version` and `schema_version` in `reference`; deprecation from `Meta.Deprecated`, `Meta.DeprecatedFlags` and `Meta.RenamedFlags`: the `Deprecated:` prefix, the `deprecated` notice, a command map without deprecated commands | what is deprecated and its replacement; the `CHANGELOG.md` entries |
 > | Settings and diagnostics: CLI-100–102 | `App.Settings` and `App.Setting`: the settings file, profiles and `--profile`; `App.Debugf` and `<PREFIX>_DEBUG` | the declared settings; the `auth` commands (CLI-101) |
 > | Network: CLI-110 | the rule for its own requests (`update`, `doctor`'s refresh) | the upstream client: timeouts, read-only retries, proxy, TLS, User-Agent |
 > | Verification | `RunConformance` (`G00`–`G10`, `R01`–`R05`), `CheckCoverage` (`R06`, run from `TestMain`), `ValidateEnvelope` | a conformance sample per write command; command-level tests; the agent eval (VERIFY-SPEC) |
@@ -94,7 +94,7 @@ Check: `R04`.
 
 ### CLI-005 Formats
 
-`--format` MUST accept `json` (the default and the only format for agents) and `text` (for people; it may change and is never parsed), and `raw` on commands that declare it (`Meta.RawOutput`): logs, diffs and file bodies passed through as bytes. `--json` is an alias of `--format json`. A format the command does not support fails with `E_USAGE`, `problem: unsupported_format`, emitted as JSON. A `raw` command that fails before writing any output emits the JSON error envelope. The format never changes exit codes or the write gate (CLI-055).
+`--format` MUST accept `json` (the default and the only format for agents) and `text` (for people; it may change and is never parsed), and `raw` on commands that declare it (`Meta.RawOutput`): logs, diffs and file bodies passed through as bytes. `--json` is an alias of `--format json`. A format the command does not support fails with `E_USAGE`, `problem: unsupported_format`, emitted as JSON. A `raw` command that fails before writing any output emits the JSON error envelope. A command whose raw and JSON forms differ (a file's bytes against an object that describes it) asks `aicli.OutputFormat(cmd)` (Python `output_format(ctx)`) which format this run uses. The format never changes exit codes or the write gate (CLI-055).
 
 Why: in the eval, `--format raw` on a JSON-only command failed with a plain-text error the agent could not parse, one of the frictions that made "assign an MR and label it" (T07) expensive.
 
@@ -102,24 +102,24 @@ Check: aicli rejects undeclared formats; `G06` runs every write with `--format t
 
 ### CLI-006 NDJSON streams
 
-A command whose output is a stream (following a log, an event subscription, a long export) MAY emit NDJSON. Each line MUST then be a full envelope with one added key, `type`, which is `item` or `summary`, and the last line MUST be the `summary`: `ok: true` with what the stream covered (counts, plus the completeness keys of CLI-041 when it stopped early), or `ok: false` with `error`. The exit code matches the summary line, and a stream that ends without one is incomplete. The command's summary and examples say that it streams. aicli provides a stream writer that emits the item lines and the closing summary.
+A command whose output is a stream (following a log, an event subscription, a long export) MAY emit NDJSON. Each line MUST then be a full envelope with one added key, `type`, which is `item` or `summary`, and the last line MUST be the `summary`: `ok: true` with what the stream covered (counts, plus the completeness keys of CLI-041 when it stopped early), or `ok: false` with `error`. The exit code matches the summary line, and a stream that ends without one is incomplete. The command's summary and examples say that it streams. aicli provides a stream writer that emits the item lines and the closing summary. In `--format raw` a stream writes the bytes alone, with no envelope and no summary line, and its exit code tells how it ended. An item line lists the untrusted paths of the item's own schema, not those of the command's output schema.
 
 ```jsonl
 {"ok":true,"schema_version":"2.0","type":"item","data":{"time":"2026-10-12T08:00:01Z","line":"Running tests"},"meta":{"duration_ms":40,"untrusted":["data.line"]}}
 {"ok":true,"schema_version":"2.0","type":"summary","data":{"count":1,"has_more":false},"meta":{"duration_ms":41}}
 ```
 
-Why: a stream lets the agent stop early and keeps memory flat; the summary line tells a finished stream from a killed one.
+Why: a stream lets the agent stop early and keeps memory flat; the summary line tells a finished stream from a killed one. In the gitlab-cli pilot (2026-10), every `job log --follow` line listed the job object's untrusted field, and raw lines ended in a JSON summary that a pipe could not use.
 
 Check: review; the tool's stream tests parse every line.
 
 ### CLI-007 Naming and values
 
-Keys MUST be snake_case everywhere, including `data` and `details`. IDs are strings even when the upstream uses numbers. Times are ISO 8601 UTC with a `Z` suffix (`2026-10-12T08:00:00Z`). Enum values are lowercase snake_case unless contract.json fixes them otherwise. Quantities carry their unit in the key (`duration_ms`, `retry_after_ms`) or in the parameter's `unit` (CLI-024).
+Keys MUST be snake_case everywhere, including `data` and `details`. IDs are strings even when the upstream uses numbers. Times are ISO 8601 UTC with a `Z` suffix (`2026-10-12T08:00:00Z`), and a key ending in `_at` holds only such a time; a date without a time goes under a key ending in `_on` (`expires_on`). Enum values are lowercase snake_case unless contract.json fixes them otherwise. Quantities carry their unit in the key (`duration_ms`, `retry_after_ms`) or in the parameter's `unit` (CLI-024).
 
-Why: agents copy keys and values between tools and between calls; gitlab-cli 1.2.17 answered `hasMore` where the rest of the fleet said `has_more`.
+Why: agents copy keys and values between tools and between calls; gitlab-cli 1.2.17 answered `hasMore` where the rest of the fleet said `has_more`. GitLab returns some dates under `_at` keys (a member's `expires_at` of `2026-12-31`), which the gitlab-cli pilot (2026-10) renamed.
 
-Check: `R04` checks key case; review for values.
+Check: `R04` checks key case and that `_at` values are UTC times; review for the other values.
 
 ## Errors
 
@@ -296,7 +296,7 @@ Check: contract validation of the tool's real output (VER-002).
 
 Each tool MUST have one registry that defines its command tree. For every command it holds the path, aliases, summary, typed parameters, effects, the dangerous flag, output schema, error codes, examples, maturity and evidence. `--help`, `reference`, the Skill's command map (`App.CommandMap()`, SKL-002) and the coverage enumeration (VER-003) are generated from it; nothing is maintained by hand next to it.
 
-With aicli the registry is the cobra (Go) or click (Python) tree plus one `aicli.Meta` per leaf, attached with `App.Register`. Groups get their summary from `App.Group`; output schemas are declared with `App.Schema`.
+With aicli the registry is the cobra (Go) or click (Python) tree plus one `aicli.Meta` per leaf, attached with `App.Register`. Groups get their summary from `App.Group`; output schemas are declared with `App.Schema`, and a schema name registered twice is a defect that aicli reports.
 
 ```go
 app.Register(mrUpdate, aicli.Meta{
@@ -336,7 +336,7 @@ Check: aicli's tree check; `R02`.
 
 ### CLI-022 Root reachability and measured guesses
 
-Every noun a user would name MUST be reachable from the root; a nested noun gets a root shortcut (`branch` for `repo branch`). Plural noun aliases SHOULD be accepted. The forms agents demonstrably guess first MUST be accepted, or answered with an exact `did_you_mean`: each tool keeps a guess list, starting from the fleet list below and extended from its own eval's failed calls. Suggestions MUST search the whole tree, not only the siblings of the mistyped word.
+Every noun a user would name MUST be reachable from the root: a noun nested under exactly one parent gets a root shortcut (`branch` for `repo branch`). A noun nested under several parents (`comment` under `issue` and `mr`) gets none, or a qualified one (`issue-comment`), because one word cannot name two paths. Plural noun aliases SHOULD be accepted. The forms agents demonstrably guess first MUST be accepted, or answered with an exact `did_you_mean`: each tool keeps a guess list, starting from the fleet list below and extended from its own eval's failed calls. Suggestions MUST search the whole tree, not only the siblings of the mistyped word.
 
 The fleet list, from the 2026-10 eval:
 
@@ -347,11 +347,11 @@ The fleet list, from the 2026-10 eval:
 - positional identifiers (`branch delete old-experiment`), and `--project` on commands that take the project positionally;
 - `--format raw` on a JSON-only command is `E_USAGE` with `unsupported_format`.
 
-aicli accepts guesses through `App.Shortcuts` (root nouns), `App.ShortFlags` (`-p`), `App.FlagAliases` (`--repo` for `--project`) and `Meta.Aliases` (other command names), and suggests through `App.FlagSynonyms` and `App.VerbSynonyms`; its unknown-command and unknown-flag errors search the whole tree.
+aicli accepts guesses through `App.AddShortcut(word, path...)` (root nouns), `App.ShortFlags` (`-p`), `App.FlagAliases` (`--repo` for `--project`, on every command), `Meta.FlagAliases` (an alias on one command only, such as `--branch` for `--name`) and `Meta.Aliases` (other command names), and suggests through `App.FlagSynonyms` and `App.VerbSynonyms`; its unknown-command and unknown-flag errors search the whole tree. `AddShortcut` refuses a word already mapped to another path, and the tree check reports a word in `App.Shortcuts` whose target is not a registered path.
 
-Why: accepting these guesses, together with the v3 Skill's command map, cut invalid calls per trial from 0.22 to 0.07 (arm D against C), and from 0.54 to 0.07 against gitlab-cli 1.2.17 run in the same hour (arm D against A′); with the Skill off, where only the CLI changed, they fell 75% against C, to 0.04.
+Why: accepting these guesses, together with the v3 Skill's command map, cut invalid calls per trial from 0.22 to 0.07 (arm D against C), and from 0.54 to 0.07 against gitlab-cli 1.2.17 run in the same hour (arm D against A′); with the Skill off, where only the CLI changed, they fell 75% against C, to 0.04. In the gitlab-cli pilot (2026-10), the issue and merge request groups each needed a root `comment`, and whichever registered last would have taken the word silently.
 
-Check: `R03`; the tool's tests run every entry of its guess list.
+Check: `R02` (a root shortcut for every noun under one parent, and no word mapped twice); `R03`; the tool's tests run every entry of its guess list.
 
 ### CLI-023 Parsing
 
@@ -382,15 +382,15 @@ Each command MUST declare its effects, and the declaration MUST match what the c
 | `artifact` | creates a new local file |
 | `persist` | overwrites an existing local file |
 
-A command with any effect other than `observe` is a write (`type: write` in `reference`) and goes through the gate (CLI-050). `deliver` and `configure` make a command dangerous by default, and any other write MAY be declared dangerous (irreversible deletes, merges, mass changes). The tool's `risk_tier` is at least what its effects require: T0 for `observe`; T1 for `change`, `artifact` and `persist`; T2 for `deliver` and `configure` (SEC-001). The tool's own records (its journal, confirm key and notice cache) and its self-update (`update`, CLI-070) are not effects. So the built-ins `reference`, `context`, `doctor`, `changelog` and `operation` are reads, and `update`, which changes the tool itself and stays outside the gate, declares only `observe`: a documented exception, not a contradiction.
+A command with any effect other than `observe` is a write (`type: write` in `reference`) and goes through the gate (CLI-050). `deliver` and `configure` make a command dangerous by default, and a write that cannot be undone (a delete, a merge, a purge) MUST be declared dangerous (SEC-001). A bulk command is dangerous only when what it does is, through its effects or an action that cannot be undone; acting on many targets does not make it so (`issue bulk close` is not dangerous, since each issue can be reopened). A plan can be dangerous although its command is not (a commit that deletes files): `Preview.Dangerous` makes that run dangerous (CLI-056). A comment stored on a resource is `change`, even when the upstream notifies the resource's watchers; `deliver` is for content meant to reach someone, such as a message, a mail or a share, and names its destinations (CLI-051). The tool's `risk_tier` is at least what its effects require: T0 for `observe`; T1 for `change`, `artifact` and `persist`; T2 for `deliver` and `configure` (SEC-001). The tool's own records (its journal, confirm key and notice cache) and its self-update (`update`, CLI-070) are not effects. So the built-ins `reference`, `context`, `doctor`, `changelog` and `operation` are reads, and `update`, which changes the tool itself and stays outside the gate, declares only `observe`: a documented exception, not a contradiction.
 
-Why: the fleet audit found writes outside any gate (wechat-mp `token refresh`, confluence `page attachment download` to a server-chosen file name) and a gated write that `reference` reported as a read (kibana `patterns infer --write`).
+Why: the fleet audit found writes outside any gate (wechat-mp `token refresh`, confluence `page attachment download` to a server-chosen file name) and a gated write that `reference` reported as a read (kibana `patterns infer --write`). In the gitlab-cli pilot (2026-10), the specs, the template and the review Skill gave different answers for bulk commands, and a comment that notifies watchers seemed to fit both `change` and `deliver`.
 
 Check: `G00` (every write command has a conformance sample); `R02`; effect tests (VER-004).
 
 ### CLI-026 Error codes per command
 
-Each command MUST list the error codes it can return, and `reference --command` shows them. aicli publishes `Meta.ErrorCodes` together with the codes the library itself raises for that command (usage errors; gate, scope and journal errors for writes). A code that cannot occur is not listed.
+Each command MUST list the error codes it can return, and `reference --command` shows them. aicli publishes `Meta.ErrorCodes` together with the codes the library itself raises for that command (usage errors; `E_CONFIG` on every tool command when the tool declares settings, since an unknown profile stops any of them, CLI-101; gate, scope and journal errors for writes). A code that cannot occur is not listed.
 
 Why: agents plan for the branches that can happen; a listed but unreachable code sends them down a path that does not exist.
 
@@ -421,7 +421,7 @@ When a command offers one of these concepts, it MUST use the standard flag name 
 - `--profile <name>`: the account profile (CLI-101).
 - `--idempotency-key <key>`: makes a create safe to repeat (CLI-062).
 
-A duration is `<n>ms`, `<n>s`, `<n>m`, `<n>h` or `<n>d`, in `--wait`, in relative times and in any other flag that takes one. aicli suggests the standard name for common synonyms when the command has the standard flag and the tool's `FlagSynonyms` has no entry for the word: `--per-page`, `--page-size`, `--max-results` and `--max` for `--limit`; `--page-token`, `--next-token` and `--next` for `--cursor`; `--search`, `--keyword`, `--keywords` and `--term` for `--query`; `--order-by` and `--sort-by` for `--sort`.
+A duration is `<n>ms`, `<n>s`, `<n>m`, `<n>h` or `<n>d`, in `--wait`, in relative times and in any other flag that takes one; `aicli.ParseDuration` and `aicli.ParseTime` (Python `parse_duration`, `parse_time_arg`) parse durations and times, absolute or relative, so `7d` means the same in every tool. aicli suggests the standard name for common synonyms when the command has the standard flag and the tool's `FlagSynonyms` has no entry for the word: `--per-page`, `--page-size`, `--max-results` and `--max` for `--limit`; `--page-token`, `--next-token` and `--next` for `--cursor`; `--search`, `--keyword`, `--keywords` and `--term` for `--query`; `--order-by` and `--sort-by` for `--sort`.
 
 Why: agents type the flags they know from other tools. The fleet's measured first guesses include `-R` and `--repo` for `--project`, and `--all` for `--limit` (CLI-022). One vocabulary turns what an agent learned on one tool into a valid call on the next, before any guess list is needed.
 
@@ -433,13 +433,13 @@ The standard verbs (CLI-021) MUST mean the same in every tool:
 
 - `list` returns a page of matches (CLI-041). No match is an empty page with `ok: true`, never `E_NOT_FOUND`.
 - `get` returns one resource by ref, URL or name (CLI-048). A missing resource is `E_NOT_FOUND`; a name that matches several is `E_AMBIGUOUS`.
-- `search` returns a page ranked by relevance to `--query`, and the page's `sort` says so.
+- `search` returns a page of matches for `--query`, and the page's `sort` states the order the page really has: `relevance` only where the upstream ranks by relevance, otherwise the order it uses (`created_at_desc`). When the tool cannot tell which (GitLab ranks by relevance only with advanced search), `sort` is `upstream` and `scope` says what that order can be.
 - `create` returns the new resource's `ref` in `result`, beside the receipt (CLI-059), and SHOULD accept `--idempotency-key` (CLI-062).
 - `update` changes only the fields given. A field is cleared only on request, with an empty value or `--clear-<field>`, never because a flag was left out. A call that names no field to change is `E_USAGE` (`missing_parameter`) before the gate, so no token is minted for it.
 - `delete` reports a missing target as `E_NOT_FOUND` at the dry-run, never as success.
 - A domain verb (`merge`, `approve`, `share`) declares its precise effects (CLI-025), and its summary says what changes.
 
-Why: agents carry what they learned on one tool to the next (CLI-022), so a verb that means something else in one tool turns a correct habit into a wrong call or a wrong report. A `list` that fails on no match, or a `delete` that reports success for a target that never existed, puts a false statement in the agent's answer; an `update` that clears every field it was not given destroys data the user never mentioned.
+Why: agents carry what they learned on one tool to the next (CLI-022), so a verb that means something else in one tool turns a correct habit into a wrong call or a wrong report. A `list` that fails on no match, or a `delete` that reports success for a target that never existed, puts a false statement in the agent's answer; an `update` that clears every field it was not given destroys data the user never mentioned. In the gitlab-cli pilot (2026-10), `relevance` would have been false on most self-managed GitLab instances, whose basic search lists issues and merge requests newest first.
 
 Check: review; the empty and invalid-input rows of VER-004.
 
@@ -471,7 +471,7 @@ Check: `R01` (valid, and at most 8,000 characters or grouped).
 
 ### CLI-032 reference --command
 
-`reference --command <path>` MUST return `{tool, version, command, schemas, error_codes}`: the command's full entry (`path`, `aliases`, `summary`, `type`, `effects`, `dangerous`, `maturity`, `evidence`, `params`, `output`, `error_codes`, `examples`), the schema entry its `output` names, and the `{exit, retryable}` of each code it lists, in at most 4,000 characters. It accepts aliases; an unknown path is `E_USAGE` `invalid_value` (`parameter: "--command"`) with `did_you_mean`.
+`reference --command <path>` MUST return `{tool, version, command, schemas, error_codes}`: the command's full entry (`path`, `aliases`, `summary`, `type`, `effects`, `dangerous`, `maturity`, `evidence`, `params`, `output`, `error_codes`, `examples`), the schema entry its `output` names (with the command's own default fields when it sets `Meta.DefaultFields`), and the `{exit, retryable}` of each code it lists, in at most 6,000 characters. It accepts aliases; an unknown path is `E_USAGE` `invalid_value` (`parameter: "--command"`) with `did_you_mean`.
 
 ```json
 {"ok":true,"schema_version":"2.0","data":{"tool":"tool","version":"2.0.0",
@@ -485,9 +485,9 @@ Check: `R01` (valid, and at most 8,000 characters or grouped).
  "meta":{"duration_ms":2}}
 ```
 
-Why: one command costs about 130–200 tokens, against 4,000–28,000 for a full `reference`.
+Why: one command costs about 130–200 tokens, against 4,000–28,000 for a full `reference`. The budget is 6,000 because in the gitlab-cli pilot (2026-10) a write with 15 flags (`mr create`) needed 4,552 characters, most of them its parameters and its error codes.
 
-Check: `R01` (valid, and at most 4,000 characters).
+Check: `R01` (valid, and at most 6,000 characters).
 
 ### CLI-033 Full reference
 
@@ -574,9 +574,9 @@ Check: review; the tool's auth tests (VER-004).
 
 ### CLI-040 Default fields
 
-Each list command MUST declare default fields chosen from the questions users ask, not from the API schema: what an agent needs to choose and verify an item (`ref`, a title or name, state, `updated_at`, `url`) and the fields common tasks ask about (for merge requests: assignees, reviewers, labels, pipeline status). `--fields a,b` replaces the defaults, `--fields +a` adds to them, and `--fields all` returns everything. An unknown field is `E_USAGE` (`invalid_value`, `parameter: "--fields"`, `expected` listing the fields). Projection applies to each item, to the object a `get` returns, or to a confirmed write's `data.result` (never to its receipt); the completeness keys (CLI-041) are always kept. aicli projects; the tool chooses the defaults (`Meta.DefaultFields` or the schema's `default_fields`).
+Each list command MUST declare default fields chosen from the questions users ask, not from the API schema: what an agent needs to choose and verify an item (`ref`, a title or name, state, `updated_at`, `url`) and the fields common tasks ask about (for merge requests: assignees, reviewers, labels, pipeline status). `--fields a,b` replaces the defaults, `--fields +a` adds to them, and `--fields all` returns everything. An unknown field is `E_USAGE` (`invalid_value`, `parameter: "--fields"`, `expected` listing the fields). Projection applies to each item, to the object a `get` returns, and to a confirmed write's `data.result`, which without `--fields` is cut to the default fields as a read is (never to its receipt); the completeness keys (CLI-041) are always kept. A default field that costs an extra upstream read per item is allowed when tasks need it: the tool reads it only when the response will show it (`aicli.WantsField(cmd, name)`), in parallel and up to a cap that `scope` states; a field not worth that cost stays out of the defaults. aicli projects; the tool chooses the defaults (`Meta.DefaultFields` for one command, else the schema's `default_fields`), and `--help` and `reference` show the command's own: its `output` then names a copy of the schema, `<output>_for_<command words joined by _>`, that carries those defaults.
 
-Why: putting assignees, labels and pipeline status on MR items, with a pipeline filter computed in the tool, cut "which MRs have failed pipelines" (T02) from 13.6 to 6.1 calls and "assign an MR and label it" (T07) from 13.0 to 9.5, with the Skill held constant.
+Why: putting assignees, labels and pipeline status on MR items, with a pipeline filter computed in the tool, cut "which MRs have failed pipelines" (T02) from 13.6 to 6.1 calls and "assign an MR and label it" (T07) from 13.0 to 9.5, with the Skill held constant. That default costs one GitLab read per merge request, because GitLab's merge request list carries no pipeline status (gitlab-cli pilot, 2026-10).
 
 Check: aicli's projection tests; review of the chosen defaults.
 
@@ -585,34 +585,34 @@ Check: aicli's projection tests; review of the chosen defaults.
 Every list MUST return `items`, `count` (the items in this response) and `has_more`, and SHOULD return `total`, the number of items in the whole list, when the upstream reports it, so a count question needs no paging (CLI-044). When `has_more` is true, exactly one of `next_cursor`, `next_offset` or `continuation_reason` is present (`offset` may echo the current position). A list the tool capped carries `truncated: true` and `truncated_reason`. Every list SHOULD state `sort` and `scope` (optional keys in contract.json); `scope` says what the list covers: the container, the filters actually applied and resolved times. A list whose coverage is narrower than a reader would assume (direct members only; a client-side filter over one page) MUST say so in `scope`, and a read that fans out over several containers names in `scope` the containers it could not read, never dropping them silently.
 
 ```json
-{"ok":true,"schema_version":"2.0","data":{"items":[{"ref":"@carol","username":"carol","access":"developer","via":"group acme"}],"count":1,"has_more":false,"scope":{"project":"acme/payments-service","membership":"effective: direct and inherited from groups"},"sort":"username_asc"},"meta":{"duration_ms":41}}
+{"ok":true,"schema_version":"2.0","data":{"items":[{"ref":"@carol","username":"carol","access":"developer","membership":"inherited"}],"count":1,"has_more":false,"scope":{"project":"acme/payments-service","membership":"effective: direct and inherited from groups"},"sort":"username_asc"},"meta":{"duration_ms":41}}
 ```
 
-Why: gitlab-cli 1.2.17's `project members` returned `items: []` and `hasMore: false` for a project whose members all come through its group, because it listed direct members only. An agent then told the user that the bot account "can see the project … but the members list doesn't include it", which was false.
+Why: gitlab-cli 1.2.17's `project members` returned `items: []` and `hasMore: false` for a project whose members all come through its group, because it listed direct members only. An agent then told the user that the bot account "can see the project … but the members list doesn't include it", which was false. The item says `membership: inherited` rather than the group it comes through, because GitLab's REST API does not name that group (gitlab-cli pilot, 2026-10).
 
 Check: aicli's `Page` enforces the key rules and `R04` validates every page; review checks that `scope` is true.
 
 ### CLI-042 Size budgets
 
-With default flags, a success response MUST stay within 8,000 characters, and every error response within 2,000 (whole envelope). The full `reference` (CLI-033) and `raw` output are exempt from the success budget (contract.json `size_budgets.exempt`); `reference --index` and `reference --command` keep theirs (CLI-031, CLI-032). Larger results go to paging, to a dedicated fetch command (CLI-043), or to a command that writes them to `--output <file>` and returns a summary and the path. Writing a local file is an `artifact` or `persist` effect, so such a command is a gated write, and the scope's `outputs` or `roots` must allow its path (SEC-012); aicli's `--output` helper runs that write through the gate.
+With default flags, a success response MUST stay within 8,000 characters, and every error response within 2,000 (whole envelope). The success budget is for default invocations: a call that asks for more (`--limit 100`, `--fields all`) may exceed it, and a list whose default page could break it (long titles, many default fields) lowers its default `--limit` or its default fields. The full `reference` (CLI-033) and `raw` output are exempt from the success budget (contract.json `size_budgets.exempt`); `reference --index` and `reference --command` keep theirs (CLI-031, CLI-032). Larger results go to paging, to a dedicated fetch command (CLI-043), or to a command that writes them to `--output <file>` and returns a summary and the path. Writing a local file is an `artifact` effect for a new file and `persist` for an existing one, so such a command is a gated write: a new file's path must lie in the scope's `outputs` and an existing one's in `roots` (SEC-012). A command that declares `artifact` without `persist` never overwrites: an existing path is `E_VALIDATION` (`invalid_value`, `details.path`), not a scope refusal. aicli offers two ways to write: `App.WriteOutput` runs a small in-memory result through the gate on its own, with the file as the target; inside the `Apply` of an `App.Write` whose target is the upstream resource (the job whose artifacts are fetched, with the file in `Preview.Outputs`), `App.OpenOutput(path, overwrite)` streams into a temporary file beside the target that `Commit` moves into place. Both check the scope again when they write.
 
-Why: the harness shows a success inline only up to about 30,000 characters and a failure up to about 10,000, after which the agent gets a preview or loses the middle. A 50-item list is about 4,000 characters with three default fields, against 14,000 with all fields, indented.
+Why: the harness shows a success inline only up to about 30,000 characters and a failure up to about 10,000, after which the agent gets a preview or loses the middle. A 50-item list is about 4,000 characters with three default fields, against 14,000 with all fields, indented. In the gitlab-cli pilot (2026-10), a download whose output file already existed was refused for a missing `roots` grant that could not help, and a whole artifacts archive had to fit in memory.
 
-Check: `R01` (reference budgets) and `R04` (errors); response-size tests over fixtures (VER-004).
+Check: `R01` (reference budgets); `R04` (the success budget on the suite's default invocations, the error budget on every envelope; `ValidateEnvelope` checks only the error budget); response-size tests over fixtures (VER-004).
 
 ### CLI-043 Heavy sub-resources
 
-Diffs, logs, file bodies and attachments MUST be separate commands, never inlined in lists or in default `get` output; lists carry bounded summaries (counts, paths, sizes). The heavy commands return structured data (a diff as per-file entries with paths and line counts), so `--fields` can project them down to an inventory.
+Diffs, logs, file bodies and attachments MUST be separate commands, never inlined in lists or in default `get` output; lists carry bounded summaries (counts, paths, sizes). The heavy commands return structured data (a diff as per-file entries with paths and line counts), so `--fields` can project them down to an inventory. One body can still exceed the success budget: a long file, a large diff, a description with pasted logs. Its JSON form then carries a bounded window: lines or files paged with `--offset` and `--limit`, or the text cut at a stated length with `<field>_truncated: true` and a notice that names the command for the rest. `--format raw` (`Meta.RawOutput`) returns the whole body, and a long text field stays out of the default fields, so `--fields +description` adds it on request.
 
-Why: the agent pays for a heavy payload only for the item it chose, and can ask for the inventory first.
+Why: the agent pays for a heavy payload only for the item it chose, and can ask for the inventory first. In the gitlab-cli pilot (2026-10), single files, diffs and release notes were longer than 8,000 characters.
 
 Check: review.
 
 ### CLI-044 Compute in the tool
 
-Counting, grouping, filtering and finding the latest or the top item MUST happen in the tool, on the server where possible; a command never ships a list to the model for it to count. A client-side filter pages through the full set first and says so in `scope`; when it cannot, the list is `truncated`.
+Counting, grouping, filtering and finding the latest or the top item MUST happen in the tool, on the server where possible; a command never ships a list to the model for it to count. A client-side filter pages through the full set first and says so in `scope`; when it cannot, the list is `truncated`. A list returns `total` when the upstream reports it, so a count needs no paging (CLI-041); a grouped count (who opened the most issues) is a page of `{<key>, count}` items sorted `count_desc`, whose `scope` says what was counted, and which is `truncated` when the tool could not read the whole set.
 
-Why: in "which open MRs have a failed pipeline" (T02), 1.2.17 agents listed MRs and fetched each one. With `mr list --pipeline-status failed` computed in the tool, the task took 6.1 calls instead of 13.6, and 2.8 once the Skill named the filter.
+Why: in "which open MRs have a failed pipeline" (T02), 1.2.17 agents listed MRs and fetched each one. With `mr list --pipeline-status failed` computed in the tool, the task took 6.1 calls instead of 13.6, and 2.8 once the Skill named the filter. In the gitlab-cli pilot (2026-10), finding the top author of 46 issues still left the agent counting a 46-item page.
 
 Check: review; the agent eval (VER-006).
 
@@ -626,11 +626,11 @@ Check: review.
 
 ### CLI-046 Untrusted content paths
 
-A response that carries external content (text written by people or other systems: titles, descriptions, comments, mail bodies, file contents, upstream error text) MUST list where it is in `meta.untrusted`, once per response, as paths: dot-separated keys from the envelope root, with `[]` for every element of an array (`data.items[].title`, `data.description`, `error.details.upstream_message`). The list survives `--fields`. The per-object `_untrusted` key of 1.6.3 is gone.
+A response that carries external content (text written by people or other systems: titles, descriptions, comments, mail bodies, file contents, upstream error text, and a `ref` that embeds such text, such as a branch, label or file name in `acme/web/-/branches/<name>`) MUST list where it is in `meta.untrusted`, once per response, as paths: dot-separated keys from the envelope root, with `[]` for every element of an array (`data.items[].title`, `data.description`, `error.details.upstream_message`). The list follows `--fields`: it keeps the paths of the fields that remain and drops those the projection removed. The per-object `_untrusted` key of 1.6.3 is gone.
 
-aicli adds the paths from the output schema's `untrusted_fields`, `App.OK(cmd, data, untrusted...)`, `Page.Untrusted` and `Error.Untrusted`, and keeps them through projection. How agents and tools treat that content is SEC-002.
+aicli adds the paths from the output schema's `untrusted_fields`, `App.OK(cmd, data, untrusted...)`, `Page.Untrusted` and `Error.Untrusted`, and drops those of fields the projection removed. How agents and tools treat that content is SEC-002.
 
-Why: repeating `_untrusted` on every item cost about 16 % more characters in a 50-item list response; one list of paths says the same.
+Why: repeating `_untrusted` on every item cost about 16 % more characters in a 50-item list response; one list of paths says the same. A ref is what an agent copies into its next command, and in the gitlab-cli pilot (2026-10) branch, tag and file refs carried text people wrote.
 
 Check: `R04`; the injected-instruction scenario of the agent eval (VER-006).
 
@@ -645,6 +645,7 @@ Check: aicli's writer and notice tests.
 ### CLI-048 Accept what the agent has
 
 - Every resource in output MUST carry one `ref` string (`acme/web!5`, `acme/web#12`), and every command that takes that resource MUST accept it, and the resource's web URL too.
+- A sub-resource's ref is its parent's ref, then its collection and its id: `acme/web#12/notes/99`, `acme/web!5/discussions/<id>`, so a grant for the parent covers it (SEC-012). Web URLs and their anchors (`…/-/issues/12#note_99`) stay accepted as input.
 - Where names are natural input (projects, users, boards), an ambiguous name MUST be `E_AMBIGUOUS` (exit 2) with `candidates`, each `{ref, label}`, never a silent pick.
 - Relative times (`7d`, `24h`) SHOULD be accepted and echoed as absolute UTC in `scope`; `--input -` or `--input <file>` SHOULD take the parameters as one JSON object; long text SHOULD come through `--<param>-file <path|->` (`Meta.FileInputs`), bound by its content (CLI-054).
 
@@ -652,9 +653,9 @@ Check: aicli's writer and notice tests.
 {"ok":false,"schema_version":"2.0","error":{"code":"E_AMBIGUOUS","message":"More than one project matches that name; choose one by ref.","retryable":false,"details":{"dispatch_state":"not_started","next_action":"Ask the user which project they mean, then re-run with its ref.","candidates":[{"ref":"acme/payments-service","label":"acme / payments-service"},{"ref":"legacy/payments","label":"legacy / payments"}]}},"meta":{"duration_ms":120,"untrusted":["error.details.candidates[].label"]}}
 ```
 
-aicli supplies the `Ambiguous` constructor, file and stdin inputs (`ReadFileInput`) and positional binding; resolving refs, URLs and names, and `--input`, are the tool's code (a resolved value is bound with `SetResolved`, CLI-054).
+aicli supplies the `Ambiguous` constructor, file and stdin inputs (`ReadFileInput`) and positional binding; resolving refs, URLs and names, and `--input`, are the tool's code (a resolved value is bound with `SetResolved`, each input's own part, CLI-054).
 
-Why: agents copy identifiers from earlier output, the user's message and URLs, and invent one when a command demands an ID they do not have. The eval's ambiguous-project task (T04) had two projects named "payments" on purpose.
+Why: agents copy identifiers from earlier output, the user's message and URLs, and invent one when a command demands an ID they do not have. The eval's ambiguous-project task (T04) had two projects named "payments" on purpose. In the gitlab-cli pilot (2026-10), issue and merge request comments, threads and changed files had no ref form, and each command group invented its own.
 
 Check: for each resource type, tests that its ref, URL and name resolve to the same target (VER-004).
 
@@ -708,6 +709,8 @@ return app.Write(cmd, aicli.WriteSpec{
 
 `classify` belongs to the tool. It wraps with `aicli.NotDispatched` an error raised before anything left the machine, and with `aicli.Rejected` an upstream answer that proves nothing changed (a 4xx, including 429, mapped by `FromHTTP`). Anything else it returns unchanged, and the gate reports it as `E_OUTCOME_UNKNOWN`. Wrap the `*aicli.Error` that `FromHTTP` built, never the raw transport error: `aicli.NotDispatched(aicli.FromHTTP(0, msg, "", 0))` reports `E_NETWORK`, and `aicli.Rejected(aicli.FromHTTP(status, msg, body, 0))` the status's code; around a plain error the gate has no code and falls back to `E_SERVER` (receipt rule 4). Python has the same API in snake_case (`app.write`, `WriteSpec`).
 
+When finding the target takes an upstream lookup (a name or an ID to resolve, a variable's environment scope, the account's own namespace), set `WriteSpec.ResolveTarget` instead of `Target`. The gate calls it at a dry-run or a bare call before the scope check, and at confirm only after the token checks (CLI-057), so a repeated confirm is `token_used` before any tool code runs; its error is returned as the tool's own, with nothing sent. Code before `App.Write` runs at every confirm ahead of those checks, so it reads nothing upstream that the write itself can change.
+
 Why: the fleet audit found the per-tool gates broken in the same ways. Bindings missed inputs in all 10 gated tools (gitlab-cli: 23 of its 59 write commands; 72 confirmed findings in the other 9), tokens were forgeable in 9 and reusable in 8 when the store failed, and `--format text` skipped the gate in 2. The rule was right; ten implementations of it were not.
 
 Check: `G00`–`G10` for every write command.
@@ -727,7 +730,7 @@ Check: `G00`–`G10` for every write command.
   "preview":{"operation_id":"op_4hx2mq7tz3b5kd6wqe2nrc7vya","command":"mr update","action":"Update merge request",
     "target":{"key":"acme/web!5","kind":"merge_request","label":"!5 Add retry"},"effects":["change"],"dangerous":false,
     "changes":[{"field":"assignees","before":["bob"],"after":["carol"]},{"field":"labels","add":["needs-review"]}],
-    "inputs":{"mr":"acme/web!5","assignee":"carol","add_labels":["needs-review"]},
+    "inputs":{"mr":"5","project":"acme/web","assignee":"carol","add_labels":["needs-review"]},
     "base":{"version":"2026-10-11T18:30:24Z","source":"updated_at"},"can_apply":true,"blocked_by":[]},
   "confirm_token":"ct2_4hx2mq7tz3b5kd6wqe2nrc7vya_9f2a61c04be87d35a0c6e1f24b7d9e03",
   "expires_at":"2026-10-12T08:15:00Z","operation_id":"op_4hx2mq7tz3b5kd6wqe2nrc7vya"},
@@ -745,7 +748,7 @@ A write called with neither flag MUST change nothing and return `E_CONFIRMATION_
 ```json
 {"ok":false,"schema_version":"2.0","error":{"code":"E_CONFIRMATION_REQUIRED","message":"This command changes data and nothing was changed; check the preview, then confirm with its token.","retryable":false,"details":{
   "dispatch_state":"not_started","problem":"confirmation_required","next_action":"If details.preview matches the request, re-run the same command with --confirm ct2_7mq2xk4vz6bn3dt5wy2hce7rpa_0c4e8a1f6b2d9e3a7c5f1b8d4e0a6c2f.",
-  "preview":{"operation_id":"op_7mq2xk4vz6bn3dt5wy2hce7rpa","command":"issue close","action":"Close issue","target":{"key":"acme/web#12","kind":"issue","label":"#12 Timeout in checkout"},"effects":["change"],"dangerous":false,"changes":[{"field":"state","before":"opened","after":"closed"}],"inputs":{"issue":"acme/web#12"},"can_apply":true,"blocked_by":[]},
+  "preview":{"operation_id":"op_7mq2xk4vz6bn3dt5wy2hce7rpa","command":"issue close","action":"Close issue","target":{"key":"acme/web#12","kind":"issue","label":"#12 Timeout in checkout"},"effects":["change"],"dangerous":false,"changes":[{"field":"state","before":"opened","after":"closed"}],"inputs":{"issue":"12","project":"acme/web"},"can_apply":true,"blocked_by":[]},
   "confirm_token":"ct2_7mq2xk4vz6bn3dt5wy2hce7rpa_0c4e8a1f6b2d9e3a7c5f1b8d4e0a6c2f",
   "expires_at":"2026-10-12T08:20:00Z","operation_id":"op_7mq2xk4vz6bn3dt5wy2hce7rpa"}},
  "meta":{"duration_ms":95,"untrusted":["error.details.preview.target.label"]}}
@@ -779,11 +782,11 @@ aicli normalises before binding:
 - Flag names are canonical (`--repo` binds as `project`). Scalars bind as the string form of the parsed value; repeated or comma-separated values bind as an array in input order. Positionals bind as `args` unless `Meta.Positional` turns them into a flag, so `branch delete x` and `branch delete --name x` are the same request.
 - A file or stdin input is read once and binds as `sha256:<hex>` of its content under the parameter it fills; a literal value for that parameter binds as `sha256:<hex>` of the literal. So `--body X` and `--body-file f`, where `f` contains `X`, are the same request.
 - Secret values bind as an HMAC under the confirm key, never in clear (SEC-021).
-- A value the tool accepts in several forms (id, ref, URL, name) binds as given unless the tool resolves it first: it calls `aicli.SetResolved(cmd, flag, canonical)` before `App.Write`, so every form binds the same value.
+- A value the tool accepts in several forms (id, ref, URL, name) binds as given unless the tool resolves it first: it calls `aicli.SetResolved(cmd, flag, canonical)` before `App.Write`, so every form binds the same value. It may also set a flag the user did not give, when that value came inside another input (the project in `acme/web!5`). Bind each input's own part, the iid as `mr` and the project as `project`, never a ref that embeds both: a changed `--project` is then named as `--project`, not as `--mr` (G03). A structured value that names a file (`--action 'update:path=a;content_file=b'`) binds that file's content only when the tool reads the file once before `App.Write` and binds, with `SetResolved`, a form that holds the content's SHA-256.
 
 The claims live in the operation record, not in the token: `{v, tool, tool_version, op, cmd, inv, inputs, account, host, target, scope, base, idem, exp}`, where `v` is 2 and every other value is a string or a digest. `inputs` holds a digest per input name, so a mismatch can name the input, and `inv` is the SHA-256 of the canonical inputs. Canonical JSON means sorted keys, no whitespace, UTF-8.
 
-Why: the fleet audit found bindings that missed inputs in every gated tool: file contents bound by path only (jira `issue attach`, outlook attachments), batch paths that bound only the target list (an archery `query run` token accepted a different `--sql`), accounts resolved from environment or configuration left out, and a gitlab-cli token minted for `--assignee alice` that assigned the MR to dave.
+Why: the fleet audit found bindings that missed inputs in every gated tool: file contents bound by path only (jira `issue attach`, outlook attachments), batch paths that bound only the target list (an archery `query run` token accepted a different `--sql`), accounts resolved from environment or configuration left out, and a gitlab-cli token minted for `--assignee alice` that assigned the MR to dave. In the gitlab-cli pilot (2026-10), an issue bound whole (`acme/web#12`) beside its project made a changed `--project` read as a changed `--issue`.
 
 Check: `G03`.
 
@@ -803,19 +806,19 @@ Check: `G04` (a second confirm is `token_used`); `G05` (upper-cased, padded, tru
 
 ### CLI-056 Dangerous commands
 
-A dangerous command MUST be called with `--dangerous` in both steps, the dry-run (or the bare call) and the confirm. Without it the gate returns `E_CONFIRMATION_REQUIRED` with `problem: dangerous_flag_required` before doing anything else. The scope must also grant `dangerous: true` (SEC-012).
+A dangerous command MUST be called with `--dangerous` in both steps, the dry-run (or the bare call) and the confirm. Without it the gate returns `E_CONFIRMATION_REQUIRED` with `problem: dangerous_flag_required` before doing anything else. The scope must also grant `dangerous: true` (SEC-012). A plan can be dangerous although its command is not (a `commit create` that deletes a file): `Preview.Dangerous` makes the gate treat that run as dangerous, with `--dangerous` in both steps, `preview.dangerous: true` and a scope that grants `dangerous: true`. The binding covers it, so a plan that becomes dangerous between the dry-run and the confirm is `state_drift`.
 
 ```json
 {"ok":false,"schema_version":"2.0","error":{"code":"E_CONFIRMATION_REQUIRED","message":"This command is dangerous and needs --dangerous in both the dry-run and the confirm step.","retryable":false,"details":{"dispatch_state":"not_started","next_action":"Re-run with --dangerous --dry-run, check the preview, then repeat the command with --dangerous --confirm <confirm_token>.","problem":"dangerous_flag_required"}},"meta":{"duration_ms":2}}
 ```
 
-Why: typing `--dangerous` twice is a statement of intent that a copied command or an injected instruction does not carry by accident, and forgetting it costs one call (10 of 813 calls in the eval's arm D).
+Why: typing `--dangerous` twice is a statement of intent that a copied command or an injected instruction does not carry by accident, and forgetting it costs one call (10 of 813 calls in the eval's arm D). In the gitlab-cli pilot (2026-10), a `repo commit create` with only delete actions removed files without `--dangerous`, while `repo file delete` needed it.
 
 Check: `G09`.
 
 ### CLI-057 Re-checks at confirm, in a fixed order
 
-At confirm the gate MUST re-run the command's `Preview` and compare: a changed base version is `E_CONFLICT` `state_drift`; a changed scope file is `scope_changed`; a changed account, host or target is `token_mismatch` with `parameter` `account`, `host` or `target`. The re-run preview must also plan the same change: a different `action`, `changes`, `destinations` or `outputs`, or `can_apply: false`, is `state_drift` too, so `Preview` MUST be deterministic: no timestamps, and a stable order in `Changes` and in list values. aicli runs every check in this order and stops at the first failure.
+At confirm the gate MUST re-run the command's `Preview` and compare: a changed base version is `E_CONFLICT` `state_drift`; a changed scope file is `scope_changed`; a changed account, host or target is `token_mismatch` with `parameter` `account`, `host` or `target`. The re-run preview must also plan the same change: a different `action`, `changes`, `destinations`, `outputs` or `dangerous`, or `can_apply: false`, is `state_drift` too, so `Preview` MUST be deterministic: no timestamps, and a stable order in `Changes` and in list values. aicli runs every check in this order and stops at the first failure.
 
 Confirm (`--confirm <token>`):
 
@@ -826,7 +829,7 @@ Confirm (`--confirm <token>`):
 5. Consumed marker present, or the record is no longer `planned` → `token_used`, whatever the token's age.
 6. Past `expires_at` → `token_expired`, with a new plan for the same command.
 7. Recompute the inputs digest; different → `token_mismatch` naming the first differing parameter.
-8. `--dangerous` missing on a dangerous command → `E_CONFIRMATION_REQUIRED` (`dangerous_flag_required`).
+8. `--dangerous` missing on a dangerous command, or on a plan the dry-run found dangerous (`Preview.Dangerous`) → `E_CONFIRMATION_REQUIRED` (`dangerous_flag_required`). Only now does tool code run: `WriteSpec.ResolveTarget` (a batch's `BatchSpec.ResolveItems`), when set, finds the target, and its error is the tool's own.
 9. Take the target's lock (`locks/<hash>.lock` in the state directory; a batch takes every item's, in sorted order), waiting at most 10 s → `lock_held`. Steps 10 to 15 run under it, so two confirms on the same target never interleave. Check the consumed marker again → `token_used`.
 10. Scope: missing or insufficient → `E_FORBIDDEN` with `details.scope`; digest changed → `scope_changed`; operation budget spent → `E_FORBIDDEN` (`scope.status: budget_spent`).
 11. An unresolved operation on the same target → `unresolved_operation`. Re-run `Preview`: base version or plan changed, or `can_apply: false` → `state_drift`. Recompute account, host and target: different → `token_mismatch` (`parameter` `account`, `host` or `target`).
@@ -844,15 +847,15 @@ Every failure in steps 1 to 14 has `dispatch_state: not_started`: nothing has be
 Dry-run and bare call:
 
 1. `--dangerous` missing on a dangerous command → `dangerous_flag_required`.
-2. Scope check; a refusal is `E_FORBIDDEN` with `details.scope`, and with `details.preview` when the preview could be built.
+2. Resolve the target with `ResolveTarget` when the command sets it (its error is the tool's own), then check the scope; a refusal is `E_FORBIDDEN` with `details.scope`, and with `details.preview` when the preview could be built.
 3. An unresolved operation on the same target → `unresolved_operation`.
-4. Run `Preview`.
+4. Run `Preview`; for a plan it marks dangerous (`Preview.Dangerous`), `--dangerous` missing → `dangerous_flag_required`, and a scope without `dangerous: true` → `E_FORBIDDEN`.
 5. Allocate the operation id.
 6. Write the record as `planned`; failure → `E_IO`.
 7. Mint the token, unless `can_apply` is false.
 8. Emit: `ok: true` with `data` for `--dry-run`; `E_CONFIRMATION_REQUIRED` with the same content in `details` for a bare call.
 
-Why: binding the base version stops a write planned against an old state from running against a new one, and a fixed order makes every tool refuse the same way, always before anything is sent. The order matters. In the 2.0 release review, a used token checked for expiry first came back after 10 minutes as `token_expired` with a fresh token, and following it sent the write twice. Without the lock, two confirms planned against the same version both passed the drift check, and the second overwrote the first.
+Why: binding the base version stops a write planned against an old state from running against a new one, and a fixed order makes every tool refuse the same way, always before anything is sent. The order matters. In the 2.0 release review, a used token checked for expiry first came back after 10 minutes as `token_expired` with a fresh token, and following it sent the write twice. Without the lock, two confirms planned against the same version both passed the drift check, and the second overwrote the first. In the gitlab-cli pilot (2026-10), a lookup the tool ran before `App.Write` answered a repeated confirm of `variable delete` with `E_NOT_FOUND`, hiding `token_used`; `ResolveTarget` runs after the token checks for that reason.
 
 Check: `G10` (the scope file changed between dry-run and confirm → `scope_changed`, nothing sent); aicli's gate tests cover the other steps.
 
@@ -885,7 +888,7 @@ A confirmed write MUST return `data` = `{operation_id, receipt, result}`. The re
 
 - `failed_stage` (`apply`, `deliver`, `persist`, `verify`) is present when execution failed or was interrupted.
 - `observed` is the read-back of the fields the write meant to change, from the write's response or a re-read. `verification` is `passed` only when `observed` matches the request, and `mismatched` lists the fields that do not.
-- `result` is the command's own payload; for a create, it carries the new resource's `ref` and `url`.
+- `result` is the command's own payload, cut to its default fields unless `--fields` asks for others (CLI-040); for a create, it carries the new resource's `ref` and `url`.
 
 `ok` and the error code are derived from the receipt, never chosen: the first matching rule of contract.json `receipt_rules` decides.
 
@@ -955,11 +958,12 @@ Check: aicli's gate tests.
 
 A command that acts on many targets MUST take them in one plural flag (`--ids 1,2,3`, or `--ids` repeated), de-duplicated with input order kept; an empty list is `E_USAGE` (`missing_parameter`). It runs through `App.WriteBatch`:
 
-- **Preview.** It lists every target: `targets`, `total`, and `items`, each `{target, operation_id, changes, can_apply, blocked_by}`, under the batch's own `opb_` id. If any item cannot apply, the batch cannot either. One token covers the whole batch. When the whole preview would break its size budget (CLI-042), `targets` and `items` keep their first entries in input order and `omitted` counts the rest (`total` = listed targets + `omitted`); the inputs and the token still cover every target.
+- **Preview.** It lists every target: `targets`, `total`, and `items`, each `{target, operation_id, changes, can_apply, blocked_by}`, under the batch's own `opb_` id. If any item cannot apply, the batch cannot either. One token covers the whole batch. When the whole preview would break its size budget (CLI-042), `targets` and `items` keep their first entries in input order and `omitted` counts the rest (`total` = listed targets + `omitted`); the inputs and the token still cover every target. The preview's `action` is `BatchSpec.Action`, or the first item's when that is empty.
 - **Result.** One item per target, `{target, operation_id, ok}`, where `target` is the target's key, plus `receipt`, `error` (`{code, retryable, message}`) or `result`, and `summary` `{total, succeeded, failed, unknown, skipped}`, where every target counts exactly once.
 - **ok.** The batch is `ok: true` only when every item succeeded. Otherwise it fails with `E_OUTCOME_UNKNOWN` if any item is unknown, else `E_PARTIAL` if any item applied, else the first failed item's code. Its details carry `operation_id` (the batch id), `items` and `summary`. When the full item list would break the size budget (CLI-042), the result, in `data` or in `details`, first drops the `receipt` and `result` of the items that succeeded, then lists fewer items, every item with `ok: false` before any that succeeded, and `omitted` counts those left out; `summary` still counts every target, and `operation list --batch <batch id>` lists them all (CLI-061).
 - **Stopping.** `--continue-on-error` defaults to true, and to false for dangerous commands. After a stop, the remaining items are `skipped`: `ok: false` with no `error`.
-- **Upstream caps.** A native bulk endpoint with a per-call cap is called in chunks behind the same contract: one token, one result, each chunk's outcome mapped onto its items. A batch never claims an atomicity the upstream does not give.
+- **Upstream caps.** A native bulk endpoint with a per-call cap is called in chunks behind the same contract: one token, one result, each chunk's outcome mapped onto its items. A batch never claims an atomicity the upstream does not give. With aicli, `BatchSpec.ApplyAll` makes one call per chunk of at most `MaxPerCall` items (all at once when 0) and returns one `ItemOutcome{Result, Err}` per item, in item order, which the gate maps onto its item. A missing or extra outcome is a defect that leaves the chunk's items `unknown`, and so does an error of the whole call, unless it is `NotDispatched` or `Rejected`, which then applies to each item.
+- **Shared inputs.** What every item shares (a user to assign, the project) is resolved once, in `BatchSpec.ResolveItems`, which runs where `ResolveTarget` does (CLI-057): an input problem common to all items is then one error with its `parameter` and `next_action`, not a block on every item.
 
 ```json
 {"ok":false,"schema_version":"2.0","error":{"code":"E_PARTIAL","message":"Three of the four issues were labelled; one was refused.","retryable":false,"details":{
@@ -974,7 +978,7 @@ A command that acts on many targets MUST take them in one plural flag (`--ids 1,
  "meta":{"duration_ms":930}}
 ```
 
-Why: 1.6.3 let a batch in which every item failed report `ok: true`; the audit found batch paths that bound only the target list (an archery `workflow audit --ids` token accepted a different `--action`); and in the eval, agents labelling four issues one by one sometimes re-minted every token, at 4 extra calls.
+Why: 1.6.3 let a batch in which every item failed report `ok: true`; the audit found batch paths that bound only the target list (an archery `workflow audit --ids` token accepted a different `--action`); and in the eval, agents labelling four issues one by one sometimes re-minted every token, at 4 extra calls. In the gitlab-cli pilot (2026-10), `repo commit create`, one GitLab request for all its files, had every item after the first report the first item's outcome, and an unknown assignee blocked each issue of a bulk assign separately.
 
 Check: aicli's batch tests; `G00`–`G10` run on batch commands too; `R04`.
 
@@ -1093,7 +1097,7 @@ Check: `R01` (`spec_version`, `schema_version`); `R05` (the `version` check).
 
 ### CLI-081 Deprecation
 
-A command or flag that is going away MUST be deprecated first and keep working until it is removed. With aicli, `Meta.Deprecated` holds a command's replacement text, such as "use `mr update --label`", and `Meta.DeprecatedFlags` maps a flag's name to its replacement text. aicli then:
+A command or flag that is going away MUST be deprecated first and keep working until it is removed. With aicli, `Meta.Deprecated` holds a command's replacement text, such as "use `mr update --label`", and `Meta.DeprecatedFlags` maps a flag's name to its replacement text; `Meta.RenamedFlags` maps a renamed flag's old name to its new one (`search` to `query`), and aicli rewrites the old name to the new one before parsing, so it binds as the new one; giving both is `E_USAGE` `conflicting_flags`, `--help` leaves the old name out, and `reference` lists it as a parameter whose description starts with ``Deprecated: use `--<new>`.`` aicli then:
 
 - starts the command's summary in help and `reference` with `Deprecated: <text>.`, and a deprecated flag's description the same way;
 - adds a `deprecated` notice (`severity: warning`, CLI-047) to every run of a deprecated command, naming the version that removes it, and to every run that uses a deprecated flag;
@@ -1105,7 +1109,7 @@ A command or flag that is going away MUST be deprecated first and keep working u
 
 A deprecated command or flag keeps working through at least one MINOR release and for at least 90 days, and is removed only in a MAJOR release (REPO-030). `CHANGELOG.md` lists it under `Deprecated` in the release that deprecates it, and under `Removed` in the release that removes it (CLI-037). A deprecated output field keeps its key for the same window.
 
-Why: agents keep using what a Skill, a README or an earlier transcript taught them. A command that vanishes in a MINOR release breaks those calls without warning; a notice on each use names the replacement while the old form still works, and `changelog` says the same after an update.
+Why: agents keep using what a Skill, a README or an earlier transcript taught them. A command that vanishes in a MINOR release breaks those calls without warning; a notice on each use names the replacement while the old form still works, and `changelog` says the same after an update. In the gitlab-cli pilot (2026-10), keeping `mr list --search` working beside `--query` took a hidden flag, a copy and a conflict check in the tool's own code.
 
 Check: aicli's deprecation tests; review that each deprecation is in `CHANGELOG.md` and that nothing is removed outside a MAJOR release.
 
@@ -1135,7 +1139,7 @@ The settings file is the one `<PREFIX>_SETTINGS_FILE` names (an absolute path), 
 
 The settings file holds no secrets: they live in the OS keyring or come from the environment (SEC-040). A person writes the file, or a `configure` command writes it through the gate (CLI-025, CLI-101); nothing else does.
 
-With aicli the tool declares `App.Settings`, each a `Setting{Name, Env, Flag, Default, Secret, Description}`. `Name` is snake_case; `Env` defaults to the upper-case `Name` and is read as `<PREFIX>_<Env>`; `Flag` names a command flag that overrides the setting when it is given on the running command; `Secret` keeps the value out of the file, out of diagnostics and errors (CLI-102, SEC-021), and makes `Flag` a secret flag everywhere, as if it were in `Meta.Secrets`. `App.Setting(cmd, name)` (Python `app.setting(name)`) returns the value and its source: `flag`, `env`, `profile` or `default`. `App.Profile()` (Python `app.profile()`) returns the active profile's name and source, and `App.SettingsPath()` (Python `app.settings_path()`) the file, so a tool can key its keyring entries per profile and write the profile's settings. `context` reports the profile (CLI-035), and `doctor`'s `settings` check validates the file (CLI-036).
+With aicli the tool declares `App.Settings`, each a `Setting{Name, Env, Flag, Default, Secret, Description}`. `Name` is snake_case; `Env` defaults to the upper-case `Name` and is read as `<PREFIX>_<Env>`; `Flag` names a command flag that overrides the setting when it is given on the running command; `Secret` keeps the value out of the file, out of diagnostics and errors (CLI-102, SEC-021), and makes `Flag` a secret flag everywhere, as if it were in `Meta.Secrets`. `App.Setting(cmd, name)` (Python `app.setting(name)`) returns the value and its source: `flag`, `env`, `profile` or `default`. `App.Profile()` (Python `app.profile()`) returns the active profile's name and source, `App.Profiles()` (Python `app.profiles()`) the profile names in file order, and `App.SettingsPath()` (Python `app.settings_path()`) the file, so a tool can key its keyring entries per profile and write the profile's settings. `context` reports the profile (CLI-035), and `doctor`'s `settings` check validates the file (CLI-036).
 
 Why: an agent and a person can predict which host or account a command uses only if every tool resolves settings the same way, and `context` can say where a value came from only if one resolver produced it. The 2026-10 fleet audit found accounts, regions and time zones read from the environment or a config file inside write paths (SEC-020); declared settings make those reads visible. The file refuses secrets because copying it off the machine must yield nothing usable (SEC-040). It has its own name because fleet tools keep a 1.x `config.json` in the same directory, which aicli does not read.
 
@@ -1147,17 +1151,17 @@ A tool that can act as more than one account, or against more than one host, MUS
 
 A tool with sign-in commands MUST give them these names:
 
-- `auth login` stores a credential: the secret in the OS keyring and the profile's other settings in the settings file (SEC-040). It declares `configure` (CLI-025) and `Meta.NewProfile`, so it can run under a profile the file does not have yet, and writes the settings with `App.SetProfileSettings` (Python `app.set_profile_settings`), which validates them like the reader, writes atomically and writes nothing on an error, so `Apply` returns that error as `NotDispatched`. For such a command, `App.Profile()` returns the requested profile and its source. When a person must act (a browser sign-in, a one-time code), it returns `E_HUMAN_REQUIRED` with `action: sign_in` (CLI-065).
+- `auth login` stores a credential: the secret in the OS keyring and the profile's other settings in the settings file (SEC-040). It declares `configure` (CLI-025) and `Meta.AllowUnknownProfile`, so it can run under a profile the file does not have yet, and writes the settings with `App.SetProfileSettings` (Python `app.set_profile_settings`), which validates them like the reader, writes atomically and writes nothing on an error, so `Apply` returns that error as `NotDispatched`; when the file has no `default_profile`, it makes this profile the default. For such a command, `App.Profile()` returns the requested profile and its source. When a person must act (a browser sign-in, a one-time code), it returns `E_HUMAN_REQUIRED` with `action: sign_in` (CLI-065).
 - `auth status` is a read: it checks the credential with the upstream and reports the account, the host and when the credential expires, never a secret.
-- `auth logout` removes the credential from the keyring. It declares `configure`.
+- `auth logout` removes the credential from the keyring. It declares `configure`, and `Meta.AllowUnknownProfile` too, so it can clean up after a profile deleted from the settings file.
 
-Why: people work with several accounts and hosts, such as a company GitLab and gitlab.com. Without profiles an agent switches between them by changing environment variables between calls, and nothing tells it when it gets one wrong. Binding `--profile` next to the resolved account and host keeps a plan made for one account from running as another: the 2026-10 fleet audit found per-tool gates that left an account resolved from the environment or configuration out of the binding (CLI-054). Standard `auth` names let an agent that signed in with one tool find the same commands in the next.
+Why: people work with several accounts and hosts, such as a company GitLab and gitlab.com. Without profiles an agent switches between them by changing environment variables between calls, and nothing tells it when it gets one wrong. Binding `--profile` next to the resolved account and host keeps a plan made for one account from running as another: the 2026-10 fleet audit found per-tool gates that left an account resolved from the environment or configuration out of the binding (CLI-054). Standard `auth` names let an agent that signed in with one tool find the same commands in the next. In the gitlab-cli pilot (2026-10), a second `auth login` left no profile active until someone set `default_profile` by hand.
 
 Check: aicli's profile tests (the order of sources, an unknown name, the binding); review the `auth` commands' effects.
 
 ### CLI-102 Diagnostics
 
-Diagnostic output is on only when `<PREFIX>_DEBUG` is set to anything but empty or `0`. It goes to stderr as lines that start with `debug:`, never to stdout, and it never changes the envelope or the exit code. Values of secret parameters (`Meta.Secrets`, SEC-021), of secret settings (CLI-100) and of secrets the tool registers with `App.AddSecret(value)` (Python `app.add_secret(value)`, for a token read from the keyring) appear as `***`, as do their URL-escaped forms; a line break in a message is escaped, so every line starts with `debug:`. A tool MUST NOT add `--verbose` or `--debug` flags. aicli writes these lines through `App.Debugf(format, args...)` (Python `app.debug(message)`), and on its own logs only the state directory, the scope file path, the settings file and the active profile, and the start of each `update` stage and the release tags it skips. A Skill never sets `<PREFIX>_DEBUG` unless the user asks (SKL-009).
+Diagnostic output is on only when `<PREFIX>_DEBUG` is set to anything but empty or `0`. It goes to stderr as lines that start with `debug:`, never to stdout, and it never changes the envelope or the exit code. Values of secret parameters (`Meta.Secrets`, SEC-021), of secret settings (CLI-100) and of secrets the tool registers with `App.AddSecret(value)` (Python `app.add_secret(value)`, for a token read from the keyring) appear as `***`, as do their URL-escaped forms; a line break in a message is escaped, so every line starts with `debug:`. A tool MUST NOT add `--verbose` or `--debug` flags. aicli writes these lines through `App.Debugf(format, args...)` (Python `app.debug(message)`), which several goroutines or threads may call at once, and on its own logs only the state directory, the scope file path, the settings file and the active profile, and the start of each `update` stage and the release tags it skips. A Skill never sets `<PREFIX>_DEBUG` unless the user asks (SKL-009).
 
 Why: a person chasing a failure needs more than the envelope, but every stderr line costs an agent tokens on every call (CLI-047). A variable that a person sets keeps diagnostics out of agent sessions by default, where a flag would end up in Skills and transcripts; redaction keeps a debug log safe to paste into an issue.
 
@@ -1169,7 +1173,7 @@ Check: aicli's tests (stdout and the exit code unchanged with `<PREFIX>_DEBUG` s
 
 Every upstream request MUST have a timeout: at most 30 s by default, and never longer than CLI-049's bound on a command's run time allows. A tool MAY retry an idempotent read after a connection failure or an HTTP 429, 502, 503 or 504, at most twice, honouring `Retry-After` up to 10 s; when the upstream asks for a longer wait, the tool returns the error instead, with `retry_after_ms` on `E_RATE_LIMITED` (CLI-016). It MUST NOT re-send a write that may have been dispatched (CLI-015, CLI-060).
 
-The tool MUST honour `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`. TLS certificates are always verified: a private CA comes from `<PREFIX>_CA_FILE`, a PEM file added to the system roots, and no flag, variable or setting turns verification off. Requests carry `User-Agent: <tool>/<version> aicli/<spec version>`. When `doctor`'s `connectivity` check fails on a certificate, its message says so and its `fix` names `<PREFIX>_CA_FILE` (CLI-036). aicli's own requests (`update`, `doctor`'s refresh) follow this rule, and a tool gets the same proxy, CA file and TLS settings from `App.HTTPTransport()` and the header from `App.UserAgent()` (Python `app.ssl_context()`, `app.user_agent()`).
+The tool MUST honour `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`. TLS certificates are always verified: a private CA comes from `<PREFIX>_CA_FILE`, a PEM file added to the system roots, and no flag, variable or setting turns verification off. Requests carry `User-Agent: <tool>/<version> aicli/<spec version>`. When `doctor`'s `connectivity` check fails on a certificate, its message says so and its `fix` names `<PREFIX>_CA_FILE` (CLI-036). aicli's own requests (`update`, `doctor`'s refresh) follow this rule, and a tool gets the same proxy, CA file and TLS settings from `App.HTTPTransport()`, which reads the proxy variables through `App.Env` as it reads the CA file, and the header from `App.UserAgent()` (Python `app.ssl_context()`, `app.user_agent()`).
 
 Why: the harness kills a call after 2 minutes, and a killed call reports nothing (CLI-049), so a request without a timeout can cost the whole answer. Re-sending a write is how one change gets applied twice: gitlab-cli's 1.x HTTP client retried 5xx and network errors for every method, so a timed-out POST could apply twice. Agents run on corporate networks behind proxies and private CAs; a CA file makes such a network work without turning off the check that stops interception.
 
@@ -1185,7 +1189,7 @@ Output
 - [ ] CLI-004 `meta.duration_ms` always; only `notices` and `untrusted` besides
 - [ ] CLI-005 `json` default; `text` for people; `raw` where declared; unsupported format → `E_USAGE` in JSON
 - [ ] CLI-006 streams: an envelope with `type` per line, ending in a `summary`
-- [ ] CLI-007 snake_case keys, string IDs, UTC times with `Z`, snake_case enums
+- [ ] CLI-007 snake_case keys, string IDs, UTC times with `Z` under `_at` keys, dates under `_on`, snake_case enums
 
 Errors
 
@@ -1203,20 +1207,20 @@ Command model
 
 - [ ] CLI-020 one registry; help, `reference`, the Skill map and coverage generated from it
 - [ ] CLI-021 tree shape; reserved names and flags; `<noun> <verb>` with the standard verbs
-- [ ] CLI-022 root shortcuts, plurals, a guess list, whole-tree suggestions
+- [ ] CLI-022 root shortcuts for nouns under one parent, plurals, a guess list, whole-tree suggestions
 - [ ] CLI-023 path first; unknown flags and stray positionals rejected; positionals bound to flags
 - [ ] CLI-024 typed parameters; `secret`; no default on a required parameter
-- [ ] CLI-025 true effects; risk tier at least what they require
+- [ ] CLI-025 true effects (a comment is `change`); writes that cannot be undone are dangerous, bulk ones only when what they do is; risk tier at least what they require
 - [ ] CLI-026 error codes per command
 - [ ] CLI-027 maturity with evidence
 - [ ] CLI-028 standard flag names: `--limit`, `--cursor`, `--query`, `--since`, `--sort`, `--state`, `--wait`, `--output`, `--input`, `--profile`
-- [ ] CLI-029 standard verb meanings: an empty `list` is a page, `update` changes only what is given, a missing `delete` target is `E_NOT_FOUND`
+- [ ] CLI-029 standard verb meanings: an empty `list` is a page, `update` changes only what is given, a missing `delete` target is `E_NOT_FOUND`, `search` states its real order
 
 Discovery
 
 - [ ] CLI-030 generated help; root lists every command; write help gives the recipe; no completion command
 - [ ] CLI-031 `reference --index` within 8,000 characters, or grouped
-- [ ] CLI-032 `reference --command` within 4,000 characters
+- [ ] CLI-032 `reference --command` within 6,000 characters
 - [ ] CLI-033 full `reference` for tooling only
 - [ ] CLI-034 no mandatory first step
 - [ ] CLI-035 `context` from local state, with the authorization summary and, with settings, the profile
@@ -1232,9 +1236,9 @@ Reads and output size
 - [ ] CLI-043 heavy sub-resources as separate, structured commands
 - [ ] CLI-044 counting and filtering in the tool
 - [ ] CLI-045 Markdown for rich text
-- [ ] CLI-046 `meta.untrusted` paths
+- [ ] CLI-046 `meta.untrusted` paths, refs that hold people's text included, following `--fields`
 - [ ] CLI-047 quiet stderr; typed notices
-- [ ] CLI-048 refs, URLs, names with `E_AMBIGUOUS`, relative times, `--input`, `--<param>-file`
+- [ ] CLI-048 refs (a sub-resource's under its parent's), URLs, names with `E_AMBIGUOUS`, relative times, `--input`, `--<param>-file`
 - [ ] CLI-049 multi-ref reads, `--wait`, bounded run time
 
 Writes
@@ -1245,7 +1249,7 @@ Writes
 - [ ] CLI-053 confirm repeats the same request
 - [ ] CLI-054 the token binds the whole resolved request
 - [ ] CLI-055 canonical, keyed, single-use tokens; fail closed; no bypass
-- [ ] CLI-056 `--dangerous` in both steps
+- [ ] CLI-056 `--dangerous` in both steps, for a dangerous command or plan
 - [ ] CLI-057 re-checks at confirm, in the fixed order
 - [ ] CLI-058 operation record written before anything is sent
 - [ ] CLI-059 receipts; `ok` from `receipt_rules`

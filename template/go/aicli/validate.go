@@ -2293,17 +2293,15 @@ func validateEnvelopeDoc(v *validation, doc any, stream bool) {
 		v.add("schema_version", "must be %q", SchemaVersion)
 	}
 	validateMeta(v, env["meta"], isOK)
-	size := compactSize(env)
 	if isOK {
+		// The success budget holds for default invocations only (CLI-042), which
+		// the envelope cannot tell: conformance R04 checks it on its own (Q24).
 		if data, has := env["data"]; has {
 			validateSuccessData(v, data)
 		}
-		if !stream && size > successBudgetChars && !isFullReference(env["data"]) {
-			v.add("$", "the response is %d characters, over the %d budget (CLI-042)", size, successBudgetChars)
-		}
 	} else {
 		validateErrorObject(v, "error", env["error"])
-		if size > errorBudgetChars {
+		if size := compactSize(env); size > errorBudgetChars {
 			v.add("$", "error envelope is %d characters (compact), over the %d budget", size, errorBudgetChars)
 		}
 	}
@@ -2344,8 +2342,9 @@ func parseDocument(v *validation, raw []byte) (any, bool) {
 // exact envelope keys; schema_version; meta, its notices and untrusted paths; the
 // error object, its details per code (dispatch_state, the per-code rules, the
 // receipt and batch rules against the code) and the error budget; and for success
-// data the success budget (the full reference is exempt) and the operation,
-// dry-run, receipt, batch and page shapes with their semantic rules.
+// data the operation, dry-run, receipt, batch and page shapes with their semantic
+// rules. The 8,000-character success budget applies to default invocations only
+// (CLI-042), so conformance R04 checks it there, not this function (Q24).
 func ValidateEnvelope(raw []byte) error {
 	v := &validation{}
 	if !bytes.HasSuffix(raw, []byte("\n")) || bytes.HasSuffix(raw, []byte("\r\n")) {
@@ -2795,9 +2794,18 @@ func validateCommandEntry(v *validation, p string, x, tool any, schemas, table m
 		v.add(pj(p, "params"), "%s: parameter names are unique", path)
 	}
 	if t, ok := tool.(string); ok {
+		// An alias replaces the last word of the path (aliases are per parent, P1).
+		parent := ""
+		if i := strings.LastIndex(path, " "); i >= 0 {
+			parent = path[:i] + " "
+		}
+		forms := []string{path}
+		for _, al := range aliases {
+			forms = append(forms, parent+al)
+		}
 		for i, e := range examples {
 			runnable := false
-			for _, q := range append([]string{path}, aliases...) {
+			for _, q := range forms {
 				runnable = runnable || e == t+" "+q || strings.HasPrefix(e, t+" "+q+" ")
 			}
 			if !runnable {

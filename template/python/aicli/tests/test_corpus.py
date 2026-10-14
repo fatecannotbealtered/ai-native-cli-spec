@@ -11,6 +11,7 @@ import pytest
 
 from aicli import validate as V
 from aicli._util import decode_generic, go_json
+from aicli.conformance import over_success_budget
 
 EXAMPLES = Path(__file__).resolve().parents[3] / "common" / "contract" / "examples"
 
@@ -86,6 +87,20 @@ def check(schema: str, raw: bytes, parse: bool) -> None:
     v.raise_if_any()
 
 
+def budget_problems(entry: dict[str, Any], raw: bytes) -> list[str]:
+    """The success budget of a default invocation, which conformance R04 checks and
+    validate_envelope does not (Q24): the corpus's success_budget examples are
+    checked with it."""
+    if (entry.get("violation") or {}).get("check") != "success_budget":
+        return []
+    try:
+        doc = json.loads(raw)
+    except ValueError:
+        return []
+    size, over = over_success_budget(doc)
+    return [f"the response is {size} characters, over the success budget (R04)"] if over else []
+
+
 ENTRIES = _index()
 
 
@@ -96,6 +111,19 @@ def test_corpus_example(entry: dict[str, Any]) -> None:
     parse = (entry.get("violation") or {}).get("kind") == "parse"
     if entry["expect"] == "valid":
         check(entry["schema"], raw, parse)
+        assert not budget_problems(entry, raw)
         return
+    if budget_problems(entry, raw):
+        return  # over the success budget of a default invocation (R04, Q24)
     with pytest.raises(V.ContractViolation):
         check(entry["schema"], raw, parse)
+
+
+@pytest.mark.skipif(not ENTRIES, reason="contract examples not available here")
+def test_q24_validate_envelope_leaves_the_success_budget_to_r04() -> None:
+    entries = [e for e in ENTRIES if (e.get("violation") or {}).get("check") == "success_budget"]
+    assert entries
+    for e in entries:
+        raw = _compact(_raw(e))
+        V.validate_envelope(raw)  # the budget is not this function's (Q24)
+        assert budget_problems(e, raw), e["file"]

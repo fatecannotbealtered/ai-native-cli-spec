@@ -86,6 +86,23 @@ type seenEnvelope struct {
 	label  string
 	raw    []byte
 	stream bool
+	// byDefault marks a default invocation (no --fields or --limit), whose success
+	// response R04 holds to the success budget (CLI-042, Q24).
+	byDefault bool
+}
+
+// defaultInvocation reports arguments that leave the output's size as the command
+// sets it: no --fields and no --limit (CLI-042).
+func defaultInvocation(args []string) bool {
+	for _, arg := range args {
+		if arg == "--" {
+			break
+		}
+		if name := flagName(arg); strings.HasPrefix(arg, "--") && (name == "fields" || name == "limit") {
+			return false
+		}
+	}
+	return true
 }
 
 // stateDir is one isolated state directory with its scope file.
@@ -223,7 +240,8 @@ func (s *suite) run(st *stateDir, label string, args []string, stdin string) run
 		if dec.Decode(&m) == nil {
 			r.env = m
 		}
-		s.seen = append(s.seen, seenEnvelope{label: label + ": " + strings.Join(args, " "), raw: r.stdout, stream: isStreamOutput(r.stdout)})
+		s.seen = append(s.seen, seenEnvelope{label: label + ": " + strings.Join(args, " "), raw: r.stdout, stream: isStreamOutput(r.stdout),
+			byDefault: defaultInvocation(args)})
 	}
 	return r
 }
@@ -329,7 +347,7 @@ func (s *suite) checkReference() {
 	r := s.run(st, "R01", []string{"reference"}, "")
 	if r.exit != 0 {
 		s.errorf("R01", "reference failed: %s", r.describe())
-	} else if err := validateReferenceFull(r.data()); err != nil {
+	} else if err := validateReferenceFull(s.resolvedExamples(r.data())); err != nil {
 		s.errorf("R01", "reference: %v", err)
 	}
 	r = s.run(st, "R01", []string{"reference", "--index"}, "")
@@ -366,10 +384,51 @@ func (s *suite) checkReference() {
 		if n := runeLen(cr.stdout); n > commandBudgetChars {
 			s.errorf("R01", "reference --command %q is %d characters, over %d", path, n, commandBudgetChars)
 		}
-		if err := validateReferenceCommand(cr.data()); err != nil {
+		if err := validateReferenceCommand(s.resolvedExamples(cr.data())); err != nil {
 			s.errorf("R01", "reference --command %q: %v", path, err)
 		}
 	}
+}
+
+// resolvedExamples returns reference data whose examples are resolved as the parser
+// resolves them (Q21): an example written with a root shortcut or an alias is
+// checked as the command line it runs, as the tree check (R02) checks it. Examples
+// that resolve to no command are left as they are, for the validator to report.
+func (s *suite) resolvedExamples(data map[string]any) map[string]any {
+	fix := func(entry any) any {
+		c, ok := entry.(map[string]any)
+		if !ok {
+			return entry
+		}
+		list, ok := c["examples"].([]any)
+		if !ok {
+			return entry
+		}
+		out := cloneMap(c)
+		examples := make([]any, len(list))
+		for i, x := range list {
+			examples[i] = x
+			if ex, isText := x.(string); isText {
+				if target, resolved := s.probe.exampleCommand(ex); target != nil && cmdPath(target) == c["path"] {
+					examples[i] = resolved
+				}
+			}
+		}
+		out["examples"] = examples
+		return out
+	}
+	out := cloneMap(data)
+	if cmds, ok := data["commands"].([]any); ok {
+		fixed := make([]any, len(cmds))
+		for i, c := range cmds {
+			fixed[i] = fix(c)
+		}
+		out["commands"] = fixed
+	}
+	if c, ok := data["command"]; ok {
+		out["command"] = fix(c)
+	}
+	return out
 }
 
 func runeLen(b []byte) int { return utf8.RuneCount(bytes.TrimRight(b, "\n")) }
@@ -1021,8 +1080,33 @@ func (s *suite) checkEnvelopes() {
 		}
 		if err := validate(e.raw); err != nil {
 			s.errorf("R04", "%s: %v", e.label, err)
+			continue
+		}
+		// A default invocation's success stays within the budget (CLI-042, Q24);
+		// the full reference is exempt (decision 17).
+		if e.stream || !e.byDefault {
+			continue
+		}
+		var env map[string]any
+		dec := json.NewDecoder(bytes.NewReader(e.raw))
+		dec.UseNumber()
+		if dec.Decode(&env) != nil {
+			continue
+		}
+		if size, over := overSuccessBudget(env); over {
+			s.errorf("R04", "%s: the response is %d characters, over the %d budget of a default invocation (CLI-042)", e.label, size, successBudgetChars)
 		}
 	}
+}
+
+// overSuccessBudget reports a success envelope over the success budget of a default
+// invocation (CLI-042, Q24), measured compact; the full reference is exempt.
+func overSuccessBudget(env map[string]any) (int, bool) {
+	if env["ok"] != true || isFullReference(env["data"]) {
+		return 0, false
+	}
+	size := compactSize(env)
+	return size, size > successBudgetChars
 }
 
 // ---------------------------------------------------------------- R06 coverage

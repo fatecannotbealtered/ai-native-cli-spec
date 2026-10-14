@@ -354,7 +354,8 @@ func TestP5SetProfileSettings(t *testing.T) {
 	if e := a.SetProfileSettings("lab", map[string]string{"host": "https://lab.example"}); e != nil {
 		t.Fatal(e)
 	}
-	mustJSON(t, "new file", readBack(), `{"profiles":{"lab":{"host":"https://lab.example"}}}`)
+	// the first profile written becomes the default (Q3)
+	mustJSON(t, "new file", readBack(), `{"default_profile":"lab","profiles":{"lab":{"host":"https://lab.example"}}}`)
 	if runtime.GOOS != "windows" {
 		if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
 			t.Fatalf("the settings file must be 0600: %v %v", info.Mode(), err)
@@ -420,11 +421,11 @@ func TestP5SetProfileSettings(t *testing.T) {
 
 // ---------------------------------------------------------------- P6 new profiles
 
-// P6: a command declared with Meta.NewProfile runs with a requested profile the
+// P6: a command declared with Meta.AllowUnknownProfile runs with a requested profile the
 // settings file does not have: Setting reads the flag, the environment and the
 // default; App.Profile and the binding name the requested profile; its Apply can
 // create it with SetProfileSettings. Other commands still refuse the profile.
-func TestP6NewProfileCommands(t *testing.T) {
+func TestP6UnknownProfileCommands(t *testing.T) {
 	h := settingsHarness(t)
 	h.grant(map[string]any{"effects": []string{"change", "deliver", "configure"}})
 	base := h.build
@@ -459,7 +460,7 @@ func TestP6NewProfileCommands(t *testing.T) {
 		a.Schema("login_result", SchemaDef{Shape: "object",
 			Fields: []string{"profile", "profile_source", "host", "host_source", "page_size", "page_size_source"}})
 		a.Register(login, Meta{Summary: "Sign in and keep the host in a profile", Effects: []Effect{Configure}, Output: "login_result",
-			NewProfile: true, Examples: []string{"notes login --profile lab --host https://lab.example --dangerous --dry-run"}})
+			AllowUnknownProfile: true, Examples: []string{"notes login --profile lab --host https://lab.example --dangerous --dry-run"}})
 		return a
 	}
 	writeSettings(t, h, `{"profiles": {"work": {"host": "https://w.example"}}}`)
@@ -469,7 +470,7 @@ func TestP6NewProfileCommands(t *testing.T) {
 	pv, _ := dry.data()["preview"].(map[string]any)
 	inputs, _ := pv["inputs"].(map[string]any)
 	if dry.exit != 0 || inputs["profile"] != "lab" || dry.token() == "" {
-		t.Fatalf("a NewProfile command runs with the new profile: %s", dry)
+		t.Fatalf("an AllowUnknownProfile command runs with the new profile: %s", dry)
 	}
 	// the token binds the requested profile
 	expectMismatch(t, h.run("login", "--profile", "lab2", "--host", "https://lab.example", "--dangerous", "--confirm", dry.token()), "profile")

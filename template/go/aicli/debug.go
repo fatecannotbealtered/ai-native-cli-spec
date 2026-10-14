@@ -33,13 +33,16 @@ func (a *App) debugOn() bool {
 
 // Debugf writes "debug: <message>" to stderr when <PREFIX>_DEBUG is set to anything
 // but "" or "0". Secret values (secretValues) are replaced by ***, and line breaks
-// are escaped so every line starts with "debug:" (D11).
+// are escaped so every line starts with "debug:" (D11). It is safe to call from
+// several goroutines (Q22): each line is written whole.
 func (a *App) Debugf(format string, args ...any) {
 	if !a.debugOn() {
 		return
 	}
 	msg := redactWith(fmt.Sprintf(format, args...), a.secretValues())
 	msg = strings.NewReplacer("\r", `\r`, "\n", `\n`).Replace(msg)
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	_, _ = fmt.Fprintf(a.stderr(), "debug: %s\n", msg)
 }
 
@@ -49,14 +52,16 @@ func (a *App) debugOnce(format string, args ...any) {
 		return
 	}
 	line := fmt.Sprintf(format, args...)
+	a.mu.Lock()
 	if a.debugSeen == nil {
 		a.debugSeen = map[string]bool{}
 	}
-	if a.debugSeen[line] {
-		return
-	}
+	seen := a.debugSeen[line]
 	a.debugSeen[line] = true
-	a.Debugf("%s", line)
+	a.mu.Unlock()
+	if !seen {
+		a.Debugf("%s", line)
+	}
 }
 
 // secretValues lists the values debug lines and errors never show, longest first:
@@ -114,7 +119,10 @@ func (a *App) secretValues() []string {
 		add(a.env(a.envPrefix() + "_" + s.envName()))
 		add(s.Default)
 	}
-	for _, v := range a.secrets {
+	a.mu.Lock()
+	registered := append([]string(nil), a.secrets...)
+	a.mu.Unlock()
+	for _, v := range registered {
 		add(v)
 	}
 	out := make([]string, 0, len(set))

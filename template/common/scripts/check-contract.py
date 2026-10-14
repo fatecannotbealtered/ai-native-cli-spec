@@ -39,7 +39,7 @@ Size budgets (CLI-031, CLI-032, CLI-042) on whole envelopes: an error is at most
 is at most 8000, except the full reference (data with exactly contract.json
 self_description.reference.required_keys), which is exempt (contract.json size_budgets.exempt);
 reference --index data is held to the index budget (8000) and reference --command data to the command
-budget (4000). Raw-format output is not an envelope and is not checked. NDJSON stream lines are not
+budget (6000). Raw-format output is not an envelope and is not checked. NDJSON stream lines are not
 budgeted.
 
 The checks are static: they show that documents are well formed and consistent, not that a tool produced

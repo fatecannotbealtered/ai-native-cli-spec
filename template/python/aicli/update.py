@@ -11,16 +11,18 @@ verifying the Sigstore signature of checksums.txt (exact workflow identity) and 
 archive's checksum, and finally sync the installed Skills from the new package.
 
 Network use follows CLI-110: 30 s per request, proxies from HTTPS_PROXY,
-HTTP_PROXY and NO_PROXY, TLS always verified (<PREFIX>_CA_FILE adds a PEM bundle to
-the system roots), a User-Agent, GITHUB_TOKEN (else GH_TOKEN) sent only to the API
-host, and size caps on everything read."""
+HTTP_PROXY and NO_PROXY in the App's environment (App.env), TLS always verified
+(<PREFIX>_CA_FILE adds a PEM bundle to the system roots), a User-Agent, GITHUB_TOKEN
+(else GH_TOKEN) sent only to the API host, and size caps on everything read."""
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import functools
 import hashlib
 import http.client
+import ipaddress
 import json
 import math
 import os
@@ -354,6 +356,77 @@ class _HttpsRedirects(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+def app_proxies(app: App) -> tuple[dict[str, str], str]:
+    """The proxies of the App's environment (CLI-110, Q2), read through App.env and
+    never the process environment, by Go's httpproxy rules: HTTPS_PROXY for https
+    requests, HTTP_PROXY for http ones (ignored under CGI, REQUEST_METHOD set), and
+    NO_PROXY, the hosts that go direct; each upper-case name before its lower-case
+    form."""
+
+    def env_any(*names: str) -> str:
+        for name in names:
+            v = app._env(name) or ""
+            if v:
+                return v
+        return ""
+
+    proxies: dict[str, str] = {}
+    v = env_any("HTTPS_PROXY", "https_proxy")
+    if v:
+        proxies["https"] = v
+    v = env_any("HTTP_PROXY", "http_proxy")
+    if v and not app._env("REQUEST_METHOD"):
+        proxies["http"] = v
+    return proxies, env_any("NO_PROXY", "no_proxy")
+
+
+def _loopback(host: str) -> bool:
+    """localhost or a loopback address, which never goes through a proxy."""
+    name = host.strip().lower()
+    if name.startswith("["):
+        name = name[1 : name.find("]")] if "]" in name else name[1:]
+    elif name.count(":") == 1:
+        name = name.split(":", 1)[0]
+    if name == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        return False
+
+
+class _AppProxyHandler(urllib.request.ProxyHandler):
+    """urllib's ProxyHandler over the App's proxies (Q2): its own NO_PROXY decides
+    which hosts go direct, not the process environment or the Windows registry,
+    and localhost never uses a proxy."""
+
+    def __init__(self, proxies: dict[str, str], no_proxy: str) -> None:
+        super().__init__(proxies)
+        self.no_proxy = no_proxy
+
+    def proxy_open(self, req: Any, proxy: str, type: str) -> Any:  # noqa: A002 - urllib's name
+        orig_type = req.type
+        proxy_type, user, password, hostport = urllib.request._parse_proxy(proxy)  # type: ignore[attr-defined]
+        if proxy_type is None:
+            proxy_type = orig_type
+        if req.host and (
+            _loopback(req.host)
+            or (
+                self.no_proxy
+                and urllib.request.proxy_bypass_environment(req.host, {"no": self.no_proxy})
+            )
+        ):
+            return None
+        if user and password:
+            pair = f"{urllib.parse.unquote(user)}:{urllib.parse.unquote(password)}"
+            creds = base64.b64encode(pair.encode()).decode("ascii")
+            req.add_header("Proxy-authorization", "Basic " + creds)
+        req.set_proxy(urllib.parse.unquote(hostport), proxy_type)
+        if orig_type == proxy_type or orig_type == "https":
+            return None  # the other handlers take it from here
+        return self.parent.open(req, timeout=req.timeout)
+
+
 class _Net:
     """HTTP GET for the update (CLI-110)."""
 
@@ -367,12 +440,13 @@ class _Net:
         self._opener: urllib.request.OpenerDirector | None = None
 
     def opener(self) -> urllib.request.OpenerDirector:
-        """The opener on App.ssl_context (CLI-110, P10): the proxy from the
-        environment, the system roots plus <PREFIX>_CA_FILE, https-only redirects.
-        An unusable CA file raises its E_CONFIG Error."""
+        """The opener on App.ssl_context (CLI-110, P10): the proxy from the App's
+        environment (Q2), the system roots plus <PREFIX>_CA_FILE, https-only
+        redirects. An unusable CA file raises its E_CONFIG Error."""
         if self._opener is None:
+            proxies, no_proxy = app_proxies(self.app)
             self._opener = urllib.request.build_opener(
-                urllib.request.ProxyHandler(urllib.request.getproxies_environment()),
+                _AppProxyHandler(proxies, no_proxy),
                 urllib.request.HTTPSHandler(context=self.app.ssl_context()),
                 _HttpsRedirects(),
             )

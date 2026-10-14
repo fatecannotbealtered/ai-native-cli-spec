@@ -33,6 +33,7 @@ from .contract_gen import (
     COMMAND_BUDGET_CHARS,
     EXCLUDED_FROM_BINDING,
     INDEX_BUDGET_CHARS,
+    SUCCESS_BUDGET_CHARS,
     WRITE_EFFECTS,
 )
 from .keystore import KEY_SIZE
@@ -41,6 +42,8 @@ from .scope import validate_scope_file
 from .token import parse_token
 from .validate import (
     ContractViolation,
+    compact_size,
+    is_full_reference,
     validate_changelog,
     validate_context,
     validate_doctor,
@@ -250,7 +253,8 @@ class _Suite:
         self.tool = probe.tool_name()
         self.prefix = probe._prefix()
         self.counter = 0
-        self.seen: list[tuple[str, bytes, bool]] = []  # label, stdout, an NDJSON stream
+        # label, stdout, an NDJSON stream, a default invocation (Q24)
+        self.seen: list[tuple[str, bytes, bool, bool]] = []
         self.outputs: list[bytes] = []
 
     def cleanup(self) -> None:
@@ -344,7 +348,14 @@ class _Suite:
                 r.env = doc if isinstance(doc, dict) else None
             except ValueError:
                 pass
-            self.seen.append((label + ": " + " ".join(args), r.stdout, is_stream_output(r.stdout)))
+            self.seen.append(
+                (
+                    label + ": " + " ".join(args),
+                    r.stdout,
+                    is_stream_output(r.stdout),
+                    default_invocation(args),
+                )
+            )
         return r
 
     # ---------------------------------------------------------------- driver
@@ -380,7 +391,9 @@ class _Suite:
         if r.exit != 0:
             self.errorf("R01", f"reference failed: {r.describe()}")
         else:
-            self._valid("R01", "reference", validate_reference_full, r.data())
+            self._valid(
+                "R01", "reference", validate_reference_full, self.resolved_examples(r.data())
+            )
         r = self.run(st, "R01", ["reference", "--index"])
         if r.exit != 0:
             self.errorf("R01", f"reference --index failed: {r.describe()}")
@@ -410,8 +423,38 @@ class _Suite:
                     f"{COMMAND_BUDGET_CHARS}",
                 )
             self._valid(
-                "R01", f'reference --command "{c.path}"', validate_reference_command, cr.data()
+                "R01",
+                f'reference --command "{c.path}"',
+                validate_reference_command,
+                self.resolved_examples(cr.data()),
             )
+
+    def resolved_examples(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Reference data whose examples are resolved as the parser resolves them
+        (Q21): an example written with a root shortcut or an alias is checked as the
+        command line it runs, as the tree check (R02) checks it. Examples that
+        resolve to no command are left as they are, for the validator to report."""
+
+        def fix(entry: Any) -> Any:
+            if not isinstance(entry, dict) or not isinstance(entry.get("examples"), list):
+                return entry
+            out = dict(entry)
+            examples = []
+            for x in entry["examples"]:
+                if isinstance(x, str):
+                    target, resolved = self.probe.example_command(x)
+                    if target is not None and target.path == entry.get("path"):
+                        x = resolved
+                examples.append(x)
+            out["examples"] = examples
+            return out
+
+        out = dict(data)
+        if isinstance(data.get("commands"), list):
+            out["commands"] = [fix(c) for c in data["commands"]]
+        if "command" in data:
+            out["command"] = fix(data["command"])
+        return out
 
     def _valid(self, check: str, what: str, fn: Callable[[Any], None], data: Any) -> None:
         try:
@@ -962,11 +1005,27 @@ class _Suite:
         # validate_envelope covers the envelope, details, budgets, snake_case keys,
         # ids and UTC times (CLI-007); validate_stream does the same for each line
         # of a stream and checks that the summary is last.
-        for label, raw, stream in self.seen:
+        for label, raw, stream, by_default in self.seen:
             try:
                 (validate_stream if stream else validate_envelope)(raw)
             except ContractViolation as exc:
                 self.errorf("R04", f"{label}: {exc}")
+                continue
+            # A default invocation's success stays within the budget (CLI-042, Q24);
+            # the full reference is exempt (decision 17).
+            if stream or not by_default:
+                continue
+            try:
+                env = json.loads(raw.decode("utf-8"))
+            except ValueError:
+                continue
+            size, over = over_success_budget(env)
+            if over:
+                self.errorf(
+                    "R04",
+                    f"{label}: the response is {size} characters, over the "
+                    f"{SUCCESS_BUDGET_CHARS} budget of a default invocation (CLI-042)",
+                )
 
     def check_coverage(self) -> None:
         if not self.h.coverage_file:
@@ -996,6 +1055,28 @@ class _Suite:
 
 
 # ---------------------------------------------------------------- samples
+
+
+def default_invocation(args: list[str]) -> bool:
+    """Arguments that leave the output's size as the command sets it: no --fields
+    and no --limit (CLI-042)."""
+    for arg in args:
+        if arg == "--":
+            break
+        name = arg[2:].split("=", 1)[0] if arg.startswith("--") else ""
+        if name in ("fields", "limit"):
+            return False
+    return True
+
+
+def over_success_budget(env: Any) -> tuple[int, bool]:
+    """The size of a success envelope and whether it is over the success budget of
+    a default invocation (CLI-042, Q24), measured compact; the full reference is
+    exempt."""
+    if not isinstance(env, dict) or env.get("ok") is not True or is_full_reference(env.get("data")):
+        return 0, False
+    size = compact_size(env)
+    return size, size > SUCCESS_BUDGET_CHARS
 
 
 def is_stream_output(raw: bytes) -> bool:

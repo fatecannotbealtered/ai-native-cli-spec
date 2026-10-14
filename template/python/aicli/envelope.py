@@ -119,6 +119,10 @@ class RunState:
     debugged: set[str] = field(default_factory=set)  # library debug lines written this run
     profile: Any = None  # the resolved config profile (settings.ProfileState), once read
     parsed: Node | None = None  # the command the arguments name, once found
+    # old names of renamed flags the arguments used (Q10)
+    renamed_used: list[str] = field(default_factory=list)
+    # a renamed flag given with its new name too: (old, new)
+    renamed_both: tuple[str, str] = ("", "")
 
 
 def prefix_paths(prefix: str, paths: list[str]) -> list[str]:
@@ -162,6 +166,44 @@ def keep_keys(v: Any, keep: set[str]) -> Any:
     if not isinstance(v, dict):
         return v
     return {k: val for k, val in v.items() if k in keep}
+
+
+def present_paths(root: dict[str, Any], paths: list[str]) -> list[str]:
+    """The untrusted paths that name at least one value in the response (Q20): the
+    path of a field the projection removed, or of the items of an empty list, names
+    none and is dropped. root holds the response's data ({"data": ...}) or error
+    ({"error": {"details": ...}}) in generic JSON form."""
+    return [p for p in paths if path_present(root, p.strip())]
+
+
+def path_present(root: dict[str, Any], path: str) -> bool:
+    """Walk one untrusted path ("data.items[].title"): each segment names a key,
+    and each [] steps into a list."""
+    nodes: list[Any] = [root]
+    for seg in path.split("."):
+        name = seg.rstrip("[]")
+        arrays = (len(seg) - len(name)) // 2
+        nxt: list[Any] = []
+        for n in nodes:
+            if not isinstance(n, dict) or name not in n:
+                continue
+            vals = [n[name]]
+            for _ in range(arrays):
+                vals = [x for v in vals if isinstance(v, list) for x in v]
+            nxt.extend(vals)
+        if not nxt:
+            return False
+        nodes = nxt
+    return True
+
+
+def error_root(obj: dict[str, Any]) -> dict[str, Any]:
+    """An error's details as the root present_paths walks."""
+    try:
+        details = to_generic(obj.get("details") or {})
+    except (TypeError, ValueError):
+        details = {}
+    return {"error": {"details": details}}
 
 
 def encode_envelope(env: Ordered, pretty: bool = False) -> bytes:
@@ -221,7 +263,8 @@ class EnvelopeMixin:
     # ---------------------------------------------------------------- notices and output
 
     def notice(self: App, n: Notice) -> None:
-        """Add a notice to the current response's meta.notices."""
+        """Add a notice to the current response's meta.notices. It is safe to call
+        from several threads (Q22)."""
         st = self._run
         if st is None:
             return
@@ -229,9 +272,10 @@ class EnvelopeMixin:
             n = dataclasses.replace(n, type="notice")
         if n.severity not in NOTICE_SEVERITY_VALUES:
             n = dataclasses.replace(n, severity="info")
-        if n in st.notices:
-            return
-        st.notices.append(n)
+        with self._mu:
+            if n in st.notices:
+                return
+            st.notices.append(n)
 
     def ok(self: App, cmd: Any, data: Any, *untrusted: str) -> None:
         """Report success with data (CLI-002). untrusted lists paths inside data
@@ -258,11 +302,28 @@ class EnvelopeMixin:
         paths += schema_untrusted(schema, shape)
         st.out = Result_(set=True, data=gen, raw=data, untrusted=paths)
 
-    def project(
-        self: App, st: RunState, m: Meta | None, schema: SchemaDef, shape: str, v: Any
-    ) -> Any:
-        """Apply --fields and default fields to a command's output (CLI-040).
-        Pagination keys are never removed and "ref" is always kept."""
+    def output_format(self: App, cmd: Any = None) -> str:
+        """The output format of this run (CLI-005, Q14): json, text or raw, as
+        resolved for the running command; json outside App.execute."""
+        st = self._run
+        if st is None:
+            return "json"
+        return st.format or "json"
+
+    def wants_field(self: App, cmd: Any, name: str) -> bool:
+        """Whether the running command's response keeps the field name (CLI-040,
+        Q17); True outside App.execute."""
+        st = self._run
+        if st is None:
+            return True
+        node = self._resolve_node(cmd) or st.cmd
+        m = self.meta_for(node) if node is not None else None
+        keep = self.projection(st, m, self.schema_of(m))
+        return keep is None or name in keep
+
+    def projection(self: App, st: RunState, m: Meta | None, schema: SchemaDef) -> set[str] | None:
+        """The fields --fields and the default fields keep (CLI-040): None when
+        every field is returned; "ref" is always kept."""
         defaults = list(schema.default_fields)
         if m is not None and m.default_fields:
             defaults = list(m.default_fields)
@@ -277,9 +338,18 @@ class EnvelopeMixin:
                 keep = set(defaults) | set(sel.names)
         elif defaults:
             keep = set(defaults)
+        if keep is not None:
+            keep.add("ref")
+        return keep
+
+    def project(
+        self: App, st: RunState, m: Meta | None, schema: SchemaDef, shape: str, v: Any
+    ) -> Any:
+        """Apply --fields and default fields to a command's output (CLI-040).
+        Pagination keys are never removed and "ref" is always kept."""
+        keep = self.projection(st, m, schema)
         if keep is None:
             return v
-        keep.add("ref")
         if shape == "page":
             if not isinstance(v, dict):
                 return v
@@ -328,7 +398,8 @@ class EnvelopeMixin:
     def _emit(self: App, st: RunState, res: Result_) -> int:
         stdout, stderr = self._stdout(), self._stderr()
         if res.err is None:
-            untrusted = clean_paths(res.untrusted)
+            # the paths of fields the projection removed name nothing (Q20)
+            untrusted = clean_paths(present_paths({"data": res.data}, res.untrusted))
             if st.format == "text":
                 self._write(stdout, write_text(res.data).encode("utf-8", "replace"))
                 self._text_notices(st, stderr)
@@ -349,12 +420,15 @@ class EnvelopeMixin:
                     )
             else:
                 meta = self._meta(st, untrusted)
-                env = Ordered(
-                    ok=True,
-                    schema_version=SCHEMA_VERSION,
-                    data=fit_success_budget(res.data, meta) if res.library else res.data,
-                    meta=meta,
-                )
+                data = res.data
+                if res.library:
+                    data = fit_success_budget(data, meta)
+                    kept = clean_paths(present_paths({"data": data}, untrusted))
+                    if kept:
+                        meta["untrusted"] = kept
+                    else:
+                        meta.pop("untrusted", None)
+                env = Ordered(ok=True, schema_version=SCHEMA_VERSION, data=data, meta=meta)
                 try:
                     self._write(stdout, encode_envelope(env, st.pretty))
                     return 0
@@ -365,9 +439,14 @@ class EnvelopeMixin:
                     )
         assert res.err is not None
         obj, code, err_untrusted = self.normalize_error(res.err)
-        untrusted = clean_paths(err_untrusted + res.untrusted)
+        untrusted = clean_paths(present_paths(error_root(obj), err_untrusted + res.untrusted))
         meta = self._meta(st, untrusted)
         obj = fit_error_budget(obj, meta, self.tool_name())
+        kept = clean_paths(present_paths(error_root(obj), untrusted))
+        if kept:
+            meta["untrusted"] = kept
+        else:
+            meta.pop("untrusted", None)
         if st.format == "text":
             self._write(stderr, write_text_error(obj).encode("utf-8", "replace"))
             self._text_notices(st, stderr)

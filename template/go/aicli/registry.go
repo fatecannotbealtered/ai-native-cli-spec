@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -70,13 +71,27 @@ type Meta struct {
 	// DeprecatedFlags marks flags deprecated: flag name -> replacement text. Help
 	// and reference prefix the flag's description; using it adds a notice.
 	DeprecatedFlags map[string]string
-	// NewProfile lets the command run with a requested profile (--profile or
-	// <PREFIX>_PROFILE) that the settings file does not have yet, as `auth login
-	// --profile lab` creates it (CLI-101, P6): the unknown-profile refusal is
-	// skipped, App.Setting reads the flag, the environment and the default only,
-	// App.Profile returns the requested name, and that name is still bound into the
-	// confirm token. Apply creates the profile with App.SetProfileSettings.
-	NewProfile bool
+	// RenamedFlags keeps old flag names working (old -> new, Q10): --old is read as
+	// --new (and binds as --new), using it adds the notice "`--old` is deprecated:
+	// use `--new`.", giving both is E_USAGE, and help leaves it out while reference
+	// lists it as a deprecated parameter. The command defines only --new.
+	RenamedFlags map[string]string
+	// FlagAliases accepts other long flag names on this command only (alias ->
+	// canonical, Q11), after App.FlagAliases: an alias App.FlagAliases maps on this
+	// command wins. The canonical flag binds; reference does not list the alias.
+	FlagAliases map[string]string
+	// StreamItem names the schema of the items an NDJSON stream writes (App.Stream,
+	// Q23) when they are not the output schema's objects (a log's lines): items are
+	// projected with it and take its untrusted fields.
+	StreamItem string
+	// AllowUnknownProfile lets the command run under a profile (--profile or
+	// <PREFIX>_PROFILE) that the settings file does not have (CLI-101, P6, Q4): `auth
+	// login --profile lab` creates it, `auth logout --profile gone` cleans up after a
+	// deleted one. The unknown-profile refusal is skipped, App.Setting reads the
+	// flag, the environment and the default only, App.Profile returns the requested
+	// name, and that name is still bound into the confirm token. Apply creates the
+	// profile with App.SetProfileSettings.
+	AllowUnknownProfile bool
 }
 
 // deprecatedText is the help and reference text of a deprecated command or flag
@@ -148,6 +163,9 @@ type registry struct {
 	schemas map[string]SchemaDef
 	builtin map[*cobra.Command]bool
 	order   []*cobra.Command // leaves in the order they were registered
+	// problems are registration defects (a schema registered twice, Q18; a shortcut
+	// word mapped to two paths, Q6), which the tree check reports.
+	problems []string
 }
 
 func (r *registry) init() {
@@ -196,10 +214,35 @@ func (a *App) Group(cmd *cobra.Command, summary string) {
 	a.reg.groups[cmd] = summary
 }
 
-// Schema registers an output schema under name.
+// Schema registers an output schema under name. A name is registered once: a
+// second call is a defect the tree check reports (Q18), and the first definition
+// stays.
 func (a *App) Schema(name string, s SchemaDef) {
 	a.reg.init()
+	if _, taken := a.reg.schemas[name]; taken {
+		a.reg.problems = append(a.reg.problems, fmt.Sprintf("App.Schema(%q) was called twice; register each schema name once (the first definition is kept)", name))
+		return
+	}
 	a.reg.schemas[name] = s
+}
+
+// AddShortcut maps a word typed at the root to a command path (CLI-022, Q6), as
+// App.Shortcuts does: "branch" -> "repo", "branch". A word already mapped to a
+// different path is a defect the tree check reports, and the first mapping stays;
+// the same mapping again is harmless.
+func (a *App) AddShortcut(word string, path ...string) {
+	a.reg.init()
+	if a.Shortcuts == nil {
+		a.Shortcuts = map[string][]string{}
+	}
+	if have, taken := a.Shortcuts[word]; taken {
+		if !slices.Equal(have, path) {
+			a.reg.problems = append(a.reg.problems, fmt.Sprintf("App.AddShortcut(%q) maps it to %q, but it already maps to %q; a shortcut word names one path (the first is kept)",
+				word, strings.Join(path, " "), strings.Join(have, " ")))
+		}
+		return
+	}
+	a.Shortcuts[word] = append([]string(nil), path...)
 }
 
 func (a *App) metaFor(cmd *cobra.Command) *Meta {
@@ -477,8 +520,12 @@ func typedDefault(f *pflag.Flag, typ string) any {
 	return d
 }
 
-// params builds a command's reference params: positionals first, then flags by name.
-func (a *App) params(c *cobra.Command) []paramEntry {
+// params builds a command's help params: positionals first, then flags by name.
+func (a *App) params(c *cobra.Command) []paramEntry { return a.paramsOf(c, false) }
+
+// paramsOf builds a command's params; withRenamed adds the old names of renamed
+// flags as deprecated parameters, which reference lists and help does not (Q10).
+func (a *App) paramsOf(c *cobra.Command, withRenamed bool) []paramEntry {
 	m := a.metaFor(c)
 	out := []paramEntry{}
 	posFlag := ""
@@ -528,6 +575,18 @@ func (a *App) params(c *cobra.Command) []paramEntry {
 		}
 		flags = append(flags, a.paramFor(m, f))
 	})
+	if withRenamed && m != nil {
+		for _, old := range sortedKeys(m.RenamedFlags) {
+			f := lookupFlag(c, m.RenamedFlags[old])
+			if f == nil || lookupFlag(c, old) != nil {
+				continue // the tree check reports it
+			}
+			p := a.paramFor(m, f)
+			p.Name, p.Required, p.Default = old, false, nil
+			p.Description = deprecatedText("use `--"+f.Name+"`", f.Usage)
+			flags = append(flags, p)
+		}
+	}
 	sort.SliceStable(flags, func(i, j int) bool { return flags[i].Name < flags[j].Name })
 	return append(out, flags...)
 }
@@ -610,9 +669,13 @@ func (a *App) commandType(m *Meta) string {
 }
 
 // errorCodesOf lists the codes a command can return: its declared codes plus the
-// codes the library itself returns for it.
-func (a *App) errorCodesOf(m *Meta) []string {
+// codes the library itself returns for it, E_CONFIG among them for every tool
+// command when settings are declared (an unknown profile stops it, D4, Q25).
+func (a *App) errorCodesOf(c *cobra.Command, m *Meta) []string {
 	set := map[string]bool{"E_USAGE": true, "E_UNKNOWN": true}
+	if a.Settings != nil && !a.reg.builtin[c] {
+		set["E_CONFIG"] = true
+	}
 	if m != nil {
 		for _, c := range m.ErrorCodes {
 			set[c] = true
@@ -635,7 +698,7 @@ func (a *App) errorCodesOf(m *Meta) []string {
 func (a *App) entryFor(c *cobra.Command) commandEntry {
 	m := a.metaFor(c)
 	e := commandEntry{Path: cmdPath(c), Aliases: nonNil(c.Aliases), Summary: c.Short, Type: a.commandType(m),
-		Effects: []string{}, Maturity: string(Draft), Evidence: []string{}, Params: a.params(c), ErrorCodes: a.errorCodesOf(m),
+		Effects: []string{}, Maturity: string(Draft), Evidence: []string{}, Params: a.paramsOf(c, true), ErrorCodes: a.errorCodesOf(c, m),
 		Examples: []string{}}
 	if m != nil {
 		e.Summary = a.summaryOf(c)
@@ -643,7 +706,7 @@ func (a *App) entryFor(c *cobra.Command) commandEntry {
 		e.Dangerous = m.dangerous()
 		e.Maturity = string(m.Maturity)
 		e.Evidence = nonNil(m.Evidence)
-		e.Output = m.Output
+		e.Output, _ = a.outputOf(c, m)
 		e.Examples = nonNil(m.Examples)
 	}
 	sort.Strings(e.Aliases)
@@ -655,13 +718,49 @@ func (a *App) indexFor(c *cobra.Command) indexEntry {
 	return indexEntry{Path: e.Path, Type: e.Type, Effects: e.Effects, Dangerous: e.Dangerous, Maturity: e.Maturity, Summary: e.Summary}
 }
 
+func schemaEntryOf(s SchemaDef) schemaEntry {
+	return schemaEntry{Shape: s.Shape, Fields: nonNil(s.Fields), DefaultFields: nonNil(s.DefaultFields), UntrustedFields: nonNil(s.Untrusted)}
+}
+
+// schemaEntries is the reference's schema catalog: every registered schema, and the
+// command-specific copies outputOf names (Q5).
 func (a *App) schemaEntries() map[string]schemaEntry {
 	out := map[string]schemaEntry{}
 	for name, s := range a.reg.schemas {
-		out[name] = schemaEntry{Shape: s.Shape, Fields: nonNil(s.Fields), DefaultFields: nonNil(s.DefaultFields),
-			UntrustedFields: nonNil(s.Untrusted)}
+		out[name] = schemaEntryOf(s)
+	}
+	for _, c := range a.commands() {
+		if name, own := a.outputOf(c, a.metaFor(c)); own != nil {
+			out[name] = *own
+		}
 	}
 	return out
+}
+
+// outputOf is the schema name a command's reference entry gives as its output
+// (Q5): its output schema, or, when Meta.DefaultFields differ from the schema's
+// default fields, a copy of the schema with the command's default fields under the
+// name <output>_for_<path> (path words joined by _, - read as _), returned as own,
+// so reference shows the defaults the command really uses, as help does.
+func (a *App) outputOf(c *cobra.Command, m *Meta) (string, *schemaEntry) {
+	if m == nil {
+		return "", nil
+	}
+	s, ok := a.reg.schemas[m.Output]
+	if !ok || len(m.DefaultFields) == 0 || slices.Equal(m.DefaultFields, s.DefaultFields) {
+		return m.Output, nil
+	}
+	base := m.Output + "_for_" + strings.ReplaceAll(strings.Join(strings.Fields(cmdPath(c)), "_"), "-", "_")
+	name := base
+	for n := 2; ; n++ {
+		if _, taken := a.reg.schemas[name]; !taken {
+			break
+		}
+		name = fmt.Sprintf("%s_%d", base, n)
+	}
+	own := schemaEntryOf(s)
+	own.DefaultFields = nonNil(m.DefaultFields)
+	return name, &own
 }
 
 func (a *App) codeTable(codes []string) map[string]map[string]any {
@@ -1240,6 +1339,30 @@ func (a *App) checkTree() []string {
 		for _, ex := range m.Examples {
 			if !strings.HasPrefix(ex, tool+" ") {
 				add("%q: example %q does not start with %q", path, ex, tool)
+			} else if target, _ := a.exampleCommand(ex); target != c {
+				// Resolved as the parser resolves it (shortcuts, aliases), as R01 does (Q21).
+				add("%q: example %q does not run this command; start it with %q and the command's path, a shortcut or an alias", path, ex, tool)
+			}
+		}
+		if m.StreamItem != "" {
+			if _, ok := a.reg.schemas[m.StreamItem]; !ok {
+				add("%q names stream item schema %q, which is not registered", path, m.StreamItem)
+			}
+		}
+		for _, old := range sortedKeys(m.RenamedFlags) {
+			switch renamed := m.RenamedFlags[old]; {
+			case lookupFlag(c, renamed) == nil:
+				add("%q: Meta.RenamedFlags maps --%s to --%s, which the command does not define", path, old, renamed)
+			case lookupFlag(c, old) != nil:
+				add("%q: Meta.RenamedFlags names --%s, which the command still defines; keep only --%s", path, old, renamed)
+			}
+		}
+		for _, alias := range sortedKeys(m.FlagAliases) {
+			switch canonical := m.FlagAliases[alias]; {
+			case lookupFlag(c, canonical) == nil:
+				add("%q: Meta.FlagAliases maps --%s to --%s, which the command does not define", path, alias, canonical)
+			case lookupFlag(c, alias) != nil:
+				add("%q: Meta.FlagAliases names --%s, which the command already defines", path, alias)
 			}
 		}
 		if m.isWrite() {
@@ -1314,6 +1437,7 @@ func (a *App) checkTree() []string {
 	if contains(riskTierValues, a.RiskTier) && tierRank(a.RiskTier) < tierRank(maxTier) {
 		add("App.RiskTier %s is below %s, which the declared effects require (SEC-001)", a.RiskTier, maxTier)
 	}
+	problems = append(problems, a.reg.problems...)
 	for _, key := range sortedKeys(a.Shortcuts) {
 		to := strings.Join(a.Shortcuts[key], " ")
 		if c := a.commandByPath(to); c == nil || c == a.Root {
@@ -1323,9 +1447,17 @@ func (a *App) checkTree() []string {
 			add("App.Shortcuts[%q] never applies: %q is already a root command", key, words[0])
 		}
 	}
-	// nested groups need a root shortcut (CLI-022)
+	// A nested group needs a root shortcut (CLI-022) when its noun occurs under one
+	// parent only; a noun under several parents (comment under issue and mr) needs
+	// none, since a root word could name only one of them (Q6).
+	nested := map[string]int{}
 	walkAll(a.Root, func(c *cobra.Command) {
-		if c == a.Root || isCobraInternal(c) || c.Hidden || !hasSubcommands(c) || c.Parent() == a.Root {
+		if c != a.Root && !isCobraInternal(c) && !c.Hidden && hasSubcommands(c) && c.Parent() != a.Root {
+			nested[c.Name()]++
+		}
+	})
+	walkAll(a.Root, func(c *cobra.Command) {
+		if c == a.Root || isCobraInternal(c) || c.Hidden || !hasSubcommands(c) || c.Parent() == a.Root || nested[c.Name()] > 1 {
 			return
 		}
 		words := strings.Fields(cmdPath(c))
@@ -1342,6 +1474,29 @@ func (a *App) checkTree() []string {
 		}
 	})
 	return problems
+}
+
+// exampleCommand resolves an example the way the parser resolves a command line
+// (Q21): the tool name, then root shortcuts and aliases. It returns the command the
+// example runs (nil when it names none) and the example rewritten with the command's
+// path in place of the words that named it.
+func (a *App) exampleCommand(ex string) (*cobra.Command, string) {
+	tokens := strings.Fields(ex)
+	if len(tokens) == 0 || tokens[0] != a.toolName() {
+		return nil, ex
+	}
+	args := a.applyShortcut(tokens[1:])
+	target, kinds := a.classify(args)
+	if target == nil || target == a.Root || hasSubcommands(target) {
+		return nil, ex
+	}
+	out := []string{tokens[0], cmdPath(target)}
+	for i, k := range kinds {
+		if k != argWord {
+			out = append(out, args[i])
+		}
+	}
+	return target, strings.Join(out, " ")
 }
 
 func tierRank(t string) int {
