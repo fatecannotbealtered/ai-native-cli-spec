@@ -76,7 +76,7 @@ The aicli library (Go: `internal/aicli/`; Python: `<pkg>/_aicli/`) implements mo
 
 `MIGRATION-2.0.md` in the spec repo is the authority for this path; follow it step by step. In outline:
 
-1. Pin `v2.0.0`, sync, and route output and errors through aicli: `schema_version` becomes `"2.0"` and JSON is compact by default.
+1. Pin `v2.0.1`, sync, and route output and errors through aicli: `schema_version` becomes `"2.0"` and JSON is compact by default.
 2. Register every command with `Meta` (effects, maturity, evidence) and add root shortcuts and the measured guesses (CLI-021, CLI-022).
 3. Move every write onto `app.Write` or `app.WriteBatch`. Delete the tool's own token, key and consumed-store code and any switch that weakens binding for old tests, and migrate tests that mint tokens by hand.
 4. Delete `release_readiness` and its `doctor` check, the FCC guard and the per-tool `contract_gen`; VER-001…VER-005 replace them.

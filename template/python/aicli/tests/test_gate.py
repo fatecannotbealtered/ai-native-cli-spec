@@ -7,6 +7,7 @@ import os
 import threading
 from typing import Any
 
+import click
 import pytest
 from aicli_testapp import (
     THarness,
@@ -19,7 +20,7 @@ from aicli_testapp import (
 )
 
 import aicli
-from aicli import Op, Preview, Result, Target, WriteSpec
+from aicli import CHANGE, App, FieldChange, Meta, Op, Preview, Result, Target, WriteSpec
 from aicli._util import time_string
 from aicli.conformance import _is_token as is_token
 from aicli.token import TOKEN_LIFETIME
@@ -617,3 +618,63 @@ def test_file_and_literal_mismatch_explains_the_bytes(h: THarness) -> None:
     r = h.run("note", "update", "1", "--body-file", f, "--confirm", tok)
     expect_conflict(r, "token_mismatch")
     assert "literal --body" in r.details()["next_action"], r
+
+
+def test_r1_read_back_names_the_resolved_target(h: THarness) -> None:
+    """The read-back of a write whose target resolve_target finds: "{target}" in
+    WriteSpec.read_back is the resolved key, and without a read_back the
+    next_action names the resolved key."""
+    for read_back, key, want in [
+        (
+            "note get {target}",
+            "notes/2",
+            "Do not resend. Run `notes note get notes/2` to see whether the change landed, then",
+        ),
+        (
+            "",
+            "notes/3",
+            "Do not resend. Read notes/3 upstream to see whether the change landed, then",
+        ),
+    ]:
+
+        def build(u: Upstream, read_back: str = read_back, key: str = key) -> App:
+            a = notes_app(u)
+
+            def apply(op: Op) -> Result:
+                raise ConnectionResetError("connection reset by peer")
+
+            def remove() -> None:
+                a.write(
+                    None,
+                    WriteSpec(
+                        resolve_target=lambda: Target(key, "note"),
+                        preview=lambda: Preview(
+                            action="Remove the note",
+                            can_apply=True,
+                            base_version="1",
+                            changes=[FieldChange("note", before="Ideas", note="removed")],
+                        ),
+                        apply=apply,
+                        read_back=read_back,
+                    ),
+                )
+
+            cmd = click.Command("remove", callback=remove)
+            group = a.root.commands["note"]  # type: ignore[union-attr]
+            assert isinstance(group, click.Group)
+            group.add_command(cmd)
+            a.register(
+                cmd,
+                Meta(
+                    summary="Remove a note",
+                    effects=[CHANGE],
+                    output="note_write",
+                    examples=["notes note remove --dry-run", "notes note remove --confirm <token>"],
+                ),
+            )
+            return a
+
+        h.build = build
+        r = h.run("note", "remove", "--confirm", h.must_token("note", "remove"))
+        assert r.code() == "E_OUTCOME_UNKNOWN", r
+        assert r.details()["next_action"].startswith(want), r

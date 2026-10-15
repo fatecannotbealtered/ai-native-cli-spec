@@ -2,7 +2,7 @@
 
 **English → [VERIFY-SPEC.md](VERIFY-SPEC.md)**
 
-本文属于 ai-native-cli-spec 2.0.0，包含规则 VER-001 至 VER-008。本规范说明工具怎样证明自己满足 CLI-SPEC、SEC-SPEC 和 SKILL-SPEC：靠真正运行过的测试和经过评分的 Agent 试验，而不是靠文档或源码扫描。它取代 v1 的功能契约覆盖（Functional Contract Coverage）源码扫描（`fcc_status`），以及工具自我声明的 `release_readiness`。
+本文属于 ai-native-cli-spec 2.0.1，包含规则 VER-001 至 VER-008。本规范说明工具怎样证明自己满足 CLI-SPEC、SEC-SPEC 和 SKILL-SPEC：靠真正运行过的测试和经过评分的 Agent 试验，而不是靠文档或源码扫描。它取代 v1 的功能契约覆盖（Functional Contract Coverage）源码扫描（`fcc_status`），以及工具自我声明的 `release_readiness`。
 
 MUST、MUST NOT、SHOULD 和 MAY 取 RFC 2119 中的含义；本文把它们分别译作「必须」「不得」「应当」「可以」。*模拟上游*（fake upstream）指任何代替真实服务的替身：进程内的假实现、mock 服务器、录制的响应。*真实上游*（real upstream）指真实产品的一个实例，包括在 Docker 里起的一次性实例。
 

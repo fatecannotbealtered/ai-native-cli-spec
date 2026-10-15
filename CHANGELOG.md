@@ -2,6 +2,19 @@
 
 All notable changes to ai-native-cli-spec are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html); tags before v1.5.0 have two segments. Rule IDs in the 2.0.0 entry refer to the specs in `template/common/.agent/` and to `REPO-SPEC.md`; section numbers in 1.x entries refer to the 1.x specs. The 1.x entries are summarised from the git history and tag messages; dates are tag dates.
 
+## [2.0.1] - 2026-10-16
+
+### Fixed
+
+- `update` also reads a plain-text `--version` line from the new binary (`gitlab-cli version 1.2.17`), so `--allow-downgrade` to a 1.x release works; a binary that runs but reports no version is now refused as "did not report its version" instead of "does not run on this machine", and the Go library, like the Python one, refuses a binary that exits with an error even when it prints a version (CLI-070).
+- `WriteSpec.ReadBack` may contain `{target}`, replaced by the target that `ResolveTarget` found, so a write whose target needs a lookup can still name its read-back command (CLI-057, CLI-058).
+- An unknown command word that matches commands under several groups equally well (`comment` under `mr` and `issue`) gets a suggested command line for each of them instead of only one (CLI-022).
+- The libraries' own conformance tests remove their temporary export directory.
+
+### Security
+
+- `google.golang.org/grpc` 1.83.2 in the Go library's module (GO-2026-6443, not reachable from aicli).
+
 ## [2.0.0] - 2026-10-15
 
 Tool maintainers: see [MIGRATION-2.0.md](MIGRATION-2.0.md). Release candidates `v2.0.0-rc.1` and `v2.0.0-rc.2` preceded this release. Evidence: gitlab-cli was migrated onto the aicli library as a pilot (106 commands, 60 of them writes), passed the conformance suite, and passed a recorded live run of 166 calls against GitLab EE 18.8, in which all 164 JSON envelopes validated against the contract and a lost reply was looked up and resolved without a second send.

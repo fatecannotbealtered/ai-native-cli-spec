@@ -134,8 +134,9 @@ func (a *App) unknownCommand(group *cobra.Command, word string) *Error {
 	}
 	sort.Strings(available)
 	suggestions := a.siblingMatches(group, word)
+	var ranks []int // of tree matches; siblings share one parent
 	if len(suggestions) == 0 {
-		suggestions = a.treeMatches(word, false)
+		suggestions, ranks = a.rankedTreeMatches(word, false)
 	}
 	if len(suggestions) > 3 {
 		suggestions = suggestions[:3]
@@ -150,9 +151,8 @@ func (a *App) unknownCommand(group *cobra.Command, word string) *Error {
 	}
 	e.Details["available"] = nonNil(available)
 	e.Details["usage"] = group.CommandPath() + " <command> [flags]"
-	next := fmt.Sprintf("Run `%s --help` to list every command under it.", group.CommandPath())
-	if len(suggestions) > 0 {
-		best := suggestions[0]
+	// correct is the next_action for one suggestion and the command it says to run.
+	correct := func(best string) (next, run string) {
 		bestWords := strings.Fields(strings.TrimPrefix(strings.TrimPrefix(best, a.Root.Name()), " "))
 		dropped := false
 		var kept []string
@@ -189,11 +189,29 @@ func (a *App) unknownCommand(group *cobra.Command, word string) *Error {
 		case ok && !isGroup && !variadic && positionals > takes:
 			// The rewritten line would be refused (unexpected_argument): point to the
 			// command's own help instead of a command that cannot run.
-			next = fmt.Sprintf("Did you mean `%s`? It does not take those positional arguments; run `%s --help` for its flags.", best, best)
+			return fmt.Sprintf("Did you mean `%s`? It does not take those positional arguments; run `%s --help` for its flags.", best, best), best + " --help"
 		case ok && (!isGroup || line != best):
-			next = fmt.Sprintf("Did you mean `%s`? Run `%s`.", best, line)
+			return fmt.Sprintf("Did you mean `%s`? Run `%s`.", best, line), line
 		default:
-			next = fmt.Sprintf("Did you mean `%s`? Run `%s --help` for its commands and flags.", best, best)
+			return fmt.Sprintf("Did you mean `%s`? Run `%s --help` for its commands and flags.", best, best), best + " --help"
+		}
+	}
+	next := fmt.Sprintf("Run `%s --help` to list every command under it.", group.CommandPath())
+	if len(suggestions) > 0 {
+		next, _ = correct(suggestions[0])
+		// Equally close matches under different parents (I-1): no one of them is
+		// picked; each one's corrected line is named.
+		var names, runs []string
+		parents := map[string]bool{}
+		for i, s := range suggestions {
+			if i < len(ranks) && ranks[i] == ranks[0] {
+				_, run := correct(s)
+				names, runs = append(names, "`"+s+"`"), append(runs, "`"+run+"`")
+				parents[s[:strings.LastIndex(s, " ")+1]] = true
+			}
+		}
+		if len(parents) > 1 {
+			next = fmt.Sprintf("Did you mean %s? Run %s.", strings.Join(names, " or "), strings.Join(runs, " or "))
 		}
 	}
 	e.Details["next_action"] = next
@@ -204,8 +222,15 @@ func (a *App) unknownCommand(group *cobra.Command, word string) *Error {
 // (exact, singular/plural, a verb synonym, or a close spelling), shallowest first.
 // Shortcut keys count as names of their target. Paths carry the tool name.
 func (a *App) treeMatches(word string, leavesOnly bool) []string {
+	paths, _ := a.rankedTreeMatches(word, leavesOnly)
+	return paths
+}
+
+// rankedTreeMatches is treeMatches with the rank of each path: its depth, 0 for a
+// shortcut key; equal ranks are equally close.
+func (a *App) rankedTreeMatches(word string, leavesOnly bool) ([]string, []int) {
 	if word == "" {
-		return []string{}
+		return []string{}, nil
 	}
 	type hit struct {
 		path  string
@@ -246,13 +271,15 @@ func (a *App) treeMatches(word string, leavesOnly bool) []string {
 		return hits[i].path < hits[j].path
 	})
 	out := []string{}
+	var ranks []int
 	for i, h := range hits {
 		if i == 3 {
 			break
 		}
 		out = append(out, h.path)
+		ranks = append(ranks, h.depth)
 	}
-	return out
+	return out, ranks
 }
 
 // usageMax caps a synopsis (details.usage) at about 200 characters.

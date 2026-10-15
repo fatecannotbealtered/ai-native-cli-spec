@@ -2,7 +2,7 @@
 
 **English → [SKILL-SPEC.md](SKILL-SPEC.md)**
 
-规范版本 2.0.0，规则 SKL-001 至 SKL-011。本文对随 AI 原生 CLI 一起发布的 Agent Skill 具有规范效力。相关文件：`CLI-SPEC.md`（工具的行为，CLI-xxx）、`SEC-SPEC.md`（安全，SEC-xxx）和 `VERIFY-SPEC.md`（测试 Skill 的 Agent 评测，VER-006）。
+规范版本 2.0.1，规则 SKL-001 至 SKL-011。本文对随 AI 原生 CLI 一起发布的 Agent Skill 具有规范效力。相关文件：`CLI-SPEC.md`（工具的行为，CLI-xxx）、`SEC-SPEC.md`（安全，SEC-xxx）和 `VERIFY-SPEC.md`（测试 Skill 的 Agent 评测，VER-006）。
 
 ## Skill 的用途（资料性）
 

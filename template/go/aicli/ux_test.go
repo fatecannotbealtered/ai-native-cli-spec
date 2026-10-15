@@ -408,3 +408,35 @@ func TestCommandMapFormat(t *testing.T) {
 		t.Fatalf("CommandMap:\n%q\nwant\n%q", got, want)
 	}
 }
+
+// S1: an unknown word whose closest commands tie under different parents gets each
+// one's corrected line in next_action, none picked; did_you_mean is unchanged.
+func TestS1TiedSuggestionsNameEachCorrectedLine(t *testing.T) {
+	h := newHarness(t)
+	h.build = func(u *upstream) *App {
+		a := testApp(u)
+		a.Schema("noun_result", SchemaDef{Shape: "object", Fields: []string{"noun"}})
+		for _, noun := range []string{"label", "milestone"} {
+			group := &cobra.Command{Use: noun}
+			a.Group(group, "Work with "+noun+"s")
+			a.Root.AddCommand(group)
+			archive := &cobra.Command{Use: "archive <id>", RunE: func(cmd *cobra.Command, _ []string) error {
+				return a.OK(cmd, map[string]any{"noun": noun})
+			}}
+			archive.Flags().String("id", "", "Id")
+			group.AddCommand(archive)
+			a.Register(archive, Meta{Summary: "Archive a " + noun, Effects: []Effect{Observe}, Output: "noun_result",
+				Positional: "id", Examples: []string{"notes " + noun + " archive 7"}})
+		}
+		return a
+	}
+	r := h.run("archive", "7")
+	if dym, _ := r.details()["did_you_mean"].([]any); r.code() != "E_USAGE" || len(dym) != 2 ||
+		dym[0] != "notes label archive" || dym[1] != "notes milestone archive" {
+		t.Fatalf("did_you_mean: %s", r)
+	}
+	want := "Did you mean `notes label archive` or `notes milestone archive`? Run `notes label archive 7` or `notes milestone archive 7`."
+	if na := r.details()["next_action"]; na != want {
+		t.Fatalf("next_action:\n%v\nwant\n%s", na, want)
+	}
+}

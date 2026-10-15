@@ -76,7 +76,7 @@ aicli 库（Go：`internal/aicli/`；Python：`<pkg>/_aicli/`）实现了 CLI-SP
 
 这条路径以规范仓库中的 `MIGRATION-2.0.md` 为准；逐步照做。概要如下：
 
-1. 固定到 `v2.0.0`，同步，让输出和错误都经过 aicli：`schema_version` 变为 `"2.0"`，JSON 默认紧凑输出。
+1. 固定到 `v2.0.1`，同步，让输出和错误都经过 aicli：`schema_version` 变为 `"2.0"`，JSON 默认紧凑输出。
 2. 用 `Meta` 注册每个命令（效果、成熟度、证据），并加上根级快捷命令和实测到的猜测写法（CLI-021、CLI-022）。
 3. 把每个写操作迁移到 `app.Write` 或 `app.WriteBatch` 上。删除工具自己的令牌、密钥和已用令牌存储代码，以及任何为旧测试削弱绑定的开关，并迁移那些手工签发令牌的测试。
 4. 删除 `release_readiness` 及其 `doctor` 检查、FCC 检查和各工具自己的 `contract_gen`；由 VER-001 至 VER-005 取代它们。

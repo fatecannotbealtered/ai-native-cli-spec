@@ -4,7 +4,7 @@
 
 一份核心规范，适用于主要调用方是 AI Agent 的命令行工具，外加实现这份规范的模板和共享库。符合规范的工具以单个 JSON 信封作答；在每个错误中说明是否已有内容发出、下一步该做什么；在有人授予授权范围之前拒绝写入；只报告自己观察到的东西。
 
-当前版本：2.0.0（2026-10-15）。改动见 [CHANGELOG.md](CHANGELOG.md)；1.6.x 工具的迁移见 [MIGRATION-2.0_zh.md](MIGRATION-2.0_zh.md)。
+当前版本：2.0.1（2026-10-16）。改动见 [CHANGELOG.md](CHANGELOG.md)；1.6.x 工具的迁移见 [MIGRATION-2.0_zh.md](MIGRATION-2.0_zh.md)。
 
 ## 2.0 包含什么
 
@@ -30,7 +30,7 @@
 
 ```bash
 # A checkout of the spec at the release you will pin.
-git clone --depth 1 --branch v2.0.0 https://github.com/fatecannotbealtered/ai-native-cli-spec spec
+git clone --depth 1 --branch v2.0.1 https://github.com/fatecannotbealtered/ai-native-cli-spec spec
 mkdir my-cli && cd my-cli
 # The common layer, then only the CI and build files of one overlay (never its aicli/ or example/).
 cp -R ../spec/template/common/. .
@@ -45,7 +45,7 @@ rm -f scripts/gen-contract.js scripts/build-manifest.js scripts/check-contract.p
 
 ## 快速上手：迁移 1.6.x 工具
 
-在 `.agent/SPEC_VERSION` 中固定 `v2.0.0`，用 2.0 版的 `scripts/sync-spec.js` 以副本方式引入 2.0 的文件，然后按顺序完成 [`MIGRATION-2.0.md`](MIGRATION-2.0_zh.md) 中的各个步骤。写入路径什么时候算改完，符合性测试套件会告诉你。
+在 `.agent/SPEC_VERSION` 中固定 `v2.0.1`，用 2.0 版的 `scripts/sync-spec.js` 以副本方式引入 2.0 的文件，然后按顺序完成 [`MIGRATION-2.0.md`](MIGRATION-2.0_zh.md) 中的各个步骤。写入路径什么时候算改完，符合性测试套件会告诉你。
 
 ## 仓库结构
 
@@ -74,7 +74,7 @@ skills/review-ai-native-cli/   Skill that reviews a tool repo against this spec
 ## 版本管理
 
 - 每次发布都是一个 git tag `vMAJOR.MINOR.PATCH`。一个 tag 为上表中的全部内容定版本；工具在 `.agent/SPEC_VERSION` 中固定一个 tag，得到的规范、契约、Schema 和库就是一起测试过的那一套。
-- `contract.json` 带有 `spec_version`（`2.0.0`）和 `contract_version`（`2.0`）。信封的 `schema_version` 是 `"2.0"`，只在信封出现破坏性变更时才升主版本（CLI-080）。
+- `contract.json` 带有 `spec_version`（`2.0.1`）和 `contract_version`（`2.0`）。信封的 `schema_version` 是 `"2.0"`，只在信封出现破坏性变更时才升主版本（CLI-080）。
 - 会破坏符合规范的工具或其 Agent 的变更，要升 MAJOR。规则 ID 永不改变含义，也永不复用。
 - 历史记录：[CHANGELOG.md](CHANGELOG.md)。英文是源文本，`*_zh.md` 文件是它的译文。
 

@@ -1,6 +1,6 @@
 {
   "$comment": "Every example of contract/examples with the schema it is validated against, whether it must pass, the rule it illustrates and why. An invalid example violates exactly one constraint; violation states the failure check-contract.py must report (kind parse, schema or semantic; check is the JSON Schema keyword or the semantic check id; path is a JSON pointer into the example) and no other failure may occur.",
-  "spec_version": "2.0.0",
+  "spec_version": "2.0.1",
   "examples": [
     {"file": "valid/envelope-mr-list.json", "schema": "envelope", "expect": "valid", "rule": "CLI-041", "reason": "A complete list: the task fields agents ask for, has_more false, the filter computed in the tool and echoed in scope, titles declared untrusted once."},
     {"file": "valid/envelope-issue-list-next-page.json", "schema": "envelope", "expect": "valid", "rule": "CLI-041", "reason": "A first page: has_more true with exactly one continuation (next_cursor)."},

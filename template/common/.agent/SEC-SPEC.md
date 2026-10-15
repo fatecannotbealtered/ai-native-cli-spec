@@ -2,7 +2,7 @@
 
 **中文版 → [SEC-SPEC_zh.md](SEC-SPEC_zh.md)**
 
-Spec version 2.0.0, rules SEC-001 to SEC-060. This file is normative for security: risk tiers, untrusted content, authority, the write gate's security properties, secrets, outbound contact, the state store, credentials at rest and the supply chain. Related files: `CLI-SPEC.md` (machine contract, CLI-xxx), `SKILL-SPEC.md` (Skills, SKL-xxx), `VERIFY-SPEC.md` (verification, VER-xxx), and `contract/contract.json` (codes, enums, key sets). Where a rule here summarises a CLI rule, the CLI rule defines the behaviour; this file says why it matters for security and how to review it.
+Spec version 2.0.1, rules SEC-001 to SEC-060. This file is normative for security: risk tiers, untrusted content, authority, the write gate's security properties, secrets, outbound contact, the state store, credentials at rest and the supply chain. Related files: `CLI-SPEC.md` (machine contract, CLI-xxx), `SKILL-SPEC.md` (Skills, SKL-xxx), `VERIFY-SPEC.md` (verification, VER-xxx), and `contract/contract.json` (codes, enums, key sets). Where a rule here summarises a CLI rule, the CLI rule defines the behaviour; this file says why it matters for security and how to review it.
 
 ## Threat model (informative)
 

@@ -337,7 +337,10 @@ class UXMixin:
         available = sorted(
             sub.name for sub in group.children if not sub.internal and not sub.hidden
         )
-        suggestions = self.sibling_matches(group, word) or self.tree_matches(word, False)
+        suggestions = self.sibling_matches(group, word)
+        ranks: list[int] = []  # of tree matches; siblings share one parent
+        if not suggestions:
+            suggestions, ranks = self.ranked_tree_matches(word, False)
         suggestions = suggestions[:3]
         msg = (
             f"`{group.command_path}` has no such subcommand; details.available lists its commands."
@@ -352,9 +355,9 @@ class UXMixin:
             e.details["did_you_mean"] = suggestions
         e.details["available"] = available
         e.details["usage"] = group.command_path + " <command> [flags]"
-        nxt = f"Run `{group.command_path} --help` to list every command under it."
-        if suggestions:
-            best = suggestions[0]
+
+        def correct(best: str) -> tuple[str, str]:
+            """The next_action for one suggestion and the command it says to run."""
             best_words = best.removeprefix(self._root.name).removeprefix(" ").split()
             dropped = [False]
             kept: list[str] = []
@@ -384,14 +387,26 @@ class UXMixin:
             if ok and not is_group and not variadic and positionals > takes:
                 # The rewritten line would be refused (unexpected_argument): point to
                 # the command's own help instead of a command that cannot run.
-                nxt = (
+                return (
                     f"Did you mean `{best}`? It does not take those positional arguments; "
                     f"run `{best} --help` for its flags."
-                )
-            elif ok and (not is_group or line != best):
-                nxt = f"Did you mean `{best}`? Run `{line}`."
-            else:
-                nxt = f"Did you mean `{best}`? Run `{best} --help` for its commands and flags."
+                ), best + " --help"
+            if ok and (not is_group or line != best):
+                return f"Did you mean `{best}`? Run `{line}`.", line
+            return (
+                f"Did you mean `{best}`? Run `{best} --help` for its commands and flags."
+            ), best + " --help"
+
+        nxt = f"Run `{group.command_path} --help` to list every command under it."
+        if suggestions:
+            nxt = correct(suggestions[0])[0]
+            # Equally close matches under different parents (I-1): no one of them is
+            # picked; each one's corrected line is named.
+            tied = [s for i, s in enumerate(suggestions) if i < len(ranks) and ranks[i] == ranks[0]]
+            if len({s[: s.rfind(" ") + 1] for s in tied}) > 1:
+                names = " or ".join(f"`{s}`" for s in tied)
+                runs = " or ".join(f"`{correct(s)[1]}`" for s in tied)
+                nxt = f"Did you mean {names}? Run {runs}."
         e.details["next_action"] = nxt
         return e
 
@@ -399,8 +414,13 @@ class UXMixin:
         """Commands anywhere in the tree whose name or alias matches word (exact,
         singular/plural, a verb synonym, or a close spelling), shallowest first.
         Shortcut keys count as names of their target. Paths carry the tool name."""
+        return self.ranked_tree_matches(word, leaves_only)[0]
+
+    def ranked_tree_matches(self: App, word: str, leaves_only: bool) -> tuple[list[str], list[int]]:
+        """tree_matches with the rank of each path: its depth, 0 for a shortcut key;
+        equal ranks are equally close."""
         if not word:
-            return []
+            return [], []
         hits: list[tuple[str, int]] = []
         singular = word.removesuffix("s")
         syn = self.verb_synonyms_for(word)
@@ -429,7 +449,7 @@ class UXMixin:
                     seen.add(c.command_path)
                     hits.append((c.command_path, 0))
         hits.sort(key=lambda h: (h[1], h[0]))
-        return [p for p, _ in hits[:3]]
+        return [p for p, _ in hits[:3]], [d for _, d in hits[:3]]
 
     def flag_names(self: App, c: Node) -> list[str]:
         """The flags a command accepts besides the global ones (details.available of

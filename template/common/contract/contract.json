@@ -1,7 +1,7 @@
 {
   "$comment": "CANONICAL JSON CONTRACT for ai-native-cli-spec 2.0. Maintained ONLY in ai-native-cli-spec/template/common/contract/contract.json. The aicli libraries (template/go/aicli, template/python/aicli) embed generated constants from this file (scripts/gen-contract.js), and the JSON Schemas in contract/schemas encode the shapes. Tools vendor this file, the schemas and the library pinned to a spec tag (.agent/SPEC_VERSION); scripts/check-spec.js guards against drift. CLI-SPEC.md, SEC-SPEC.md and VERIFY-SPEC.md are the prose; rule IDs are cited per section.",
   "contract_version": "2.0",
-  "spec_version": "2.0.0",
+  "spec_version": "2.0.1",
   "naming": {
     "rule": "CLI-007",
     "keys": "snake_case",

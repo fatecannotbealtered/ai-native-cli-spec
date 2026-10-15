@@ -1309,3 +1309,53 @@ def test_e13_the_download_deadline(box: Box, monkeypatch: pytest.MonkeyPatch) ->
     box.gh.json(LIST, [release("1.3.1")])
     r = box.run("update", "--check")
     assert r.code() == "E_TIMEOUT" and r.env["error"]["message"] == "The release check timed out."
+
+
+def test_u1_a_plain_text_version_is_read(box: Box) -> None:
+    """The post-install check reads a plain-text version (a 1.x release prints
+    "gitlab-cli version 1.2.17"); the JSON envelope keeps priority. A binary that
+    runs but reports no version is told apart from one that does not run."""
+    for out, want in {
+        b"gitlab-cli version 1.2.17\n": "1.2.17",
+        b"v1.2.17\r\n": "1.2.17",
+        b"1.2.17": "1.2.17",
+        b"starting\nnotes version 1.3.1-rc.1+b2\n": "1.3.1-rc.1+b2",
+        b'notes version 9.9.9\n{"ok":true,"data":{"version":"1.3.1"}}\n': "1.3.1",
+        b"notes version 1.3\n": None,
+        b"version 01.2.3\n": None,
+        b"1.2.17 (abc)\n": None,
+        b"": None,
+    }.items():
+        assert U._reported_version(out) == want, out
+    printed = [b""]
+
+    def plain(argv: list[str]) -> tuple[int, bytes]:
+        box.runs.append(list(argv))
+        return 0, printed[0]
+
+    box.cfg["run"] = plain
+    box.gh.json(LIST, [publish(box.gh, "1.3.1")])
+    for out, code, message in [
+        (
+            b"notes version v1.3.2\n",
+            "E_INTEGRITY",
+            "The downloaded binary reports version 1.3.2, not 1.3.1, so it was not installed.",
+        ),
+        (
+            b"notes (no version)\n",
+            "E_IO",
+            "The downloaded binary did not report its version, so it was not installed.",
+        ),
+    ]:
+        printed[0] = out
+        r = box.run("update")
+        assert r.code() == code and r.details()["stage"] == "replace", r
+        assert r.env["error"]["message"] == message, r
+        assert read(box.exe) == b"old binary"
+    assert r.details()["next_action"] == (
+        "Install notes with the package-manager command in its README instead."
+    ), r
+    printed[0] = b"notes version 1.3.1\n"
+    r = box.run("update")
+    assert r.exit == 0 and r.data()["status"] == "updated", r
+    assert read(box.exe) == b"new binary"

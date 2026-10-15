@@ -2,7 +2,7 @@
 
 **中文版 → [VERIFY-SPEC_zh.md](VERIFY-SPEC_zh.md)**
 
-Part of ai-native-cli-spec 2.0.0; rules VER-001 to VER-008. This spec says how a tool proves that it meets CLI-SPEC, SEC-SPEC and SKILL-SPEC: by tests that ran and agent trials that were graded, not by documents or source scans. It replaces v1's Functional Contract Coverage source scan (`fcc_status`) and the self-declared `release_readiness`.
+Part of ai-native-cli-spec 2.0.1; rules VER-001 to VER-008. This spec says how a tool proves that it meets CLI-SPEC, SEC-SPEC and SKILL-SPEC: by tests that ran and agent trials that were graded, not by documents or source scans. It replaces v1's Functional Contract Coverage source scan (`fcc_status`) and the self-declared `release_readiness`.
 
 MUST, MUST NOT, SHOULD and MAY have their RFC 2119 meaning. A *fake upstream* is any stand-in for the real service: an in-process fake, a mock server, recorded responses. A *real upstream* is an instance of the actual product, including a disposable one in Docker.
 

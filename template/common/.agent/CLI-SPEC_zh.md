@@ -2,7 +2,7 @@
 
 **English → [CLI-SPEC.md](CLI-SPEC.md)**
 
-**规范 2.0.0** · 信封（envelope）`schema_version` 为 `"2.0"` · 机器可读孪生：[`contract/contract.json`](../contract/contract.json) · 规则 CLI-001 至 CLI-110
+**规范 2.0.1** · 信封（envelope）`schema_version` 为 `"2.0"` · 机器可读孪生：[`contract/contract.json`](../contract/contract.json) · 规则 CLI-001 至 CLI-110
 
 本文是 AI 原生 CLI 与调用它的 Agent 之间的契约：工具输出什么、怎样失败、命令如何组织和查找、怎样报告读取结果、怎样执行写操作，以及怎样更新自身、读取设置、访问网络。它取代 CLI-SPEC 1.6.3；1.6.x 工具的维护者请按 ai-native-cli-spec 仓库中的 `MIGRATION-2.0.md` 迁移。本目录中的配套规范：[SEC-SPEC_zh.md](SEC-SPEC_zh.md)（安全，`SEC-xxx`）、[SKILL-SPEC_zh.md](SKILL-SPEC_zh.md)（Skill，`SKL-xxx`）和 [VERIFY-SPEC_zh.md](VERIFY-SPEC_zh.md)（验证与 Agent 评测，`VER-xxx`）。[AGENT_zh.md](AGENT_zh.md) 是工作手册。
 
@@ -1028,7 +1028,7 @@ aicli 添加了三个内置命令，它们只读取或写入操作记录：
 
 **包管理器安装路径。** 在 `replace` 阶段，aicli 运行 `PackageManagerArgs` 给出的参数向量，最长 10 分钟，然后从 `<tool> --version` 中读取 `data.version`，其中的 `<tool>` 重新在 `PATH` 的绝对路径条目中查找（pnpm 升级后会留下旧的存储路径）。由这个版本说了算：它等于目标版本，安装就算成功，即使包管理器报告了错误；否则结果是 `E_IO`，并给出需要手工运行的命令。
 
-**二进制安装路径。** `download` 把 `<tool>-<version>-<os>-<arch>.tar.gz`（Windows 上为 `.zip`，其中 arm64 使用 amd64 构建）、`checksums.txt` 和 `checksums.txt.sigstore.json` 下载到可执行文件旁边的一个临时目录中。`verify_signature` 和 `verify_checksum` 校验它们（第 4 项）。在 `replace` 阶段，aicli 只解出二进制和 `skills/`，遇到不安全的条目（绝对路径、`..`、名称中有 `:`、链接、设备文件、重复的名称，或总计超过 10,000 个条目或 1 GiB）以 `E_INTEGRITY` 拒绝，并运行新二进制的 `--version`，它必须报告目标版本。然后它把二进制换上，并在 `<exe dir>/skills` 中只替换这次发布附带的 Skill，每次一个 `skills/<name>`：多个工具可能共用一个目录，所以其他名称保持不动；发布中没有 `skills/` 时，该目录原样保留（REPO-043）。
+**二进制安装路径。** `download` 把 `<tool>-<version>-<os>-<arch>.tar.gz`（Windows 上为 `.zip`，其中 arm64 使用 amd64 构建）、`checksums.txt` 和 `checksums.txt.sigstore.json` 下载到可执行文件旁边的一个临时目录中。`verify_signature` 和 `verify_checksum` 校验它们（第 4 项）。在 `replace` 阶段，aicli 只解出二进制和 `skills/`，遇到不安全的条目（绝对路径、`..`、名称中有 `:`、链接、设备文件、重复的名称，或总计超过 10,000 个条目或 1 GiB）以 `E_INTEGRITY` 拒绝，并运行新二进制的 `--version`，它必须报告目标版本，可以用 2.0 的信封，也可以是一行以版本号结尾的纯文本（1.x 版本输出 `gitlab-cli version 1.2.17`）。然后它把二进制换上，并在 `<exe dir>/skills` 中只替换这次发布附带的 Skill，每次一个 `skills/<name>`：多个工具可能共用一个目录，所以其他名称保持不动；发布中没有 `skills/` 时，该目录原样保留（REPO-043）。
 
 **Skill 同步。** `binary` 的来源是 `<exe dir>/skills` 中这次发布附带的 Skill，`npm`、`pnpm` 和 `yarn` 的来源是 npm 包根目录下的 `skills/`；其他安装方式没有来源。复制时绝不跟随链接。对来源中的每个 Skill 和 `App.SkillDirs`（默认为 `~/.agents/skills` 和 `~/.claude/skills`）中的每个目录：已安装的副本是真实目录的，用一份新副本替换；是符号链接或目录联接（junction）的，保持不动。没有安装在那里的 Skill 不会被创建：安装是 README 的事（REPO-010）。复制了任何东西时，`skill_sync_status` 为 `synced`；每份已安装的副本都已经是工具的版本时，为 `not_needed`；没有来源或没有已安装的 Skill 时，为 `skipped`。
 

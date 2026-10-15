@@ -2,7 +2,7 @@
 
 **English → [SEC-SPEC.md](SEC-SPEC.md)**
 
-规范版本 2.0.0，规则 SEC-001 至 SEC-060。本文是安全方面的规范性文件，涵盖风险档（risk tier）、不可信内容、授权、写入门控（write gate）的安全属性、机密、对外连接、状态存储、凭证落盘和供应链。相关文件：`CLI-SPEC.md`（机器契约，CLI-xxx）、`SKILL-SPEC.md`（Skill，SKL-xxx）、`VERIFY-SPEC.md`（验证，VER-xxx）以及 `contract/contract.json`（错误码、枚举、键集合）。本文的规则概括某条 CLI 规则时，行为以那条 CLI 规则的定义为准；本文说明它为什么关乎安全、该怎么评审。
+规范版本 2.0.1，规则 SEC-001 至 SEC-060。本文是安全方面的规范性文件，涵盖风险档（risk tier）、不可信内容、授权、写入门控（write gate）的安全属性、机密、对外连接、状态存储、凭证落盘和供应链。相关文件：`CLI-SPEC.md`（机器契约，CLI-xxx）、`SKILL-SPEC.md`（Skill，SKL-xxx）、`VERIFY-SPEC.md`（验证，VER-xxx）以及 `contract/contract.json`（错误码、枚举、键集合）。本文的规则概括某条 CLI 规则时，行为以那条 CLI 规则的定义为准；本文说明它为什么关乎安全、该怎么评审。
 
 ## 威胁模型（资料性）
 

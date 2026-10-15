@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -38,12 +39,15 @@ TEST_SAMPLES = {
 
 
 # holds the conformance sample's --output file: inside the scope's outputs (G04
-# creates it) and roots (the later stages plan to overwrite it, C1)
-EXPORT_DIR = tempfile.mkdtemp(prefix="aicli-conformance-export-")
+# creates it) and roots (the later stages plan to overwrite it, C1). Only its name
+# is chosen on import: the module fixtures that use it create and remove it, so a
+# run that selects none of their tests leaves nothing behind.
+EXPORT_DIR = os.path.join(tempfile.gettempdir(), "aicli-conformance-export-" + secrets.token_hex(8))
 
 
 @pytest.fixture(scope="module", autouse=True)
 def _remove_export_dir():  # noqa: ANN202 - pytest fixture
+    os.makedirs(EXPORT_DIR, exist_ok=True)
     yield
     shutil.rmtree(EXPORT_DIR, ignore_errors=True)
 

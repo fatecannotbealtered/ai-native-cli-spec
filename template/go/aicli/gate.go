@@ -77,7 +77,8 @@ type Preview struct {
 // it (CLI-058). ReadBack is the read command, without the tool name, that shows
 // whether the change landed (for example "note get 1"); an unknown outcome's
 // next_action names it. Build it from the registry path and validated inputs only,
-// never from upstream text (SEC-002).
+// never from upstream text (SEC-002). A "{target}" in it is replaced by the
+// resolved target key, for a target that ResolveTarget finds.
 //
 // ResolveTarget, when set, is used instead of Target for a target that takes a read
 // to resolve (the canonical key of a variable named by its name, Q1). The gate calls
@@ -1762,7 +1763,7 @@ func (g *gateRun) report(id string, out writeOutcome, res Result, spec WriteSpec
 	case "E_OUTCOME_UNKNOWN":
 		check := fmt.Sprintf("Read %s upstream", spec.Target.Key)
 		if rb := strings.TrimSpace(spec.ReadBack); rb != "" {
-			check = fmt.Sprintf("Run `%s %s`", g.tool(), rb)
+			check = fmt.Sprintf("Run `%s %s`", g.tool(), strings.ReplaceAll(rb, "{target}", spec.Target.Key))
 		}
 		e = NewError(out.code, "The write may have been applied; nothing will be retried. Look the operation up before doing anything else.",
 			map[string]any{"operation_id": id, "lookup": lookup, "receipt": out.receipt, "dispatch_state": "unknown",

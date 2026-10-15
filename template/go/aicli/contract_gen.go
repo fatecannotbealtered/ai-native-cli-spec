@@ -10,7 +10,7 @@ package aicli
 const SchemaVersion = "2.0"
 
 // SpecVersion is the ai-native-cli-spec release this library implements.
-const SpecVersion = "2.0.0"
+const SpecVersion = "2.0.1"
 
 // ContractVersion is the contract.json version the library was generated from.
 const ContractVersion = "2.0"

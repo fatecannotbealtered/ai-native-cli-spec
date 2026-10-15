@@ -69,6 +69,13 @@ var exportDir = func() string {
 	return dir
 }()
 
+// TestMain removes exportDir once every test of the package ran.
+func TestMain(m *testing.M) {
+	code := m.Run()
+	_ = os.RemoveAll(exportDir)
+	os.Exit(code)
+}
+
 func testHarness(build func(*upstream) *App) (Harness, *upstream) {
 	u := newUpstream()
 	samples := map[string][]string{"note export": {"--output", filepath.Join(exportDir, "notes.tsv")}}
