@@ -1,98 +1,83 @@
-<h1 align="center">ai-native-cli-spec</h1>
+# ai-native-cli-spec
 
-<p align="center">
-  <strong>用于构建 AI-native CLI 的复制即用种子规范</strong>
-</p>
+[English](README.md) · [中文](README_zh.md) · [MIT 许可证](LICENSE)
 
-<p align="center">
-  <a href="README.md">English</a> &middot; <a href="README_zh.md">中文</a>
-</p>
+一份核心规范，适用于主要调用方是 AI Agent 的命令行工具，外加实现这份规范的模板和共享库。符合规范的工具以单个 JSON 信封作答；在每个错误中说明是否已有内容发出、下一步该做什么；在有人授予授权范围之前拒绝写入；只报告自己观察到的东西。
 
-<p align="center">
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge"></a>
-</p>
+当前版本：2.0.0（2026-10-15）。改动见 [CHANGELOG.md](CHANGELOG.md)；1.6.x 工具的迁移见 [MIGRATION-2.0_zh.md](MIGRATION-2.0_zh.md)。
 
-<p align="center">
-  <img alt="Agent native" src="https://img.shields.io/badge/agent-native-111827?style=for-the-badge">
-  <img alt="AI-native CLI spec" src="https://img.shields.io/badge/spec-AI--native%20CLI-0891B2?style=for-the-badge">
-  <img alt="Copy-paste seed" src="https://img.shields.io/badge/seed-copy--paste%20ready-F59E0B?style=for-the-badge">
-</p>
+## 2.0 包含什么
 
-一套**规范 + 可直接拉取的种子**，用来构建 **AI 原生 CLI 工具**——专为 AI Agent 可靠驱动而设计的命令行工具，而不只是给人用。
+| 组成部分 | 位置 | 给工具提供什么 |
+|---|---|---|
+| 5 份规范 | `template/common/.agent/` | `AGENT.md`（操作手册）、`CLI-SPEC.md`（机器契约，`CLI-xxx`）、`SEC-SPEC.md`（安全，`SEC-xxx`）、`SKILL-SPEC.md`（Agent Skills，`SKL-xxx`）、`VERIFY-SPEC.md`（验证与 Agent 评测，`VER-xxx`）。每条规范性规则都有稳定的 ID 和一行 `Check:`。 |
+| 契约与 Schema | `template/common/contract/` | `contract.json`（错误码、退出码、枚举、键集合、回执规则）、覆盖每种结构的 JSON Schema（draft 2020-12），以及一套有效与无效示例语料。 |
+| aicli 库 | `template/go/aicli/`（Go，cobra）、`template/python/aicli/`（Python ≥ 3.10，click） | 信封、错误与 HTTP 映射；由同一个注册表生成的 `--help`、`reference` 和 Skill 命令地图；Agent 体验（根级快捷方式、接受 Agent 的猜测写法、在整棵命令树中查找建议）；写入门控（write gate），包括绑定、带密钥的一次性令牌、操作记录、授权范围检查、回执、批量操作；内置命令 `reference`、`context`、`doctor`、`changelog`、`operation` 和 `update`，后者是完整的自更新，包括签名校验和 Skill 同步；设置与配置档。 |
+| 符合性测试套件 | 位于每个库内部（`RunConformance`、`run_conformance`） | 对照写入门控检查每条写命令（`G00`–`G10`），对照契约检查整个工具（`R01`–`R05`）。`R06`（注册表中的每条命令都在工具自己的测试中运行过）单独运行：等这些测试跑完，再由 `CheckCoverage`（`check_coverage`）执行。每个工具都在 CI 中运行这两项检查。 |
+| 示例工具 | `template/go/example/`、`template/python/example/` | 基于该库构建的小型「notes」CLI，附带它的符合性测试。在工具群中有工具基于 2.0 发布之前，它就是参考实现。 |
+| 仓库标准 | [`REPO-SPEC.md`](REPO-SPEC_zh.md) | 工具仓库的文件、布局、版本管理、分发、内置副本和 CI（`REPO-xxx`）。 |
+| 迁移指南 | [`MIGRATION-2.0.md`](MIGRATION-2.0_zh.md) | 把 1.6.x 工具一步步迁移到 2.0。 |
 
-把 `.agent/` 种子拉进新项目，让你的 AI 照着它干，产出的工具开箱就符合一套稳定的 agent 契约。
+工具以副本方式引入规范、契约、Schema 和库，固定在同一个规范 tag 上，并在 CI 中做漂移检查。库不以软件包形式发布。
 
-模板拆成两层：语言无关的 **`common/`** 层，加上一层很薄的按语言叠加层（**`go/`**、**`python/`** …）。先拉 `common/`，再叠加**恰好一种**语言：
+2.0 不涵盖的内容：桌面应用和设备的驱动层（会话、物理效果、未保存的状态），它留在构建于这套核心之上的 tool-driver-cli-spec 中；以及 MCP server 生成（属于后续工作）。
+
+## 为什么要做 2.0
+
+2.0 建立在 2026 年 10 月的 2 次测量之上。一次是对 gitlab-cli 做的 Agent 评测（720 次试验，3 个 Claude 模型，分别开启和关闭 Skill）。与同一批次中运行的 gitlab-cli 1.2.17 相比，2.0 的设计在任务成功率相同的情况下，CLI 调用少 31%，无效调用少 87%，墙钟时间少 24%。另一次是对工具群做的只读审计，它发现：在 10 个带确认门控的工具中，没有一个的确认令牌绑定了完整请求，其中 9 个的令牌还能被伪造。所以 2.0 的写入门控是带符合性测试套件的共享代码，不再是一条由每个工具各自实现的规则。方法见 `VERIFY-SPEC.md`：VER-006（Agent 评测）和 VER-007（门控审计）。
+
+## 快速上手：新建工具
 
 ```bash
-# 在新的（或已有的）项目目录里：
-#   1. 语言无关的通用层
-npx degit fatecannotbealtered/ai-native-cli-spec/template/common .
-#   2. 恰好一种语言叠加层（go 或 python，二选一）
-npx degit fatecannotbealtered/ai-native-cli-spec/template/go .
-
-# 然后照 template/INSTANTIATE.md 填占位符，并对你的 AI 说：
-#   "读 AGENTS.md，然后按 .agent/ 规范把这个工具搭起来。"
+# A checkout of the spec at the release you will pin.
+git clone --depth 1 --branch v2.0.0 https://github.com/fatecannotbealtered/ai-native-cli-spec spec
+mkdir my-cli && cd my-cli
+# The common layer, then only the CI and build files of one overlay (never its aicli/ or example/).
+cp -R ../spec/template/common/. .
+cp -R ../spec/template/go/.github ../spec/template/go/.golangci.yml ../spec/template/go/.goreleaser.yml ../spec/template/go/Makefile .
+cat ../spec/template/go/.gitignore >> .gitignore
+# Python instead: cp -R ../spec/template/python/.github ../spec/template/python/ruff.toml . && cat ../spec/template/python/.gitignore >> .gitignore
+# Files that belong to the spec repository only.
+rm -f scripts/gen-contract.js scripts/build-manifest.js scripts/check-contract.py && rm -rf contract/examples
 ```
 
-完整的复制即用指南见 [`template/INSTANTIATE.md`](template/INSTANTIATE.md)（占位符字典、`.gitignore` 拼接、Skill 模板重命名、`test-prompts.json` 设置、不包装第三方就删 `NOTICE.md` 的规则）。
+以上是 [`template/INSTANTIATE.md`](template/INSTANTIATE_zh.md) 的第 1 步，其余步骤照它继续：填好占位符；用 `scripts/sync-spec.js` 以副本方式引入库（它写入 `internal/aicli/` 或 `<pkg>/_aicli/`；不要手工复制 `aicli/`）；然后告诉你的 Agent：「先读 AGENTS.md，再按 .agent/AGENT.md 中的工作流 A 构建这个工具」。规范仓库中的示例工具（`template/go/example/`、`template/python/example/`）展示了完成后的样子，请在规范仓库里阅读它们。
 
-这会往你的仓库里放下一套连贯的骨架。来自 `common/`：
+## 快速上手：迁移 1.6.x 工具
 
+在 `.agent/SPEC_VERSION` 中固定 `v2.0.0`，用 2.0 版的 `scripts/sync-spec.js` 以副本方式引入 2.0 的文件，然后按顺序完成 [`MIGRATION-2.0.md`](MIGRATION-2.0_zh.md) 中的各个步骤。写入路径什么时候算改完，符合性测试套件会告诉你。
+
+## 仓库结构
+
+```text
+README.md, MIGRATION-2.0.md, REPO-SPEC.md   (+ _zh translations)
+CHANGELOG.md                                (English only)
+template/
+├── INSTANTIATE.md          how to create a tool repo from the template (+ _zh)
+├── common/                 copied into every tool
+│   ├── .agent/             AGENT, CLI-SPEC, SEC-SPEC, SKILL-SPEC, VERIFY-SPEC (+ _zh)
+│   ├── contract/           contract.json, schemas/, examples/{valid,invalid}/
+│   ├── scripts/            sync-spec, check-spec, spec-files, gen-contract, build-manifest, check-contract.py, version tooling, npm launcher
+│   ├── skills/             SKILL.md and test-prompts.json templates
+│   └── README, SECURITY, CONTRIBUTING, AGENTS.md (+ _zh), package.json, .github/ ...
+├── go/                     Go overlay: CI, release, Makefile, linters
+│   ├── aicli/              the Go library, its tests and MANIFEST.json
+│   └── example/            example tool with a conformance test
+└── python/                 Python overlay: CI, release, ruff config
+    ├── aicli/              the Python library, its tests and MANIFEST.json
+    └── example/            example tool with a conformance test
+tools/                         agent-eval/ (VER-006 harness), gate-audit/ (VER-007 workflows); not vendored
+skills/review-ai-native-cli/   Skill that reviews a tool repo against this spec
+.github/workflows/             this repo's CI: library tests, examples, contract check, tools
 ```
-AGENTS.md          # 每个 agent 最先读的入口钩子
-.agent/
-├── AGENT.md       # 总纲：导航 + 新建/扩展工作流
-├── CLI-SPEC.md    # CLI 机器契约——工具"怎么说话"
-├── SKILL-SPEC.md  # Skill 编写规范——agent"怎么听"
-└── SEC-SPEC.md    # 安全基线——怎么不被坑、不坑人
-README / LICENSE / CHANGELOG / CONTRIBUTING / SECURITY / CODE_OF_CONDUCT / NOTICE
-.github/（PR + issue 模板、dependabot）  ·  package.json + scripts/{run,prepare-npm-platform-packages}.js
-docs/OPEN_SOURCE_CHECKLIST.md  ·  skills/{SKILL.md.tmpl,test-prompts.json.tmpl}  ·  .gitignore
-```
 
-外加：你选的那一种语言叠加层（`go/` 或 `python/`）带来的 CI / release 工作流、格式化与 lint 配置、构建管线，以及一份待追加的语言级 `.gitignore`。仓库骨架标准本身则放在 [`REPO-SPEC.md`](REPO-SPEC.md)——本规范的元文档。
+## 版本管理
 
-## 为什么
+- 每次发布都是一个 git tag `vMAJOR.MINOR.PATCH`。一个 tag 为上表中的全部内容定版本；工具在 `.agent/SPEC_VERSION` 中固定一个 tag，得到的规范、契约、Schema 和库就是一起测试过的那一套。
+- `contract.json` 带有 `spec_version`（`2.0.0`）和 `contract_version`（`2.0`）。信封的 `schema_version` 是 `"2.0"`，只在信封出现破坏性变更时才升主版本（CLI-080）。
+- 会破坏符合规范的工具或其 Agent 的变更，要升 MAJOR。规则 ID 永不改变含义，也永不复用。
+- 历史记录：[CHANGELOG.md](CHANGELOG.md)。英文是源文本，`*_zh.md` 文件是它的译文。
 
-LLM Agent 时刻在调 CLI，但绝大多数 CLI 是给人用的：散文式输出、随意的退出码、在自动化里会卡死的交互提示。这套规范把它们拧成**一套连贯、有主见的标准**，让**你建的每个工具都按 agent 预期的方式行事**，也让 AI 从第一天就能照着建新工具，不必每次重新推导规则。
+## 许可证
 
-它刻意做到**分层、而非笨重**：
-
-- **一个入口**（`AGENT.md`）→ 本地聚焦规范 + 共享仓库骨架规范，只读任务需要的那份。
-- **风险分级 + 可选模式**。只读工具保持轻量；执行 SQL、持有会过期令牌的工具才按需加码。规范随工具复杂度伸缩。
-
-## 它统一了什么
-
-- **Agent-safe 输出契约**——stdout 只出一个 JSON 文档，统一 `ok` / `schema_version` / `data` / `meta` 信封，日志走 stderr。
-- **结构化错误**——稳定的 `E_*` 码 ↔ 退出码 ↔ `retryable`，让 agent 能判断重试 / 改参 / 求助于人。
-- **写操作安全**——`--dry-run` → `--confirm <token>`，token 绑定操作内容。
-- **自描述**——`reference` / `context` / `doctor` / `changelog`，让 agent 发现能力、并在自更新后知道"变了什么"。
-- **Skill**——对齐 Anthropic 的 `SKILL.md` 编写规范、渐进式披露、版本协商。
-- **安全**——不可信内容/注入防护、最小权限、凭证落盘、供应链。
-- **发布质量门禁**——README / Skill / reference / help / context / doctor / changelog / update 中声明的公开行为必须达到 Functional Contract Coverage = 100%；数字代码覆盖率是辅助指标。
-- **仓库与分发**——必备文档、双语 README 约定、CHANGELOG 单一真相源、npm 壳分发。
-
-## 怎么用
-
-- **加进已有仓库：** 先拉 `template/common`，再叠加恰好一种 `template/<lang>`：
-  ```bash
-  npx degit fatecannotbealtered/ai-native-cli-spec/template/common .
-  npx degit fatecannotbealtered/ai-native-cli-spec/template/go .   # 或 template/python
-  ```
-- **固定版本：** 在每条路径后加 `#v1.5.0`，如 `.../template/common#v1.5.0 .`
-- **从零起新仓库：** 在 GitHub 上点 **Use this template**，然后只保留你需要的那一种 `template/<lang>`。
-
-然后照 [`template/INSTANTIATE.md`](template/INSTANTIATE.md) 填好占位符，填好 `AGENTS.md` 底部的 `## 本项目` 一节，让 agent 照着 `.agent/AGENT.md` 里的**工作流 A（新建工具）**走。
-
-## 参考实现
-
-[**outlook-cli**](https://github.com/fatecannotbealtered/outlook-cli)——一个按本规范构建的 Outlook/Exchange CLI。可作为信封、dry-run/confirm 流程、自描述命令、`changelog` 机制的完整范例。
-
-## 语言
-
-每份文档都是双语：英文为主 `X.md`，中文为 `X_zh.md`，两者顶部互相挂切换链接。READMEs、`AGENTS.md`、`.agent/` 本地规范以及根部 `REPO-SPEC.md` 均如此。
-
-## 许可
-
-[MIT](LICENSE)
+[MIT](LICENSE)。版权所有 © 2026 Sean Guo。

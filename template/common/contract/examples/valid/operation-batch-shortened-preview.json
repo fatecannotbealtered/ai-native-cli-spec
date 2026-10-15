@@ -1,0 +1,47 @@
+{
+  "operation_id": "opb_l7oqa25o4mwnjt6srkrxogthpi",
+  "command": "issue close",
+  "status": "applied",
+  "target": null,
+  "effects": ["change"],
+  "scope_id": "scp_2026-10-12_triage",
+  "created_at": "2026-10-12T14:00:00Z",
+  "expires_at": "2026-10-12T14:15:00Z",
+  "dispatched_at": "2026-10-12T14:02:31Z",
+  "finished_at": "2026-10-12T14:02:44Z",
+  "preview": {
+    "operation_id": "opb_l7oqa25o4mwnjt6srkrxogthpi",
+    "command": "issue close",
+    "action": "Close 12 issues",
+    "targets": [{"key": "acme/web#90", "kind": "issue"}, {"key": "acme/web#91", "kind": "issue"}, {"key": "acme/web#92", "kind": "issue"}],
+    "total": 12,
+    "items": [
+      {"target": {"key": "acme/web#90", "kind": "issue"}, "operation_id": "op_hev3kay7sw4b5cqklcsxsbotky", "changes": [{"field": "state", "before": "opened", "after": "closed"}], "can_apply": true, "blocked_by": []},
+      {"target": {"key": "acme/web#91", "kind": "issue"}, "operation_id": "op_i4ia2mqybybmpr47st3j3bi4s4", "changes": [{"field": "state", "before": "opened", "after": "closed"}], "can_apply": true, "blocked_by": []},
+      {"target": {"key": "acme/web#92", "kind": "issue"}, "operation_id": "op_r76jhmsgmykzh34ded7o4joboi", "changes": [{"field": "state", "before": "opened", "after": "closed"}], "can_apply": true, "blocked_by": []}
+    ],
+    "omitted": 9,
+    "effects": ["change"],
+    "dangerous": false,
+    "inputs": {"project": "acme/web", "ids": ["90", "91", "92", "93", "94", "95", "96", "97", "98", "99", "100", "101"]},
+    "can_apply": true,
+    "blocked_by": []
+  },
+  "receipt": null,
+  "resolution": null,
+  "batch_id": null,
+  "items": [
+    {"operation_id": "op_hev3kay7sw4b5cqklcsxsbotky", "target": {"key": "acme/web#90", "kind": "issue"}, "status": "applied"},
+    {"operation_id": "op_i4ia2mqybybmpr47st3j3bi4s4", "target": {"key": "acme/web#91", "kind": "issue"}, "status": "applied"},
+    {"operation_id": "op_r76jhmsgmykzh34ded7o4joboi", "target": {"key": "acme/web#92", "kind": "issue"}, "status": "applied"},
+    {"operation_id": "op_mt4p5dv6exa65fu4hxio3ycmpq", "target": {"key": "acme/web#93", "kind": "issue"}, "status": "applied"},
+    {"operation_id": "op_ycqzmv7igh5rwarwqzr7souhfq", "target": {"key": "acme/web#94", "kind": "issue"}, "status": "applied"},
+    {"operation_id": "op_fm355ougdjpsa7olnbc3lk3gry", "target": {"key": "acme/web#95", "kind": "issue"}, "status": "applied"},
+    {"operation_id": "op_6zjcbik325cj2mfwkpj3ihtxim", "target": {"key": "acme/web#96", "kind": "issue"}, "status": "applied"},
+    {"operation_id": "op_tdmh4i5uzwmyvckjthtkygcbxq", "target": {"key": "acme/web#97", "kind": "issue"}, "status": "applied"},
+    {"operation_id": "op_rfckoudyng74dairk6yp65lp6q", "target": {"key": "acme/web#98", "kind": "issue"}, "status": "applied"},
+    {"operation_id": "op_kjb3juashay3qsnaxdvzdqys3q", "target": {"key": "acme/web#99", "kind": "issue"}, "status": "applied"},
+    {"operation_id": "op_rrafgywftk63lf2vterbhprpda", "target": {"key": "acme/web#100", "kind": "issue"}, "status": "applied"},
+    {"operation_id": "op_wubhwt2gyy3u6hj6ya2ugmqj4m", "target": {"key": "acme/web#101", "kind": "issue"}, "status": "applied"}
+  ]
+}

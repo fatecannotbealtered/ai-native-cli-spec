@@ -1,0 +1,29 @@
+{
+  "ok": true,
+  "schema_version": "2.0",
+  "data": {
+    "operation_id": "op_sv2aqohkzwfdjx2nzc6oxayyje",
+    "receipt": {
+      "operation_id": "op_sv2aqohkzwfdjx2nzc6oxayyje",
+      "command": "issue comment",
+      "target": {"key": "acme/web#12", "kind": "issue"},
+      "effects": ["change"],
+      "outcome": {
+        "execution": "completed",
+        "change": "applied",
+        "delivery": "not_applicable",
+        "persistence": "not_applicable",
+        "verification": "not_run"
+      },
+      "observed": {"note_id": "4411", "body_bytes": 214},
+      "replayed": false,
+      "notes": "Not re-read; observed comes from the create response."
+    },
+    "result": {
+      "ref": "acme/web#12",
+      "note_id": "4411",
+      "web_url": "https://gitlab.acme.test/acme/web/-/issues/12#note_4411"
+    }
+  },
+  "meta": {"duration_ms": 611}
+}

@@ -1,0 +1,31 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_VERIFY_INCOMPLETE",
+    "message": "The comment was added but not read back.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "dispatched",
+      "next_action": "Read the issue to check the comment.",
+      "operation_id": "op_sv2aqohkzwfdjx2nzc6oxayyje",
+      "receipt": {
+        "operation_id": "op_sv2aqohkzwfdjx2nzc6oxayyje",
+        "command": "issue comment",
+        "target": {"key": "acme/web#12", "kind": "issue"},
+        "effects": ["change"],
+        "outcome": {
+          "execution": "completed",
+          "change": "applied",
+          "delivery": "not_applicable",
+          "persistence": "not_applicable",
+          "verification": "not_run"
+        },
+        "observed": {"note_id": "4411", "body_bytes": 214},
+        "replayed": false,
+        "notes": "Not re-read; observed comes from the create response."
+      }
+    }
+  },
+  "meta": {"duration_ms": 611}
+}

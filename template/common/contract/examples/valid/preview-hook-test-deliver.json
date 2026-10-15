@@ -1,0 +1,17 @@
+{
+  "operation_id": "op_jhbory2vj3l4iovhrascrxonie",
+  "command": "hook test",
+  "action": "Send a test push event to the project webhook",
+  "target": {
+    "key": "acme/web:hook/3",
+    "kind": "project_hook",
+    "label": "hook 3 (https://hooks.acme.test/gitlab)"
+  },
+  "effects": ["deliver"],
+  "dangerous": true,
+  "changes": [],
+  "inputs": {"project": "acme/web", "hook": "3", "trigger": "push_events"},
+  "destinations": ["https://hooks.acme.test/gitlab"],
+  "can_apply": true,
+  "blocked_by": []
+}

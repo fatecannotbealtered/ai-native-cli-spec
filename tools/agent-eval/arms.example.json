@@ -1,0 +1,18 @@
+{
+  "A": {
+    "description": "Baseline: the last release with its own Skill, e.g. gitlab-cli 1.2.17 and its 1.2.17 Skill (frozen copies)",
+    "real_bin": "arms/A/gitlab-cli",
+    "skill_dir": "arms/A/skill",
+    "sha256": "",
+    "source": "tag v1.2.17",
+    "spec": "1.x"
+  },
+  "N": {
+    "description": "Candidate: the build under evaluation with the Skill it will ship (frozen copies)",
+    "real_bin": "arms/N/gitlab-cli",
+    "skill_dir": "arms/N/skill",
+    "sha256": "",
+    "source": "commit <sha>, or a patch file kept with the report",
+    "spec": "2.0"
+  }
+}

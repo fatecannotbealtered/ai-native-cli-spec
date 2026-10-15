@@ -1,6 +1,6 @@
 # CI workflow for the Python flavour of {{TOOL_NAME}}.
 #
-# Placeholders (see SHARED PLACEHOLDER DICTIONARY):
+# Placeholders (see SHARED PLACEHOLDER DICTIONARY in template/INSTANTIATE.md):
 #   {{TOOL_NAME}} kebab-case CLI/binary/repo name, e.g. my-cli
 #   {{TOOL_PKG}}  Python import package (underscores), e.g. my_cli
 #                 The Python package directory uses underscores while the CLI
@@ -13,6 +13,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -36,26 +39,36 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      # ruff.toml excludes the vendored {{TOOL_PKG}}/_aicli/ (linted in the spec repository).
       - name: Lint with ruff
         run: ruff check {{TOOL_PKG}}/ tests/
 
       - name: Check formatting with ruff
         run: ruff format --check {{TOOL_PKG}}/ tests/
 
+      # SEC-050: an audit per shipped ecosystem, fail-closed: the Python
+      # dependencies (the vendored library needs only click) and the npm wrapper.
       - name: Audit Python dependencies
         run: pip-audit -r requirements.txt
 
       - name: Audit npm wrapper
-        run: npm audit --omit=dev
+        run: npm audit --audit-level=high --omit=optional
 
+      # Includes the aicli conformance suite (VER-001: the write gate for every
+      # write command, the contract on real output, reference budgets) and the
+      # registry coverage check (VER-003). Every OS runs it: the gate's state
+      # store behaves differently on Windows.
       - name: Run tests
         run: pytest tests/ -v --tb=short
 
-      - name: Smoke test (--help)
-        run: python -m {{TOOL_PKG}}.main --help
+      - name: Smoke test (--help, reference --index)
+        shell: bash
+        run: |
+          python -m {{TOOL_PKG}}.main --help
+          python -m {{TOOL_PKG}}.main reference --index > /dev/null
 
   version-check:
-    name: Verify version sync
+    name: Verify version and spec sync
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -64,23 +77,13 @@ jobs:
         with:
           node-version: "20"
 
-      # gen-contract.js pipes the generated Python through `ruff format`, and
-      # check-spec.js re-runs it to byte-compare against the committed module.
-      # Without ruff on PATH the generator fails closed rather than emitting
-      # unformatted output, so the codegen verifier is given the codegen's own
-      # toolchain.
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install ruff (required by the contract codegen)
-        run: python -m pip install --upgrade pip && pip install ruff
-
       # Fail-closed: every derived version location must equal package.json.
       - name: Verify version sync
         run: node scripts/check-version.js
 
-      # Fail-closed: the vendored spec assets must match the pinned tag, and the
-      # generated contract module must match contract.json (REPO-SPEC §5c).
-      - name: Verify spec/contract sync
+      # Fail-closed (REPO-SPEC, SEC-050): {{TOOL_PKG}}/_aicli must match its
+      # MANIFEST.json (offline, strict), and every vendored spec file, schema and
+      # library file must match the spec tag in .agent/SPEC_VERSION (remote; a
+      # failed download degrades to a warning). Node only: there is no codegen.
+      - name: Verify spec, contract and library sync
         run: node scripts/check-spec.js

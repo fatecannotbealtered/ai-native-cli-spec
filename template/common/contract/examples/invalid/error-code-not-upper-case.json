@@ -1,0 +1,14 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "not_found",
+    "message": "The merge request does not exist in this project or is not visible to this account.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "not_started",
+      "next_action": "Run `gitlab-cli mr list --project acme/web` to find the right merge request."
+    }
+  },
+  "meta": {"duration_ms": 143}
+}

@@ -1,0 +1,14 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_NETWORK",
+    "message": "The GitLab host could not be reached, so nothing was sent.",
+    "retryable": true,
+    "details": {
+      "dispatch_state": "not_started",
+      "next_action": "Run `gitlab-cli doctor` to check connectivity, then run the command again."
+    }
+  },
+  "meta": {"duration_ms": 5011, "request_id": "req_7f3a1c"}
+}

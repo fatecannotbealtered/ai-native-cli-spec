@@ -1,0 +1,24 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_PARTIAL",
+    "message": "28 of the 30 issues were closed; 2 confidential issues were refused.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "dispatched",
+      "next_action": "Do not resend the batch; tell the user which issues were refused. `gitlab-cli operation show --id opb_z4kxepiihffpkbvympej5vxj5a` lists every item.",
+      "operation_id": "opb_z4kxepiihffpkbvympej5vxj5a",
+      "items": [
+        {"target": "acme/web#47", "operation_id": "op_req6dsrfaga7cntdes62a6gzrm", "ok": false, "error": {"code": "E_FORBIDDEN", "retryable": false, "message": "This account cannot edit confidential issues."}},
+        {"target": "acme/web#61", "operation_id": "op_diixr2hew44as7nr72jc2lp6ju", "ok": false, "error": {"code": "E_FORBIDDEN", "retryable": false, "message": "This account cannot edit confidential issues."}},
+        {"target": "acme/web#40", "operation_id": "op_34iqwcplc5iqbqwri5bsuw75pu", "ok": true},
+        {"target": "acme/web#41", "operation_id": "op_zesf5766uwmozej3zpc44aumdi", "ok": true},
+        {"target": "acme/web#42", "operation_id": "op_kdkjngqyl6xuonxldg7rw5wd3i", "ok": true}
+      ],
+      "summary": {"total": 30, "succeeded": 28, "failed": 2, "unknown": 0, "skipped": 0},
+      "omitted": 25
+    }
+  },
+  "meta": {"duration_ms": 9310}
+}

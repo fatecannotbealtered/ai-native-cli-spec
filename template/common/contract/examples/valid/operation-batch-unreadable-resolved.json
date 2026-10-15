@@ -1,0 +1,21 @@
+{
+  "operation_id": "opb_4sc42eqjpzve3deeqbcsxvjnuu",
+  "command": "unknown",
+  "status": "resolved",
+  "target": null,
+  "effects": ["change"],
+  "scope_id": null,
+  "created_at": "2026-10-12T11:01:10Z",
+  "expires_at": null,
+  "dispatched_at": "2026-10-12T11:01:10Z",
+  "finished_at": null,
+  "preview": null,
+  "receipt": null,
+  "resolution": {
+    "outcome": "partial",
+    "evidence": "The record was unreadable; the project shows issues 14 to 16 closed and 99 still open.",
+    "resolved_at": "2026-10-12T11:20:00Z"
+  },
+  "batch_id": null,
+  "items": null
+}

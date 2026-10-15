@@ -1,270 +1,320 @@
-# AI-Native Open-Source Repo Spec
+# Repo spec for AI-native CLI tools
 
+**中文版 → [REPO-SPEC_zh.md](REPO-SPEC_zh.md)**
 
-This document defines a unified repo standard for all your open-source projects: required docs, template files, directory layout, release conventions. The goal: ten projects look the same, and anyone (including an AI agent) entering any repo finds the same things in the same places.
+This is the repository standard for tools built on ai-native-cli-spec 2.0: which files a tool repo has and where, how versions, releases and distribution work, how the specs and the aicli library are vendored, and what CI runs. The goal is that every tool repo looks the same, so a person or an agent finds the same thing in the same place in any of them.
 
-Companion specs for consuming tool repositories live under `.agent/`, with
-`AGENT.md` as the entry point. This repo skeleton standard stays here, at the
-root of `ai-native-cli-spec`, so consuming repositories do not carry forked
-copies.
+This file lives at the root of the spec repo and is not vendored into tools; `.agent/AGENT.md` links to it. The vendored companions are:
 
-- `AGENT.md` — entry / playbook: how to build & extend a tool here, navigates to the local specs and this shared repo standard.
-- `CLI-SPEC.md` — the CLI machine contract (how the tool speaks).
-- `SKILL-SPEC.md` — Skill authoring spec (how the agent uses it).
-- `SEC-SPEC.md` — security baseline (how not to get burned, or burn others).
-- This doc — repo skeleton (what the project looks like).
+- `.agent/AGENT.md`: the playbook and entry point.
+- `.agent/CLI-SPEC.md`: the machine contract (`CLI-xxx`).
+- `.agent/SEC-SPEC.md`: security (`SEC-xxx`).
+- `.agent/SKILL-SPEC.md`: Skills (`SKL-xxx`).
+- `.agent/VERIFY-SPEC.md`: verification and agent eval (`VER-xxx`).
 
-## 1. File manifest (required matrix)
+The spec repository also holds `tools/`: the VER-006 agent-eval harness (`tools/agent-eval/`) and the VER-007 gate-audit workflows (`tools/gate-audit/`). Tools never vendor them; they are how the evidence those rules ask for is produced.
 
-Levels: **MUST** required; **SHOULD** strongly recommended; **optional** as needed.
+Rules here are `REPO-xxx`. MUST, MUST NOT, SHOULD and MAY have their RFC 2119 meaning; an entry marked † applies only when its condition holds. IDs are stable and never renumbered.
+
+## 1. Files
+
+### REPO-001 Required files
+
+A tool repo MUST contain the files marked MUST and SHOULD contain those marked SHOULD. "Vendored" files are copied from the spec at the pinned tag (REPO-061) and never edited (REPO-063).
 
 | File | Level | Role |
-|------|-------|------|
-| `README.md` | MUST | project front door: what it is, how to install, how to use |
-| `README_zh.md` | SHOULD | Chinese version (i18n convention in §3) |
-| `LICENSE` | MUST | open-source license (default MIT) |
-| `CHANGELOG.md` | MUST | version change log (Keep a Changelog + SemVer) |
-| `CONTRIBUTING.md` | MUST | how to contribute: env, branch, commit, test, PR flow |
-| `SECURITY.md` | MUST | vulnerability disclosure channel and supported versions |
-| `CODE_OF_CONDUCT.md` | SHOULD | code of conduct (Contributor Covenant) |
-| `NOTICE.md` | MUST† | third-party trademark / attribution notice (†required when wrapping a third-party product) |
-| `docs/COMPATIBILITY.md` | MUST† | verified backend version matrix (†required when integrating an external system) |
-| `docs/OPEN_SOURCE_CHECKLIST.md` | SHOULD | security gate checklist before the first public push |
-| `docs/E2E.md` | SHOULD† | E2E / integration test environment notes (†recommended when calling external APIs) |
-| `.gitignore` | MUST | ignore build artifacts, venvs, IDE, caches by language |
-| `.github/workflows/ci.yml` | MUST | on push / PR: lint + test |
-| `.github/workflows/release.yml` | SHOULD | on tag: build + publish |
-| `.github/ISSUE_TEMPLATE/` | SHOULD | bug / feature templates |
-| `.github/PULL_REQUEST_TEMPLATE.md` | SHOULD | PR self-check checklist |
-| `.github/dependabot.yml` | optional | dependency updates |
-| `AGENTS.md` | MUST* | cross-tool entry hook, points to `.agent/AGENT.md` |
-| `.agent/AGENT.md` | MUST* | AI-native tool entry / playbook, navigates to the local specs and this shared repo standard |
-| `.agent/CLI-SPEC.md` | MUST* | the CLI machine contract (*CLI projects only) |
-| `.agent/SKILL-SPEC.md` | MUST* | Skill authoring spec (*projects with a Skill) |
-| `.agent/SEC-SPEC.md` | MUST* | security baseline (risk tiers + injection/privilege/credential/supply-chain) |
-| `skills/<name>/SKILL.md` | MUST* | Agent Skill (*required for AI-native tools) |
-| `skills/<name>/test-prompts.json` | SHOULD* | Skill regression prompts for review / Darwin-style validation |
+|---|---|---|
+| `README.md` | MUST | front door, skeleton in REPO-010 |
+| `README_zh.md` | SHOULD | translation (REPO-020) |
+| `LICENSE` | MUST | default MIT |
+| `CHANGELOG.md` | MUST | Keep a Changelog; source of the `changelog` command (REPO-032) |
+| `CONTRIBUTING.md`, `SECURITY.md` | MUST | contribution flow; disclosure channel, supported versions, risk tier (SEC-001) |
+| `CODE_OF_CONDUCT.md` | SHOULD | Contributor Covenant |
+| `NOTICE.md` | MUST† | trademark notice (†wraps a third-party product) |
+| `docs/COMPATIBILITY.md` | MUST† | verified upstream versions (†integrates an external system) |
+| `docs/E2E.md` | SHOULD† | live test environment and recorded runs, the evidence behind `verified` maturity (VER-005) (†calls external APIs) |
+| `docs/OPEN_SOURCE_CHECKLIST.md` | SHOULD | checklist before the first public push |
+| `.gitignore`, `.gitattributes` | MUST | build output, caches, IDE files; line endings |
+| `.github/workflows/ci.yml`, `release.yml` | MUST | merge gate (REPO-070), release gate (REPO-071) |
+| `.github/ISSUE_TEMPLATE/`, `PULL_REQUEST_TEMPLATE.md` | SHOULD | issue forms, PR self-check (REPO-074) |
+| `AGENTS.md` | MUST | entry hook for every agent; points to `.agent/AGENT.md` |
+| `.agent/{AGENT,CLI-SPEC,SEC-SPEC,SKILL-SPEC,VERIFY-SPEC}.md` (+ `_zh`) | MUST, vendored | the five specs |
+| `.agent/SPEC_VERSION` | MUST | the spec pin (REPO-060) |
+| `contract/contract.json`, `contract/schemas/*.schema.json` | MUST, vendored | machine contract and JSON Schemas |
+| `contract/contract-ext.json` | MUST† | tool-specific error codes (†the tool has any) (REPO-064) |
+| Go: `internal/aicli/*.go`, `internal/aicli/LICENSE`, `internal/aicli/MANIFEST.json` | MUST, vendored | the aicli library, its licence and its file hashes |
+| Python: `<pkg>/_aicli/**`, `<pkg>/_aicli/LICENSE`, `<pkg>/_aicli/MANIFEST.json` | MUST, vendored | the aicli library, its licence and its file hashes |
+| `scripts/{spec-files,sync-spec,check-spec}.js` | MUST, vendored | sync and drift guard |
+| `scripts/{version-files,sync-version,check-version}.js`, `.npmrc` | MUST | one version source (REPO-031) |
+| `package.json`, `scripts/{run,prepare-npm-platform-packages}.js` | MUST† | npm wrapper (†distributed through npm, REPO-040) |
+| a conformance test, e.g. `cmd/conformance_test.go`, `tests/test_conformance.py` | MUST | runs the suite with a sample for every write command (VER-001); R06 runs after the full test run (Go: `TestMain` in `cmd/main_test.go`, VER-003) |
+| `skills/<name>/SKILL.md`, `skills/<name>/test-prompts.json` | MUST | the Skill and its eval prompts (SKL-011) |
 
-`*` items are specific to "AI-native tools" — a plain library may omit them, but any agent-facing CLI / tool must have them. `†` items are scenario-triggered: wrapping a third-party product (Outlook/Exchange, GitLab, Jira, Kibana, etc.) requires the trademark notice and compatibility matrix.
+Retired in 2.0; a 2.0 tool has none of them: the FCC source-scan guards `cmd/fcc_guard_test.go` and `tests/test_fcc_guard.py` (replaced by VER-003); the per-tool contract modules `internal/contract/contract_gen.go` and `<pkg>/contract_gen.py` (the library carries its generated contract); the tool's own confirm-token, key and consumed-token code (CLI-050); the tool's own `update` code, which aicli's built-in replaces (CLI-070); `release_readiness` in code and docs (CLI-027).
 
-## 2. Required README skeleton
+Why: one manifest lets anyone find the same file in every repo and lets the review Skill grade a repo mechanically.
+Check: `review-ai-native-cli` static review; `check-spec.js` fails when a vendored file is missing.
 
-Every README follows a fixed order, for easy cross-comparison and direct Agent onboarding:
+## 2. README
 
-1. **Title + language switch + badges** — badge order is CI, language quality badge when applicable, npm version, license.
-2. **One-line positioning** — Agent-native tool description. Do not position these tools as primarily interactive human CLIs.
-3. **Agent Install** — one copy-paste block an AI Agent can run: npm wrapper install, Skill install, required env placeholders, `context`, `doctor`, and `reference`.
-4. **What It Does** — one paragraph, risk tier, and any third-party/disclaimer note.
-5. **Capabilities** — compact table of command groups; README is a map, not the full manual.
-6. **Agent Workflow** — install, configure, preflight, discover via `reference`, reduce tokens with `--compact`/`--fields`, write with `--dry-run` -> `--confirm`, refresh via `changelog`.
-7. **Machine Contract** — JSON default, envelope shape, stdout/stderr rules, error codes, `_untrusted`, and `--json` compatibility note.
-8. **Configuration** — config path, env vars, credential precedence and storage.
-9. **Project Structure** — top-level tree so every repo looks navigable at a glance.
-10. **Development** — local build/test/lint commands.
-11. **Links** — `AGENTS.md`, Skill, `.agent/CLI-SPEC.md`, security, compatibility, E2E, changelog, contributing, notice, license.
+### REPO-010 README skeleton
 
-Conventions:
+A tool's README MUST have these sections in this order:
 
-- Badge sets are intentionally small. Do not add vanity badges that do not affect Agent trust or release quality.
-- Install blocks must be copy-paste-runnable by an Agent, with secret placeholders instead of real credentials.
-- Command detail belongs in the live `reference` output. README command tables stay high-level to avoid stale manual pages.
-- Example commands use real runnable forms, time as ISO 8601, ID as placeholder `<message-id>`.
+1. **Title**, language switch, badges: CI, a language quality badge where one applies, npm version, licence. No other badges.
+2. **One line** that positions the tool as agent-facing.
+3. **Agent Install**: one copy-paste block that installs the CLI, installs the Skill of the same version from the installed package with a pinned installer (`npx skills@<version> add "$(npm root -g)/<pkg>" -y -g`, SKL-009) and sets credential placeholders. It does not run `context`, `doctor` or `reference` first (CLI-034).
+4. **What It Does**: one paragraph with the risk tier (SEC-001), the effects the tool can have (CLI-025) and any third-party disclaimer.
+5. **Authorization**: writes are refused until a person grants a scope file (SEC-010); the file's path (`<PREFIX>_SCOPE_FILE`, else `<state_dir>/scope.json`), a minimal grant, and the protection statement of SEC-013.
+6. **Capabilities**: the command map, one line per noun with its verbs: `CommandMap()` output between the same `aicli:command-map` markers the Skill uses, checked by the same test (SKL-002).
+7. **Agent Workflow**: run task commands directly; discover with `--help`, `reference --index` and `reference --command <path>`; narrow output with `--fields`; write with `--dry-run`, then the same command without it plus `--confirm <token>` (a bare call returns the same preview and token), plus `--dangerous` where required; after a lost reply, `operation show --id <operation_id>`; after `update`, `changelog --since <previous_version>`.
+8. **Machine Contract**: the pinned spec version, `schema_version` `"2.0"`, the envelope, error details (`dispatch_state`, `next_action`), `meta.untrusted`, and a link to `.agent/CLI-SPEC.md`.
+9. **Configuration**: the settings and their environment variables (credentials, `<PREFIX>_STATE_DIR`, `<PREFIX>_SCOPE_FILE`, `<PREFIX>_SETTINGS_FILE`, `<PREFIX>_PROFILE`, `<PREFIX>_CA_FILE`), the settings file with its profiles (CLI-100, CLI-101), and credential storage (SEC-040).
+10. **Uninstall**: how to remove everything the tool installs or leaves behind (REPO-011).
+11. **Project Structure**: the top-level tree (REPO-050).
+12. **Development**: build, test, conformance and lint commands.
+13. **Links**: `AGENTS.md`, the Skill, `.agent/CLI-SPEC.md`, `SECURITY.md`, `docs/COMPATIBILITY.md`, `docs/E2E.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `NOTICE.md`, `LICENSE`.
 
-## 3. Internationalization (i18n) convention
+Why: the install block is what an agent runs first; in the 2026-10 gitlab-cli eval, a Skill-mandated `context`/`doctor`/`reference` bootstrap cost 1.6 calls per task with no accuracy gain.
+Check: review: headings present and in this order; the install block runs in a clean shell.
 
-- Primary doc in English `README.md`, Chinese `README_zh.md`, filename gets a `_zh` suffix.
-- The two link to each other at the top.
-- Other governance docs (CONTRIBUTING / SECURITY / code of conduct) are English-only by default, unless the project is primarily for a Chinese community.
-- Bilingual docs are **kept in sync**: change one, change the other; CI may add a link / section consistency check.
+### REPO-011 README content
 
-## 4. Versioning and release convention
+- Install blocks MUST run as pasted, with placeholders for secrets and never real credentials.
+- The README is a map. Flags, schemas and error tables live in `reference` and `--help`; the README MUST NOT copy them.
+- Examples use runnable forms, ISO 8601 UTC times and placeholder IDs (`<merge-request-ref>`).
+- The README tells the user how to grant a scope. It MUST NOT tell an agent to create or edit the scope file (SKL-006).
+- The Uninstall section MUST cover everything the tool leaves behind: the package or binary; the state directory (`~/.<tool>`, or `<PREFIX>_STATE_DIR`) with its key, journal, scope file and settings file; the credentials in the OS keyring (`<tool> auth logout` for each profile, or the keyring's own manager); a settings or scope file kept elsewhere (`<PREFIX>_SETTINGS_FILE`, `<PREFIX>_SCOPE_FILE`); the installed Skill directories (`~/.agents/skills/<name>`, `~/.claude/skills/<name>`); for a standalone binary, the Skills beside it (`<exe dir>/skills/<name>`, which `update` refreshes) and, on Windows, the `<exe>.old*` files an update can leave.
 
-- **SemVer**: `MAJOR.MINOR.PATCH`. Breaking changes bump MAJOR, backward-compatible additions bump MINOR, fixes bump PATCH.
-- The tool version (package version) is decoupled from the CLI's output `schema_version` — the latter bumps only when the JSON contract breaks (see `CLI-SPEC.md`).
-- **CHANGELOG uses Keep a Changelog format**: `Unreleased` on top, split into `Added/Changed/Fixed/Deprecated/Removed/Security`.
-- A release means tagging git `vX.Y.Z`, triggering build & publish via `release.yml`.
-- Single source of truth for the version number (`package.json` `version`); everything else is **derived, never hand-copied**.
+Why: copied flag lists go stale; a README that tells agents to write their own scope undoes SEC-010; an uninstall that leaves a credential in the keyring or a Skill in the agent's directories leaves access and instructions behind for a tool that is gone.
+Check: review.
 
-### Version bump mechanics (enforced, not by hand)
+## 3. Languages
 
-Bumping a version edits one source and lets tooling fan it out — so a release can never again ship with a stale pin, lockfile, Skill header, or `__version__`:
+### REPO-020 English source, Chinese translation
 
-- **One command:** `npm version <patch|minor|major|x.y.z>`. npm bumps `package.json` `version` (and the lockfile's top-level version) offline, then its `version` lifecycle hook runs `scripts/sync-version.js`, which propagates the new version to every derived location: `package.json` `optionalDependencies`, `package-lock.json` (`version`, `packages[""].version`, platform pins), each `skills/*/SKILL.md` (`version:` + `metadata.requires.min_version`), the Python `<pkg>/__init__.py` `__version__` (with `setup.py` reading it dynamically — not a separate copy), and a Keep-a-Changelog roll of `## [Unreleased]` into a dated `## [x.y.z]`.
-- **No git side effects:** a committed `.npmrc` sets `git-tag-version=false`, so `npm version` only edits files. The flow stays push → CI green → tag; the human reviews the synced diff and tags after CI.
-- **Single registry, two consumers:** `scripts/version-files.js` defines the derived-location set once; both `sync-version.js` (writer) and `scripts/check-version.js` (verifier) consume it, so adding a location is covered by both automatically.
-- **Fail-closed CI guard:** `scripts/check-version.js` runs in `ci.yml` (every push/PR) and in `release.yml`'s version-consistency step (at tag time). Any location that disagrees with `package.json` — even from a hand edit that bypassed the tool — turns CI red. This is the backstop that makes drift unmergeable and unpublishable.
-- **No version literals in tests:** tests read the expected version dynamically (Go: the embedded `packageJSONVersion()`; Python: the package `__version__`). A version bump must never require editing a test.
-- The lockfile is resynced by surgically rewriting only its version-bearing fields, **never** by `npm install --package-lock-only` (which would inject the developer's registry-mirror URLs into a public lockfile).
+English `X.md` is the source. A Chinese `X_zh.md` is translated from the final English text, and the two link to each other at the top. README, `AGENTS.md` and the vendored `.agent` specs are bilingual; governance docs (CONTRIBUTING, SECURITY, CODE_OF_CONDUCT) MAY be. A release that changes a bilingual English file MUST ship the updated translation.
 
-### CHANGELOG single source of truth
+Why: one source cannot disagree with itself; translating the final text avoids translating churn.
+Check: both files exist and link to each other; CI MAY compare their heading structure.
 
-`CHANGELOG.md` is the only human-maintained change source; everything else is **derived**, must not be separately maintained, and derived artifacts must not be committed:
+## 4. Versions and releases
 
-```
-CHANGELOG.md (human-maintained, single source of truth)
-   ├─ release.yml slices the "## [version]" section → GitHub Release body (generated at build)
-   └─ embedded into the binary at build → runtime changelog command (see CLI-SPEC.md §11)
-```
+### REPO-030 Semantic versioning
 
-- release-notes are generated by `release.yml` at release time (`sed -n "/^## \[VERSION\]/,/^## \[/p"`), **don't keep a hand-maintained `release-notes.md` in the repo**.
-- The runtime `changelog` command reuses the same CHANGELOG, embedded at build — zero new source, just one more outlet.
+Tool versions follow SemVer. A change that breaks what agents rely on (envelope, keys, error codes, command paths or parameters, the write flow) bumps MAJOR; moving a tool from spec 1.x to 2.0 is such a change. The tool version, the spec pin (`.agent/SPEC_VERSION`) and `schema_version` are three separate numbers (CLI-080).
 
-**Runtime changelog file naming.** The source file that embeds `CHANGELOG.md` for the runtime `changelog` command is named `changelog.go` (Go) / `changelog.py` (Python) — **singular, with NO `_embed` suffix**. In Go it holds the `//go:embed` directive and exposes the embedded contents as a package var named `ChangelogMarkdown`.
+Why: Skills and `doctor` key their expectations on the tool version (`metadata.min_version`).
+Check: breaking entries in `CHANGELOG.md` sit under a new MAJOR version.
 
-**Go version pinning.** Go projects pin a single current Go version in `go.mod` (`go 1.XX`) and **do not** add a `toolchain` line; CI reads that one source via `setup-go`'s `go-version-file: go.mod` rather than hard-coding a version in the workflow.
+### REPO-031 One version source
 
-## 4b. Distribution convention (npm wrapper)
+`package.json` `version` is the only hand-edited version. `npm version <patch|minor|major|x.y.z>` runs `scripts/sync-version.js`, which rewrites every location listed in `scripts/version-files.js`: the `optionalDependencies` pins, the version fields of `package-lock.json` including platform subentries, each Skill's `metadata.version` and `metadata.min_version` (SKL-001), the Python `__version__`, and the roll of `## [Unreleased]` into a dated heading.
 
-Cross-language tools distribute via a uniform npm wrapper, so Go binaries and Python packages both `npm install -g` and are called consistently by agents:
+- `.npmrc` sets `git-tag-version=false`: the bump edits files only; a person tags after CI is green.
+- `scripts/check-version.js` runs in `ci.yml` and `release.yml` and fails on any disagreement.
+- Tests read the version at run time and never contain it as a literal.
+- A version bump rewrites the lockfile field by field, never with `npm install --package-lock-only`, which writes the developer's registry mirror into a public file. The first lockfile is created once with `--registry=https://registry.npmjs.org/`, and every `resolved` URL in it is checked before it is committed (`template/INSTANTIATE.md`, step 3).
 
-- `package.json` declares the scoped package name, `bin` entry, and OS/CPU-specific optional platform packages. It is the **single source of truth for the npm wrapper's scope/name and version** — `scripts/run.js`, the platform-package helper, and CI read them from `package.json`, never hard-copying the scope or version elsewhere.
-- `scripts/run.js`: a thin forwarding layer that resolves the installed npm platform package and `execFileSync` invokes its binary, passing through `argv` and stdio, with an actionable reinstall hint if the platform package is missing.
-- `scripts/prepare-npm-platform-packages.js`: release-time helper that packages already-built CI binaries into npm optional platform packages. Runtime npm installation must not download binaries from GitHub.
-- The binary itself (`bin/`, `*.exe`, `dist/`) goes into `.gitignore`, produced by CI, not committed.
-- Release artifacts ship `checksums.txt`; the release pipeline signs that file with
-  Sigstore/Cosign keyless signing from the tagged GitHub Actions release workflow
-  using `cosign sign-blob --new-bundle-format` (a Sigstore protobuf bundle), and
-  publishes the bundle alongside the checksum file.
-- npm distribution publishes the main package and all platform packages with npm
-  provenance. npm registry tarball integrity and provenance cover the npm install
-  path. The standalone GitHub binary self-update path verifies that signature
-  **in-process** (Go via `sigstore-go`, Python inside the frozen binary via
-  `sigstore` — no external cosign, no user-environment dependency), fail-closed
-  with no skip path; integrity failures return the non-retryable `E_INTEGRITY`
-  code. Python tools are frozen to a self-contained binary so this path is
-  identical across languages (see CLI-SPEC §14 / SEC-SPEC §5).
-- Version notifications are an Agent-facing structured contract, not an
-  ambient banner. `update --check` refreshes update state and may write a short
-  cache under the tool's user config directory. `doctor` may actively refresh
-  with a short timeout and degrade silently on network failure. `context` and
-  `--help` only read the cache. Business commands must not phone home just to
-  advertise updates.
-- When an update is available, the notice carries `type: "update_available"`,
-  `severity`, current/latest versions, install method, recommended command,
-  release URL when known, checked-at timestamp, and next steps. It appears in
-  maintenance command `data` and, read-only from the cache (no network), in any
-  command's `meta.notices`. `severity` is graded from the CHANGELOG delta:
-  `warning` when the delta has a `security` entry or a major-version bump, else
-  `info` (`critical` reserved for known-yanked/vulnerable). Text/help output may
-  append one concise line.
-- `update` result fields describe the final post-command state, not just the
-  pre-install comparison. After a successful install, `current_version` equals
-  `target_version`, `previous_version` carries the old version, and
-  `update_available` is `false`. A cached update notice for the installed target
-  must be cleared or suppressed before later commands attach `meta.notices`.
-- A bare `update` owns the full lifecycle in one call (no confirm token, no leaf
-  subcommands): binary/package update plus a sync of every Skill directory under
-  `skills/`, with the same end state as `npx skills add <repo> -y -g`. A standalone binary is
-  replaced in place after in-process Sigstore verification; a package-manager-managed
-  install is upgraded by **driving the manager** (running `npm install -g
-  <pkg>@<version>` / `go install …` on the user's behalf), never by mutating managed
-  files in place and never by merely printing the command for the user to run. The
-  idempotent no-op check runs before any package-manager command, so an already
-  current install never re-runs `npm`, `go`, `pip`, or `brew`. Every failure or
-  interruption reports `stage` + `current_version` + `binary_replaced` +
-  `skill_sync_status` (see CLI-SPEC §14).
-- Update-notice cache tests must isolate the user config directory, and compiled
-  test binaries (including Windows `*.test.exe`) must not read or write the real
-  user update cache by default.
+Why: a hand-copied version drifts; the guard makes drift unmergeable and unpublishable.
+Check: `node scripts/check-version.js` in both workflows.
 
-## 5. Directory layout convention
+### REPO-032 CHANGELOG is the only change source
 
-```text
-project/
-├── README.md / README_zh.md
-├── LICENSE / CHANGELOG.md / CONTRIBUTING.md / SECURITY.md
-├── .gitignore
-├── AGENTS.md                   # cross-tool entry hook, points to .agent/AGENT.md
-├── .github/
-│   ├── workflows/{ci,release}.yml
-│   ├── ISSUE_TEMPLATE/
-│   └── PULL_REQUEST_TEMPLATE.md
-├── .agent/                     # AI-native specs
-│   ├── AGENT.md                # entry / playbook
-│   ├── CLI-SPEC.md             # CLI machine contract
-│   ├── SKILL-SPEC.md           # Skill authoring spec
-│   └── SEC-SPEC.md             # security baseline
-├── skills/<name>/              # bundled Agent Skill
-│   ├── SKILL.md                # executable Skill contract
-│   └── test-prompts.json       # regression prompts for Skill review
-├── <package>/                  # source (package name)
-├── tests/                      # tests, structure mirrors source
-├── scripts/                    # dev / build helper scripts
-└── <build manifest>            # language-specific: package.json / setup.py / pyproject.toml ...
-```
+`CHANGELOG.md` follows Keep a Changelog: `## [Unreleased]` on top, then `## [x.y.z] - YYYY-MM-DD` sections with `Added`, `Changed`, `Fixed`, `Deprecated`, `Removed`, `Security`. Everything else is derived and not committed: the release workflow slices the version's section into the release body, and the build embeds the file for the `changelog` command (CLI-037). Go embeds it in `changelog.go` as `ChangelogMarkdown` and passes it to `App.Changelog`; Python does the same in `changelog.py`. There is no `release-notes.md` in the repo.
 
-Conventions:
+Why: agents read the same text after `update` that people read on the release page.
+Check: no committed release-notes file; a test runs `changelog --since <previous>` against the embedded file.
 
-- Source, tests, scripts, docs each in their place, not dumped in the root.
-- Test directory mirrors the source structure, for easy locating.
-- Build artifacts, caches, venvs, IDE config all go into `.gitignore`, not committed.
+### REPO-033 Tags and toolchain
 
-### 5b. Template model: `common/` + `<lang>/`
+A release is a git tag `vX.Y.Z` pushed after CI is green on the tagged commit; `release.yml` builds, signs and publishes from the tag only. Go tools pin one Go version in `go.mod` (`go 1.XX`, no `toolchain` line) and workflows read it with `go-version-file: go.mod`.
 
-The seed in this repo's `template/` is split so that the skeleton above is assembled from two layers, and so adding a language stays cheap:
+Why: traceable builds from tagged source (SEC-050); one toolchain source that `govulncheck` findings can move.
+Check: `release.yml` triggers on `v*` tags; no Go version is hard-coded in a workflow.
+
+## 5. Distribution
+
+### REPO-040 npm wrapper
+
+Tools SHOULD distribute through the npm wrapper, so Go and Python tools install the same way. A tool that does MUST follow these rules:
+
+- `package.json` is the single source for the package scope and name, the `bin` name and the version; scripts and CI read them from it.
+- Binaries ship as per-platform packages in `optionalDependencies`, built by CI and packed at release by `scripts/prepare-npm-platform-packages.js`. Installing never downloads a binary from anywhere else, and no install script fetches code (SEC-050).
+- `scripts/run.js` resolves the platform package and runs its binary with `execFileSync`, passing argv and stdio through; a missing platform package prints a reinstall command.
+- Binaries (`bin/`, `dist/`, `*.exe`) are build output and are never committed.
+
+Why: one install path across the fleet, with registry integrity and provenance on it.
+Check: `package.json` `bin` and `optionalDependencies`; `.gitignore` covers build output.
+
+### REPO-041 Launcher time budget
+
+The command an agent runs from PATH SHOULD be the native binary, or a launcher that adds at most 100 ms to it (CLI-090). CI SHOULD measure this on every release platform: the median of at least 10 runs of `<tool> --version` through the installed command, minus the same median for the binary run directly; the job fails above 100 ms. Where the npm launcher misses the budget, the README's Agent Install SHOULD put the native binary on PATH for agents, for example the signed standalone binary, or an install step that links the binary from the already-installed platform package without network access.
+
+Why: every agent call is a round trip; on the fleet's Windows test machine a call through the npm launcher took 1.1–2.3 s against 0.4–0.7 s for the binary alone.
+Check: the launcher-budget job in CI; the README names the native path where the launcher misses.
+
+### REPO-042 Signed release material
+
+Release archives ship `checksums.txt`, signed in the tagged release workflow with Sigstore keyless signing (`cosign sign-blob --new-bundle-format`), with the bundle (`checksums.txt.sigstore.json`) published beside it; npm packages are published with provenance. The signing is unchanged from 1.x. On the binary path, aicli's `update` verifies the signature in-process against the exact workflow named in `UpdateConfig.Workflow` (default `release.yml`) and fails closed with `E_INTEGRITY` (CLI-070, SEC-050).
+
+Why: a checksum proves the bytes match a file; only the signature proves the file came from the publisher.
+Check: `release.yml` signs before publishing; aicli's `update` tests cover a missing and a bad signature.
+
+### REPO-043 Skills ship with the tool
+
+Every distribution channel MUST carry the Skills of its own version: the npm package lists `skills/` in `files`; a release archive, named `<tool>-<version>-<os>-<arch>.tar.gz` (`.zip` on Windows), holds the binary and `skills/` at its root. Install and `update` take the Skill from there, never from a branch fetched over the network: aicli's `update` replaces `<exe dir>/skills` with the new archive's `skills/`, then copies the Skills from there, or from the npm package, into the Skill directories where they are installed (SKL-009, CLI-070).
+
+Why: 1.x prescribed `npx skills add <repo> -y -g` on every update, which installs whatever the default branch holds, not the Skill written for the installed binary.
+Check: `npm pack --dry-run` lists `skills/`; a release archive lists the binary and `skills/` at its root; aicli's `update` tests show the Skill sync makes no network request.
+
+## 6. Layout
+
+### REPO-050 Directory layout
 
 ```text
-template/
-├── common/        # language-agnostic, copied into EVERY repo: AGENTS.md, the four
-│                  #   .agent/ specs, all governance docs, .github/, package.json,
-│                  #   scripts/{run,prepare-npm-platform-packages}.js, docs/, skills/SKILL.md.tmpl, .gitignore
-├── go/            # overlay: ci.yml, release.yml, .goreleaser.yml, Makefile,
-│                  #   .golangci.yml, .gitignore
-└── python/        # overlay: ci.yml, release.yml, ruff.toml, .gitignore
+<tool>/
+├── README.md, README_zh.md, LICENSE, CHANGELOG.md, CONTRIBUTING.md, SECURITY.md
+├── AGENTS.md                 entry hook: read .agent/AGENT.md first
+├── .agent/                   five specs (+ _zh) and SPEC_VERSION, vendored
+├── contract/                 contract.json and schemas/ (vendored), contract-ext.json (tool-owned)
+├── .github/                  workflows, issue and PR templates
+├── skills/<tool>/            SKILL.md, test-prompts.json, optional references/
+├── scripts/                  sync and drift guard (vendored), version tooling, npm launcher
+├── docs/                     COMPATIBILITY.md, E2E.md, OPEN_SOURCE_CHECKLIST.md
+├── package.json              npm wrapper
+├── Go:     go.mod, cmd/, internal/ ─ internal/aicli/ (vendored library + MANIFEST.json)
+└── Python: pyproject.toml, <pkg>/, tests/ ─ <pkg>/_aicli/ (vendored library + MANIFEST.json)
 ```
 
-- Instantiate by copying `common/.` then overlaying **exactly one** `<lang>/.`; concatenate the `<lang>` `.gitignore` onto the common one. See `template/INSTANTIATE.md`.
-- **Adding a language = add `template/<lang>/`** (~6 files of CI / release / formatter / build plumbing), reusing 100% of `common/`.
-- The `.agent/` behavioral specs (`AGENT`, `CLI-SPEC`, `SKILL-SPEC`, `SEC-SPEC`) live in `common/` and **never fork per language** — the machine contract is identical across languages; only build/CI plumbing differs.
+- Source, tests, scripts and docs each have their own directory; tests mirror the source layout.
+- The library exists only at its vendored path. A tool MUST NOT keep a second copy (for example a top-level `aicli/` left from copying the overlay) or import the library from anywhere else.
+- Runtime state (confirm key, operation journal, scope file, notice cache) lives in the state directory (SEC-030), never in the repo.
 
-### 5c. Spec single-sourcing: pin, sync, guard
+Why: the same places in every repo, and exactly one library copy for the drift guard to check.
+Check: review; `check-spec.js` checks the vendored path only, so a second copy is a review finding.
 
-The `.agent/` specs and the canonical `contract/contract.json` are **managed in
-exactly one place — this template** — and vendored into each tool, never
-hand-maintained per repo. The mechanism mirrors the version single-source flow
-(§4): one registry, two consumers (a writer and a fail-closed verifier).
+### REPO-051 Template model
 
-- **Registry:** `scripts/spec-files.js` lists every spec-synced path (the eight
-  `.agent/*.md`, `contract/contract.json`, and the sync/check/codegen tooling).
-- **Pin:** each tool records the spec tag it tracks in `.agent/SPEC_VERSION`
-  (e.g. `v1.5.0`), the same tag-pinning used by the `degit …#v1.5.0` install flow.
-- **Writer:** `scripts/sync-spec.js` vendors every registry file from
-  `ai-native-cli-spec@<pin>` byte-for-byte, then regenerates the per-language
-  contract module (`contract_gen.{go,py}`) from the synced `contract.json`.
-- **Verifier (CI, fail-closed):** `scripts/check-spec.js` re-fetches each registry
-  file from `template@<pin>` and asserts byte-identity (a transient network
-  failure degrades to a warning), and — strictly, offline — asserts the generated
-  contract module matches `contract.json`. Drift turns CI red, so a tool can
-  re-sync but can never silently fork the specs or the contract.
-- **Editing flow:** change the spec/contract **only** in the template → tag a new
-  spec version → in each tool bump `.agent/SPEC_VERSION` and run `sync-spec` → the
-  diff is mechanical and the guard proves alignment. Tools never edit `.agent/*`
-  or `contract.json` directly.
+The spec repo's `template/` has a language-agnostic `common/` and one overlay per language (`go/`, `python/`). A tool copies `common/` and exactly one overlay, appends the overlay's `.gitignore` to the common one, and vendors the library with `scripts/sync-spec.js` (`template/INSTANTIATE.md`). The overlay's `aicli/` and `example/` directories are sources inside the spec repo, not tool files. Behavioural specs never fork per language; an overlay carries only build, CI and packaging files. Adding a language means adding an overlay plus a library port that passes the same conformance suite.
 
-## 6. Quality gate convention
+Why: the contract an agent sees must not depend on the language a tool is written in.
+Check: `.agent/*` is byte-identical in a Go and a Python tool at the same pin.
 
-- CI must run lint + tests; red means no merge.
-- AI-native CLI releases require **Functional Contract Coverage = 100%**: every public behavior documented in README, Skill, `reference`, `--help`, `context`, `doctor`, `changelog`, or `update` has command-level tests. Numeric line coverage can ratchet upward separately, but cannot replace missing contract tests.
-- Release readiness is part of the machine contract: `reference` reports `release_readiness.level` as `stable`, `beta`, or `unpublishable`, and `doctor` includes a `release_readiness` check. `Stable` requires FCC 100%, mock upstream/contract tests with failure-path coverage, and recorded live smoke/E2E evidence. `Beta` is allowed only when FCC and mock contracts are in place but live smoke evidence is missing or declared unavailable. Missing command-level coverage is `unpublishable`.
-- A unified formatter (by language: Python ruff, JS prettier, etc.), config committed, no manual alignment.
-- The PR template has built-in self-check items: tests pass, docs synced, CHANGELOG updated, bilingual synced.
+## 7. Single-sourcing the spec and the library
 
-## 7. New-project checklist
+### REPO-060 Pin
 
-- [ ] `README.md` (+ `README_zh.md` as needed) follows the §2 skeleton
-- [ ] `LICENSE` chosen
-- [ ] `CHANGELOG.md` initialized, with `Unreleased`
-- [ ] `CONTRIBUTING.md` / `SECURITY.md` in place
-- [ ] `.gitignore` set up by language
-- [ ] `.github/workflows/ci.yml` (lint + test) in place
-- [ ] Single source of truth for version; CHANGELOG is the only change source, derived artifacts not committed
-- [ ] Source / tests / scripts separated, tests mirror source
-- [ ] (AI-native CLI) Functional Contract Coverage release gate documented and wired into contribution/checklist docs
-- [ ] (AI-native CLI) `reference.release_readiness` and `doctor.checks[].check == "release_readiness"` implemented
-- [ ] Formatter config committed, enforced in CI
-- [ ] (npm wrapper) `package.json` + `scripts/run.js` + `scripts/prepare-npm-platform-packages.js`, binary not committed
-- [ ] (wrapping a third-party product) `NOTICE.md` + `docs/COMPATIBILITY.md` in place
-- [ ] (calling external APIs) `docs/E2E.md` + integration tests in place
-- [ ] `docs/OPEN_SOURCE_CHECKLIST.md` in place, run through before the first push
-- [ ] (AI-native tool) root `AGENTS.md` + `.agent/{AGENT,CLI-SPEC,SKILL-SPEC,SEC-SPEC}.md` + `skills/<name>/{SKILL.md,test-prompts.json}` complete
-- [ ] PR / Issue templates in place
+`.agent/SPEC_VERSION` MUST hold the spec tag the tool follows, for example `v2.0.0`. One pin covers the specs, the contract and schemas, the library and the sync tooling; they are never pinned separately.
+
+Why: these files are tested together in the spec repo; mixing versions builds a combination nobody tested.
+Check: `check-spec.js` reads the pin and fails without it.
+
+### REPO-061 Sync
+
+`scripts/sync-spec.js` copies every file listed in `scripts/spec-files.js` from the spec at the pinned tag, byte for byte:
+
+| From the spec repo | To the tool |
+|---|---|
+| `template/common/.agent/*.md` | `.agent/` |
+| `template/common/contract/contract.json`, `contract/schemas/*.schema.json` | `contract/` |
+| `template/go/aicli/*.go` except `*_test.go`, plus `LICENSE` and `MANIFEST.json` | `internal/aicli/` (Go) |
+| the `aicli` package files from `template/python/aicli/` except tests, plus `LICENSE` and `MANIFEST.json` | `<pkg>/_aicli/` (Python; `<pkg>` is the detected package directory) |
+| `template/common/scripts/{spec-files,sync-spec,check-spec}.js` | `scripts/` |
+
+Tools no longer generate contract code: `scripts/gen-contract.js` runs in the spec repo and writes `contract_gen.go` and `contract_gen.py` into the libraries, so the vendored library carries its own constants. The Go library is one flat package and the Python library uses relative imports only, so copying needs no import rewriting.
+
+Why: a copy runs exactly the code the spec repo tested, with no package registry in between.
+Check: running `node scripts/sync-spec.js` on a conforming tool leaves `git diff` empty.
+
+### REPO-062 Manifest and drift guard
+
+Each library ships a `MANIFEST.json` (`{spec_version, files: {path: sha256}}`), written by `scripts/build-manifest.js` in the spec repo. Hashes are taken over content with CRLF normalised to LF, so a Windows checkout with `core.autocrlf` hashes the same as Linux. `scripts/check-spec.js` MUST run in `ci.yml` and `release.yml` and fail closed:
+
+- offline and strict: every library file matches its manifest hash, no listed file is missing, no unlisted file sits in the library directory, the manifest's `spec_version` matches the pin and `contract.json`, and every vendored spec file is present;
+- online: every vendored file equals the spec at the pinned tag and no stale file remains. A failed download degrades this layer to a warning, because the offline layer still holds; with `--from <checkout>` the comparison is strict.
+
+Why: an edited copy of the gate is a per-tool implementation again, and the fleet audit found per-tool gates broken in every one of the 10 tools that had one.
+Check: the `check-spec.js` step in both workflows.
+
+### REPO-063 Vendored files are read-only
+
+A tool MUST NOT edit, add or delete files under its vendored paths: `.agent/`, `contract/` except `contract-ext.json`, `internal/aicli/` or `<pkg>/_aicli/`, and the vendored scripts. Every library file starts with a header saying so. To change one, change it in the spec repo, release a tag, bump `.agent/SPEC_VERSION` in the tool and run `sync-spec.js`; the diff is mechanical and `check-spec.js` proves it. A tool that needs a library change opens an issue or pull request on the spec repo.
+
+Why: one implementation, conformance-tested once, is the point of 2.0 (CLI-050).
+Check: `check-spec.js`; review of any diff under the vendored paths that is not a sync.
+
+### REPO-064 Tool-owned extensions
+
+Tool-specific error codes live in `contract/contract-ext.json`, which the tool owns and the sync never touches, and are declared to the library (Go: `App.ExtCodes`). Each code follows CLI-018: an `E_*` name that is not a core code, a declared `exit` and `retryable`, and exit 9 only for human-action codes.
+
+Why: tools need codes the core lacks (archery-cli's `E_2FA_REQUIRED`) without forking the core table.
+Check: the extension rules in `contract.json` `error_codes.extension`.
+
+## 8. Quality gate
+
+### REPO-070 Merge gate
+
+CI MUST run on every push and pull request, and a failed step blocks the merge:
+
+- format and lint: Go `gofmt`, `go vet`, golangci-lint; Python ruff;
+- tests, including the conformance suite with a sample for every write command (VER-001), validation of every envelope the tests produce (VER-002), and coverage enumerated from the registry (VER-003); Go Makefile targets are `test` (includes conformance), `conformance` and `lint`;
+- a dependency audit for every ecosystem the tool ships in (SEC-050): Go `govulncheck ./...` and `npm audit`; Python `pip-audit` and `npm audit`;
+- `node scripts/check-version.js` and `node scripts/check-spec.js`.
+
+Why: 9 of 11 fleet Go repos audited only the npm wrapper, and four reachable Go standard-library CVEs sat unnoticed until the two repos that ran `govulncheck` went red (spec 1.6.0).
+Check: the steps in `ci.yml`.
+
+### REPO-071 Release gate equals merge gate
+
+`release.yml` MUST run the same tests, audits and drift guard as REPO-070 before anything is signed or published (VER-008).
+
+Why: if an advisory is published after the last green merge, the vulnerable dependency would otherwise ship in a signed release that nothing examined; in 2026-08 four Go standard-library CVEs were published days after the fleet's last green run, and a tag pushed then would have shipped them (spec 1.6.2, 1.6.3).
+Check: `release.yml` runs the REPO-070 steps ahead of signing and publishing.
+
+### REPO-072 Evidence before release
+
+Before a release that changes commands, outputs or the Skill, a tool SHOULD run the agent eval (VER-006); it MUST before any command declares `stable`. Each command's maturity and evidence references live in the registry (VER-005), and `docs/E2E.md` records the live runs that `verified` cites.
+
+Why: the eval found effects no review predicted; the 2026-10 gitlab-cli Skill without a command map made rare commands more expensive.
+Check: every evidence reference resolves; `stable` commands cite an eval run.
+
+### REPO-073 Tests never touch the user's state
+
+Tests MUST point the state directory at a temporary directory (`App.StateDir`, or `<PREFIX>_STATE_DIR`), so no test, compiled test binary included (`*.test.exe` on Windows), reads or writes the user's confirm key, operation journal, scope file or notice cache.
+
+Why: a test on real state can consume a real operation, or pass only because a real scope file grants it.
+Check: the test suite passes with `HOME` (or `USERPROFILE`) set to a read-only directory.
+
+### REPO-074 Formatter and pull request self-check
+
+Each language has one formatter with committed config (Go `gofmt`, Python ruff, Prettier for JavaScript where used); nothing is aligned by hand. The PR template asks: tests and the conformance suite pass with a sample for every write command and R06 on; each changed command's maturity matches its evidence; new writes go through the gate with truthful effects; scope and authorization behaviour unchanged or `SECURITY.md` updated; nothing vendored edited; `CHANGELOG.md` updated; README and Skill command maps regenerated; translations updated.
+
+Why: formatting noise hides real diffs; the self-check catches the updates reviewers forget.
+Check: a format check in CI; the PR template.
+
+### REPO-075 The spec repo's own gate
+
+This repo's CI MUST run: the Go library and example tests (`go test ./...` in `template/go/aicli` and `template/go/example`), the Python library and example tests (pytest), `check-contract.py` (schemas valid, valid examples pass, invalid examples fail, receipt rules hold), manifest freshness (`build-manifest.js` output equals the committed `MANIFEST.json` files), generated-contract freshness (`gen-contract.js` output equals `contract_gen.go` and `contract_gen.py`), and the reference tools: `python -m py_compile` on every `.py` under `tools/`, and `go vet ./...` and `go test ./...` in `tools/agent-eval/harness/recorder`. Each spec release also re-runs the confirm-gate audit across the fleet (VER-007).
+
+Why: tools trust a tag; the tag must have passed everything tools rely on.
+Check: this repo's `.github/workflows/`.
+
+## 9. New-project checklist
+
+- [ ] REPO-001 files present; none of the retired files
+- [ ] README follows REPO-010 and REPO-011, with Authorization, Configuration and Uninstall sections and no bootstrap
+- [ ] `.agent/SPEC_VERSION` pinned; `sync-spec.js` run; `check-spec.js` green
+- [ ] Library only at `internal/aicli/` or `<pkg>/_aicli/`, unedited
+- [ ] Conformance test with a sample for every write command; coverage enumeration on (VER-003)
+- [ ] `contract/contract-ext.json` for any tool-specific error code
+- [ ] One version source; Skill `metadata.version` and `metadata.min_version` derived; `check-version.js` green
+- [ ] `CHANGELOG.md` with `Unreleased`, embedded for `changelog`
+- [ ] CI: format, lint, tests with conformance, audits per shipped ecosystem, version and spec guards; the same on the release path
+- [ ] Launcher budget measured; native install path documented where the launcher misses it
+- [ ] Release signs `checksums.txt`; npm publishes with provenance; `App.Update` names the repository and the packages
+- [ ] Skills ship in every channel, beside the binary in release archives; `test-prompts.json` present
+- [ ] Tests use a temporary state directory
+- [ ] `SECURITY.md` states the risk tier; `NOTICE.md`, `docs/COMPATIBILITY.md`, `docs/E2E.md` where they apply
+- [ ] Bilingual docs link to each other
+- [ ] `docs/OPEN_SOURCE_CHECKLIST.md` walked before the first public push

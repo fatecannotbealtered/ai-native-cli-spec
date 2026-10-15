@@ -1,0 +1,32 @@
+{
+  "ok": true,
+  "schema_version": "2.0",
+  "data": {
+    "operation_id": "op_xcpuredojmpavbqenyk725drhi",
+    "receipt": {
+      "operation_id": "op_xcpuredojmpavbqenyk725drhi",
+      "command": "mr update",
+      "target": {"key": "acme/web!5", "kind": "merge_request"},
+      "effects": ["change"],
+      "outcome": {
+        "execution": "completed",
+        "change": "unknown",
+        "delivery": "not_applicable",
+        "persistence": "not_applicable",
+        "verification": "not_run"
+      },
+      "observed": {"assignees": ["carol"], "labels": ["backend", "needs-review"]},
+      "mismatched": [],
+      "replayed": false
+    },
+    "result": {
+      "ref": "acme/web!5",
+      "title": "Add retry to webhook sender",
+      "assignees": ["carol"],
+      "labels": ["backend", "needs-review"],
+      "updated_at": "2026-10-12T09:15:41Z",
+      "web_url": "https://gitlab.acme.test/acme/web/-/merge_requests/5"
+    }
+  },
+  "meta": {"duration_ms": 1032, "untrusted": ["data.result.title"]}
+}

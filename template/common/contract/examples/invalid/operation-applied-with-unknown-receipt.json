@@ -1,0 +1,47 @@
+{
+  "operation_id": "op_xcpuredojmpavbqenyk725drhi",
+  "command": "mr update",
+  "status": "applied",
+  "target": {"key": "acme/web!5", "kind": "merge_request", "label": "!5 Add retry to webhook sender"},
+  "effects": ["change"],
+  "scope_id": "scp_2026-10-12_triage",
+  "created_at": "2026-10-12T09:14:03Z",
+  "expires_at": "2026-10-12T09:29:03Z",
+  "dispatched_at": "2026-10-12T09:15:40Z",
+  "finished_at": "2026-10-12T09:15:41Z",
+  "preview": {
+    "operation_id": "op_xcpuredojmpavbqenyk725drhi",
+    "command": "mr update",
+    "action": "Update merge request",
+    "target": {"key": "acme/web!5", "kind": "merge_request", "label": "!5 Add retry to webhook sender"},
+    "effects": ["change"],
+    "dangerous": false,
+    "changes": [
+      {"field": "assignees", "before": ["bob"], "after": ["carol"]},
+      {"field": "labels", "add": ["needs-review"]}
+    ],
+    "inputs": {"mr": "acme/web!5", "assignee": "carol", "add_labels": ["needs-review"]},
+    "base": {"version": "2026-10-11T18:30:24Z", "source": "updated_at"},
+    "can_apply": true,
+    "blocked_by": []
+  },
+  "receipt": {
+    "operation_id": "op_xcpuredojmpavbqenyk725drhi",
+    "command": "mr update",
+    "target": {"key": "acme/web!5", "kind": "merge_request"},
+    "effects": ["change"],
+    "outcome": {
+      "execution": "unknown",
+      "change": "unknown",
+      "delivery": "not_applicable",
+      "persistence": "not_applicable",
+      "verification": "not_run"
+    },
+    "observed": {"assignees": ["carol"], "labels": ["backend", "needs-review"]},
+    "mismatched": [],
+    "replayed": false
+  },
+  "resolution": null,
+  "batch_id": null,
+  "items": null
+}

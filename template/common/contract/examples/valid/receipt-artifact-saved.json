@@ -1,0 +1,20 @@
+{
+  "operation_id": "op_kzliq5bvlzredhllachtbrx454",
+  "command": "job artifacts download",
+  "target": {"key": "acme/web:job/88231", "kind": "job"},
+  "effects": ["artifact"],
+  "outcome": {
+    "execution": "completed",
+    "change": "not_applicable",
+    "delivery": "not_applicable",
+    "persistence": "saved",
+    "verification": "passed"
+  },
+  "observed": {
+    "path": "C:\\work\\triage\\artifacts-88231.zip",
+    "bytes": 1843200,
+    "sha256": "9b1f0c4e2d7a8b3c5e6f1a2b4c8d0e9f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d"
+  },
+  "mismatched": [],
+  "replayed": false
+}

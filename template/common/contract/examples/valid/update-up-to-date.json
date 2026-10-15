@@ -1,0 +1,10 @@
+{
+  "status": "up_to_date",
+  "current_version": "1.3.1",
+  "target_version": "1.3.1",
+  "update_available": false,
+  "install_method": "binary",
+  "signature_status": "not_checked",
+  "skill_sync_status": "not_needed",
+  "binary_replaced": false
+}

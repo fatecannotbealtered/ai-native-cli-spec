@@ -1,0 +1,16 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_RATE_LIMITED",
+    "message": "GitLab's rate limit was hit; wait before the next call.",
+    "retryable": true,
+    "details": {
+      "dispatch_state": "not_started",
+      "next_action": "Wait 30 seconds, then run the same command again.",
+      "http_status": 429,
+      "retry_after_ms": 30000
+    }
+  },
+  "meta": {"duration_ms": 88}
+}

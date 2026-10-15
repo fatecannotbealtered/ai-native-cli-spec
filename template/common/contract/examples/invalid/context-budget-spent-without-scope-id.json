@@ -1,0 +1,17 @@
+{
+  "tool": "gitlab-cli",
+  "version": "1.3.0",
+  "spec_version": "2.0.0",
+  "account": "eval-bot",
+  "host": "gitlab.acme.test",
+  "credentials": {"configured": true, "source": "keyring"},
+  "state": {"dir": "/home/me/.gitlab-cli", "available": true, "protection": "posix-0700"},
+  "authorization": {
+    "status": "budget_spent",
+    "scope_id": null,
+    "path": "/home/me/.gitlab-cli/scope.json",
+    "effects": ["change"],
+    "dangerous": false,
+    "expires_at": "2026-10-19T08:00:00Z"
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "ok": true,
+  "schema_version": "2.0",
+  "data": {
+    "operation_id": "opb_54bk73vyw3p4zaoc7y2gggz3hu",
+    "items": [
+      {
+        "target": "acme/web#14",
+        "operation_id": "op_mjkgrllshhbsvhew3lcbnmmsya",
+        "ok": true,
+        "receipt": {
+          "operation_id": "op_mjkgrllshhbsvhew3lcbnmmsya",
+          "command": "issue close",
+          "target": {"key": "acme/web#14", "kind": "issue"},
+          "effects": ["change"],
+          "outcome": {
+            "execution": "completed",
+            "change": "applied",
+            "delivery": "not_applicable",
+            "persistence": "not_applicable",
+            "verification": "passed"
+          },
+          "observed": {"state": "closed"},
+          "mismatched": [],
+          "replayed": false
+        }
+      },
+      {
+        "target": "acme/web#15",
+        "operation_id": "op_ur3zuok27snbhh6l6pantk46da",
+        "ok": true,
+        "receipt": {
+          "operation_id": "op_ur3zuok27snbhh6l6pantk46da",
+          "command": "issue close",
+          "target": {"key": "acme/web#15", "kind": "issue"},
+          "effects": ["change"],
+          "outcome": {
+            "execution": "completed",
+            "change": "applied",
+            "delivery": "not_applicable",
+            "persistence": "not_applicable",
+            "verification": "passed"
+          },
+          "observed": {"state": "closed"},
+          "mismatched": [],
+          "replayed": false
+        }
+      },
+      {
+        "target": "acme/web#16",
+        "operation_id": "op_l7bwsukuvw25ne6gs3v33gyyqy",
+        "ok": true,
+        "receipt": {
+          "operation_id": "op_l7bwsukuvw25ne6gs3v33gyyqy",
+          "command": "issue close",
+          "target": {"key": "acme/web#16", "kind": "issue"},
+          "effects": ["change"],
+          "outcome": {
+            "execution": "completed",
+            "change": "applied",
+            "delivery": "not_applicable",
+            "persistence": "not_applicable",
+            "verification": "passed"
+          },
+          "observed": {"state": "closed"},
+          "mismatched": [],
+          "replayed": false
+        }
+      }
+    ],
+    "summary": {"total": 3, "succeeded": 3, "failed": 0, "unknown": 0, "skipped": 0}
+  },
+  "meta": {"duration_ms": 2304}
+}

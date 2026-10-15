@@ -1,0 +1,31 @@
+{
+  "spec_version": "2.0.0",
+  "files": {
+    "LICENSE": "dab3273f23d666e12a42e59bd9e377b9f1be3888bd4fd0b70ec627a6b80d13fc",
+    "__init__.py": "74b974599cf03cca8fcab6515d0d231b411ed64bc0e9d640457e8ee1c7bdef46",
+    "_tree.py": "47c4b356abe062d5cf861327f38c2c3d76bedcbfe3e299620888cca39116bba0",
+    "_util.py": "27cca1a51fad535afdfa2a826d4800a92afdf88e8f945ed7f2bea4758f57c7da",
+    "app.py": "f525e38a1ae95b77322d15c8a19d80cae74ad81c0729868023321a4067c40958",
+    "binding.py": "76bfc7d1b3e94db65026c509162fdb635d32eaf07921d464734ed3a0ca5aeac7",
+    "builtins.py": "5b830278a681384d4fa64c8e655576aff215c30cad37f7830819f03768f9828d",
+    "cmdhelpers.py": "11be4ae524c2abed115930685def210455ef2e3edb62c6e0e74d53bc32b35ffb",
+    "conformance.py": "94925fd596fbdbf2f70bf0251535feb5e0fe3f4c84c286102ff98f567d09ee21",
+    "contract_gen.py": "ad248db9b60673aa4aa270ce712db6ed43864b58b5981249c1d1526242c6df25",
+    "envelope.py": "0b15c32a551d352fcd5bd0e7d03cdf8299ff2efde01e8a1f1822f0ead7fcd621",
+    "errors.py": "2b3c01d4c544b6ee06033133b43d33fe53198075ca9dc1b2020a4d1424378470",
+    "gate.py": "ad644ce567c5a4abe595155ec304d1d0953b49699cae8d26a2c0b8bdcc460598",
+    "journal.py": "d3256e77a2955f19f4627ac2d7a7d759f72f5ff5764feb9159db0941222c3863",
+    "keystore.py": "9454cd6e8f7c0ae5f00911a34356fa2b2bfa627e64573e2e66c0f35fc90087cb",
+    "query.py": "e95251029829f22103faec9e463351d41480de23c6af9ca849cd7910dc4cf998",
+    "receipt.py": "d11fd15d75de0c8c48b306db1b706e30acb1031d3df006e5451cf9da7a1e7223",
+    "registry.py": "ab3106207d22b8926d2874aa853a3005dccdc6f496da3df1592aafdd78f66710",
+    "scope.py": "4390d0e744a00c707d64a402bdd62820f312bc767c45c612d3e8652c126e2182",
+    "selfupdate.py": "086197d65c0bf2cc1dbfa2a02d8e424c2785f2900ca0ebb18efc3657d09c3b06",
+    "settings.py": "ff5a9f65ef1a2f5709d4badec9e0efcb8fb2c0a9436cf87736769ed898eb2f1a",
+    "stream.py": "34d6eb4772a4d9bb40a57ccdfca4d4326e1c2c6acd9f65afafc9ea57975874d2",
+    "token.py": "1befa1e42cf6b7f8c65798dfb6b4ab8c0b1a1292b10b93248fb49b9eb5bf7e9f",
+    "update.py": "8db10edc4c1222a1bc230ebb0b784e82a4897e48c94f91a6364c3a30c0d65d8f",
+    "ux.py": "101b0159480e83b6a3ee330b2ad0b0e7ceaeeb841e3e862412fb4f3a3acc307f",
+    "validate.py": "145ef34ced7763c8f618c62b7a3cc6906803c995704631cc309093d98c52f069"
+  }
+}

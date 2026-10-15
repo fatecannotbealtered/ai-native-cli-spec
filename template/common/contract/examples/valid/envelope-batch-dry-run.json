@@ -1,0 +1,76 @@
+{
+  "ok": true,
+  "schema_version": "2.0",
+  "data": {
+    "preview": {
+      "operation_id": "opb_54bk73vyw3p4zaoc7y2gggz3hu",
+      "command": "issue close",
+      "action": "Close issues",
+      "targets": [
+        {
+          "key": "acme/web#14",
+          "kind": "issue",
+          "label": "#14 Login redirect loops after password reset"
+        },
+        {
+          "key": "acme/web#15",
+          "kind": "issue",
+          "label": "#15 Cart total ignores coupon on reload"
+        },
+        {
+          "key": "acme/web#16",
+          "kind": "issue",
+          "label": "#16 Checkout button misaligned on Safari 18"
+        }
+      ],
+      "total": 3,
+      "items": [
+        {
+          "target": {
+            "key": "acme/web#14",
+            "kind": "issue",
+            "label": "#14 Login redirect loops after password reset"
+          },
+          "operation_id": "op_mjkgrllshhbsvhew3lcbnmmsya",
+          "changes": [{"field": "state", "before": "opened", "after": "closed"}],
+          "can_apply": true,
+          "blocked_by": []
+        },
+        {
+          "target": {
+            "key": "acme/web#15",
+            "kind": "issue",
+            "label": "#15 Cart total ignores coupon on reload"
+          },
+          "operation_id": "op_ur3zuok27snbhh6l6pantk46da",
+          "changes": [{"field": "state", "before": "opened", "after": "closed"}],
+          "can_apply": true,
+          "blocked_by": []
+        },
+        {
+          "target": {
+            "key": "acme/web#16",
+            "kind": "issue",
+            "label": "#16 Checkout button misaligned on Safari 18"
+          },
+          "operation_id": "op_l7bwsukuvw25ne6gs3v33gyyqy",
+          "changes": [{"field": "state", "before": "opened", "after": "closed"}],
+          "can_apply": true,
+          "blocked_by": []
+        }
+      ],
+      "effects": ["change"],
+      "dangerous": false,
+      "inputs": {"project": "acme/web", "ids": ["14", "15", "16"]},
+      "can_apply": true,
+      "blocked_by": []
+    },
+    "confirm_token": "ct2_54bk73vyw3p4zaoc7y2gggz3hu_7a34e25db15af7cd5f000b284397f92d",
+    "expires_at": "2026-10-12T09:29:03Z",
+    "operation_id": "opb_54bk73vyw3p4zaoc7y2gggz3hu"
+  },
+  "meta": {
+    "duration_ms": 702,
+    "untrusted": ["data.preview.targets[].label", "data.preview.items[].target.label"]
+  }
+}

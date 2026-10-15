@@ -1,0 +1,34 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_CONFLICT",
+    "message": "GitLab refused the merge because the source branch has a newer commit than the one checked; nothing was merged.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "dispatched",
+      "next_action": "Re-read the merge request with `gitlab-cli mr get acme/web!5`; if it should still be merged, run the dry-run again.",
+      "conflict": "upstream_conflict",
+      "http_status": 409,
+      "upstream_message": "409 Conflict - SHA does not match HEAD of source branch: 41ab0d2",
+      "operation_id": "op_xpah4j4oacf6nip6czcuczbd6q",
+      "receipt": {
+        "operation_id": "op_xpah4j4oacf6nip6czcuczbd6q",
+        "command": "mr merge",
+        "target": {"key": "acme/web!5", "kind": "merge_request"},
+        "effects": ["change"],
+        "outcome": {
+          "execution": "failed",
+          "change": "not_applied",
+          "delivery": "not_applicable",
+          "persistence": "not_applicable",
+          "verification": "not_applicable"
+        },
+        "observed": {},
+        "failed_stage": "apply",
+        "replayed": false
+      }
+    }
+  },
+  "meta": {"duration_ms": 811, "untrusted": ["error.details.upstream_message"]}
+}

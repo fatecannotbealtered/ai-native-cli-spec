@@ -1,0 +1,11 @@
+{
+  "code": "E_CONFLICT",
+  "message": "The confirm token expired, so nothing was sent.",
+  "retryable": false,
+  "details": {
+    "dispatch_state": "not_started",
+    "next_action": "Run the dry-run again and confirm with the new token within 15 minutes.",
+    "conflict": "token_expired",
+    "operation_id": "op_xcpuredojmpavbqenyk725drhi"
+  }
+}

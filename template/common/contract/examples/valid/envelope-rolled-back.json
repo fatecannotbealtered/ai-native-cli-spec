@@ -1,0 +1,33 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_VERIFY_FAILED",
+    "message": "GitLab created the variable without masking it, so the tool deleted it again; nothing is left changed.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "dispatched",
+      "next_action": "Tell the user the value cannot be masked (GitLab needs at least 8 characters it can mask) and ask for a maskable value; do not create it unmasked unless the user says so.",
+      "operation_id": "op_vl4dx32udjwm4aua7nx3to7rxu",
+      "receipt": {
+        "operation_id": "op_vl4dx32udjwm4aua7nx3to7rxu",
+        "command": "variable create",
+        "target": {"key": "legacy/payments:variable/DEPLOY_TOKEN", "kind": "ci_variable"},
+        "effects": ["configure"],
+        "outcome": {
+          "execution": "completed",
+          "change": "rolled_back",
+          "delivery": "not_applicable",
+          "persistence": "not_applicable",
+          "verification": "failed"
+        },
+        "observed": {"masked": false},
+        "mismatched": ["masked"],
+        "failed_stage": "verify",
+        "replayed": false,
+        "notes": "The variable was deleted again, so no unmasked copy is left."
+      }
+    }
+  },
+  "meta": {"duration_ms": 1310}
+}

@@ -1,0 +1,32 @@
+{
+  "items": [
+    {
+      "ref": "acme/web!9",
+      "title": "Fix flaky login test",
+      "state": "opened",
+      "author": "carol",
+      "assignees": ["carol"],
+      "labels": ["bug", "ci"],
+      "pipeline_status": "failed",
+      "updated_at": "2026-10-12T07:52:10Z",
+      "web_url": "https://gitlab.acme.test/acme/web/-/merge_requests/9"
+    },
+    {
+      "ref": "acme/web!11",
+      "title": "Bump node to 22",
+      "state": "opened",
+      "author": "dave",
+      "assignees": [],
+      "labels": ["dependencies"],
+      "pipeline_status": "failed",
+      "updated_at": "2026-10-10T16:05:41Z",
+      "web_url": "https://gitlab.acme.test/acme/web/-/merge_requests/11"
+    }
+  ],
+  "count": 2,
+  "has_more": true,
+  "continuation_reason": "Only the 200 most recently updated merge requests were scanned; narrow the scan with --updated-after to reach older ones.",
+  "truncated": true,
+  "scope": {"project": "acme/web", "state": "all", "pipeline_status": "failed"},
+  "sort": "updated_at_desc"
+}

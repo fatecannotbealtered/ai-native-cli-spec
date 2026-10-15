@@ -1,0 +1,16 @@
+{
+  "operation_id": "op_tjvir4oyx4gbiqjoukkb36rjee",
+  "command": "branch delete",
+  "target": {"key": "acme/web:branch/old-experiment", "kind": "branch"},
+  "effects": ["change"],
+  "outcome": {
+    "execution": "completed",
+    "change": "done",
+    "delivery": "not_applicable",
+    "persistence": "not_applicable",
+    "verification": "passed"
+  },
+  "observed": {"exists": false},
+  "mismatched": [],
+  "replayed": false
+}

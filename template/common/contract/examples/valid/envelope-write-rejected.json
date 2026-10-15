@@ -1,0 +1,35 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_VALIDATION",
+    "message": "GitLab rejected the issue because the milestone is closed; nothing was created.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "dispatched",
+      "next_action": "List open milestones with `gitlab-cli milestone list --project acme/web --state active` and run the dry-run again with one of them.",
+      "problem": "invalid_value",
+      "parameter": "milestone",
+      "http_status": 422,
+      "upstream_message": "{\"message\":{\"milestone\":[\"is closed\"]}}",
+      "operation_id": "op_kodx3d6aph3d6zgzkqifwyikia",
+      "receipt": {
+        "operation_id": "op_kodx3d6aph3d6zgzkqifwyikia",
+        "command": "issue create",
+        "target": {"key": "acme/web", "kind": "project"},
+        "effects": ["change"],
+        "outcome": {
+          "execution": "failed",
+          "change": "not_applied",
+          "delivery": "not_applicable",
+          "persistence": "not_applicable",
+          "verification": "not_applicable"
+        },
+        "observed": {},
+        "failed_stage": "apply",
+        "replayed": false
+      }
+    }
+  },
+  "meta": {"duration_ms": 640, "untrusted": ["error.details.upstream_message"]}
+}

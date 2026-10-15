@@ -1,0 +1,30 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_FORBIDDEN",
+    "message": "The receiving server refused the test event, so nothing was delivered.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "dispatched",
+      "next_action": "Check the hook URL and its secret token in the project's webhook settings, then run the dry-run again.",
+      "operation_id": "op_pf6espqnnqsmgm5bxchggwxf4y",
+      "receipt": {
+        "operation_id": "op_pf6espqnnqsmgm5bxchggwxf4y",
+        "command": "hook test",
+        "target": {"key": "acme/web:hook/3", "kind": "project_hook"},
+        "effects": ["deliver"],
+        "outcome": {
+          "execution": "completed",
+          "change": "not_applicable",
+          "delivery": "rejected",
+          "persistence": "not_applicable",
+          "verification": "not_applicable"
+        },
+        "observed": {"response_status": 403},
+        "replayed": false
+      }
+    }
+  },
+  "meta": {"duration_ms": 1502}
+}

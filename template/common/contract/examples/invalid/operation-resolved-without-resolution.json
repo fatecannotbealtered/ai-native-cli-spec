@@ -1,0 +1,43 @@
+{
+  "operation_id": "op_pwbsbpupht3f3c4bjchdjpd5ra",
+  "command": "mr merge",
+  "status": "resolved",
+  "target": {"key": "acme/web!5", "kind": "merge_request", "label": "!5 Add retry to webhook sender"},
+  "effects": ["change"],
+  "scope_id": "scp_2026-10-12_triage",
+  "created_at": "2026-10-12T09:20:11Z",
+  "expires_at": "2026-10-12T09:35:11Z",
+  "dispatched_at": "2026-10-12T09:21:30Z",
+  "finished_at": "2026-10-12T09:22:00Z",
+  "preview": {
+    "operation_id": "op_pwbsbpupht3f3c4bjchdjpd5ra",
+    "command": "mr merge",
+    "action": "Merge merge request",
+    "target": {"key": "acme/web!5", "kind": "merge_request", "label": "!5 Add retry to webhook sender"},
+    "effects": ["change"],
+    "dangerous": true,
+    "changes": [{"field": "state", "before": "opened", "after": "merged"}],
+    "inputs": {"mr": "acme/web!5"},
+    "base": {"version": "2026-10-12T09:15:41Z", "source": "updated_at"},
+    "can_apply": true,
+    "blocked_by": []
+  },
+  "receipt": {
+    "operation_id": "op_pwbsbpupht3f3c4bjchdjpd5ra",
+    "command": "mr merge",
+    "target": {"key": "acme/web!5", "kind": "merge_request"},
+    "effects": ["change"],
+    "outcome": {
+      "execution": "unknown",
+      "change": "unknown",
+      "delivery": "not_applicable",
+      "persistence": "not_applicable",
+      "verification": "not_run"
+    },
+    "observed": {},
+    "replayed": false
+  },
+  "resolution": null,
+  "batch_id": null,
+  "items": null
+}

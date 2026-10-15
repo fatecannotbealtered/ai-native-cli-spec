@@ -1,0 +1,44 @@
+{
+  "ok": true,
+  "schema_version": "2.0",
+  "data": {
+    "items": [
+      {
+        "ref": "acme/web#16",
+        "title": "Checkout button misaligned on Safari 18",
+        "state": "opened",
+        "author": "alice",
+        "assignees": [],
+        "labels": ["bug", "frontend"],
+        "updated_at": "2026-10-12T06:40:00Z",
+        "web_url": "https://gitlab.acme.test/acme/web/-/issues/16"
+      },
+      {
+        "ref": "acme/web#15",
+        "title": "Cart total ignores coupon on reload",
+        "state": "opened",
+        "author": "dave",
+        "assignees": ["bob"],
+        "labels": ["bug"],
+        "updated_at": "2026-10-11T21:12:37Z",
+        "web_url": "https://gitlab.acme.test/acme/web/-/issues/15"
+      },
+      {
+        "ref": "acme/web#14",
+        "title": "Login redirect loops after password reset",
+        "state": "opened",
+        "author": "carol",
+        "assignees": ["carol"],
+        "labels": ["bug", "auth"],
+        "updated_at": "2026-10-11T15:03:09Z",
+        "web_url": "https://gitlab.acme.test/acme/web/-/issues/14"
+      }
+    ],
+    "count": 3,
+    "has_more": true,
+    "next_cursor": "eyJ1cGRhdGVkX2F0IjoiMjAyNi0xMC0xMVQxNTowMzowOVoiLCJpZCI6MTR9",
+    "scope": {"project": "acme/web", "state": "opened", "labels": ["bug"]},
+    "sort": "updated_at_desc"
+  },
+  "meta": {"duration_ms": 517, "untrusted": ["data.items[].title"]}
+}

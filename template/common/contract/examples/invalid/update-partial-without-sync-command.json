@@ -1,0 +1,24 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_PARTIAL",
+    "message": "gitlab-cli was updated but its Skills were not synced, so the installed Skill still describes the old version.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "dispatched",
+      "next_action": "Run `gitlab-cli update` again to finish the Skill sync, then read `gitlab-cli changelog --since 1.3.0`.",
+      "stage": "skill_sync",
+      "current_version": "1.3.1",
+      "previous_version": "1.3.0",
+      "target_version": "1.3.1",
+      "binary_replaced": true,
+      "skill_sync_status": "failed",
+      "status": "partial",
+      "install_method": "npm",
+      "signature_status": "not_checked",
+      "update_available": false
+    }
+  },
+  "meta": {"duration_ms": 18322}
+}

@@ -1,0 +1,28 @@
+# The spec repository's text files are LF on every platform, whatever
+# core.autocrlf says. MANIFEST.json hashes, `gen-contract.js --check` and the
+# vendoring round trip compare bytes, so a CRLF checkout must not change them.
+# template/common/ carries its own .gitattributes, which tools copy.
+* text=auto eol=lf
+
+# The libraries tools vendor: always text, always LF.
+template/go/aicli/** text eol=lf
+template/python/aicli/** text eol=lf
+
+# Windows command scripts are intentionally CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files.
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.tar.gz binary
+*.tgz binary

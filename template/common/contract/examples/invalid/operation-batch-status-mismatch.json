@@ -1,0 +1,84 @@
+{
+  "operation_id": "opb_4sc42eqjpzve3deeqbcsxvjnuu",
+  "command": "issue close",
+  "status": "applied",
+  "target": null,
+  "effects": ["change"],
+  "scope_id": "scp_2026-10-12_triage",
+  "created_at": "2026-10-12T11:00:00Z",
+  "expires_at": "2026-10-12T11:15:00Z",
+  "dispatched_at": "2026-10-12T11:01:10Z",
+  "finished_at": "2026-10-12T11:01:14Z",
+  "preview": {
+    "operation_id": "opb_4sc42eqjpzve3deeqbcsxvjnuu",
+    "command": "issue close",
+    "action": "Close issues",
+    "targets": [
+      {"key": "acme/web#14", "kind": "issue"},
+      {"key": "acme/web#15", "kind": "issue"},
+      {"key": "acme/web#16", "kind": "issue"},
+      {"key": "acme/web#99", "kind": "issue"}
+    ],
+    "total": 4,
+    "items": [
+      {
+        "target": {"key": "acme/web#14", "kind": "issue"},
+        "operation_id": "op_56fuuz26w7o47yzbcaomtvdjfq",
+        "changes": [{"field": "state", "before": "opened", "after": "closed"}],
+        "can_apply": true,
+        "blocked_by": []
+      },
+      {
+        "target": {"key": "acme/web#15", "kind": "issue"},
+        "operation_id": "op_gxisfqerjnooxecoxjj4jcjjhy",
+        "changes": [{"field": "state", "before": "opened", "after": "closed"}],
+        "can_apply": true,
+        "blocked_by": []
+      },
+      {
+        "target": {"key": "acme/web#16", "kind": "issue"},
+        "operation_id": "op_va3mcrinyqw7xtbdzgaxxuu4nq",
+        "changes": [{"field": "state", "before": "opened", "after": "closed"}],
+        "can_apply": true,
+        "blocked_by": []
+      },
+      {
+        "target": {"key": "acme/web#99", "kind": "issue"},
+        "operation_id": "op_vl7u5ljmrgpruvsnjcvukex35y",
+        "changes": [{"field": "state", "before": "opened", "after": "closed"}],
+        "can_apply": true,
+        "blocked_by": []
+      }
+    ],
+    "effects": ["change"],
+    "dangerous": false,
+    "inputs": {"project": "acme/web", "ids": ["14", "15", "16", "99"]},
+    "can_apply": true,
+    "blocked_by": []
+  },
+  "receipt": null,
+  "resolution": null,
+  "batch_id": null,
+  "items": [
+    {
+      "operation_id": "op_56fuuz26w7o47yzbcaomtvdjfq",
+      "target": {"key": "acme/web#14", "kind": "issue"},
+      "status": "applied"
+    },
+    {
+      "operation_id": "op_gxisfqerjnooxecoxjj4jcjjhy",
+      "target": {"key": "acme/web#15", "kind": "issue"},
+      "status": "applied"
+    },
+    {
+      "operation_id": "op_va3mcrinyqw7xtbdzgaxxuu4nq",
+      "target": {"key": "acme/web#16", "kind": "issue"},
+      "status": "applied"
+    },
+    {
+      "operation_id": "op_vl7u5ljmrgpruvsnjcvukex35y",
+      "target": {"key": "acme/web#99", "kind": "issue"},
+      "status": "not_applied"
+    }
+  ]
+}

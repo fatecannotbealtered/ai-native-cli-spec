@@ -1,0 +1,15 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_VERIFY_FAILED",
+    "message": "The update was accepted but the read-back shows no assignee, so the requested assignee was not set.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "dispatched",
+      "next_action": "Check that the user can be assigned with `gitlab-cli project members acme/web --all-levels` before trying again.",
+      "operation_id": "op_xqz4quaalotefdxq4raeu3wfgi"
+    }
+  },
+  "meta": {"duration_ms": 1873}
+}

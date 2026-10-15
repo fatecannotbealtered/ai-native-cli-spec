@@ -1,0 +1,16 @@
+{
+  "ok": false,
+  "schema_version": "2.0",
+  "error": {
+    "code": "E_CONFIRMATION_REQUIRED",
+    "message": "Deleting a branch is dangerous and needs --dangerous in both the dry-run and the confirm; nothing was changed.",
+    "retryable": false,
+    "details": {
+      "dispatch_state": "not_started",
+      "next_action": "Run `gitlab-cli branch delete old-experiment --project acme/web --dangerous --dry-run`.",
+      "problem": "dangerous_flag_required",
+      "parameter": "--dangerous"
+    }
+  },
+  "meta": {"duration_ms": 4}
+}

@@ -1,4 +1,9 @@
 # Python-specific — append to common/.gitignore
+#
+# Never ignore {{TOOL_PKG}}/_aicli/: it is the vendored ai-native-cli-spec
+# library (scripts/sync-spec.js writes it, scripts/check-spec.js verifies it)
+# and is committed like the rest of the source. Its __pycache__/ is ignored
+# below like any other.
 
 # Byte-compiled / cache
 __pycache__/
@@ -24,3 +29,6 @@ coverage.xml
 # PyInstaller
 *.spec
 *.manifest
+
+# Derived release artifact — must not be committed
+release-notes.md
