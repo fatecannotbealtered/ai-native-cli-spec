@@ -2,9 +2,9 @@
 
 All notable changes to ai-native-cli-spec are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html); tags before v1.5.0 have two segments. Rule IDs in the 2.0.0 entry refer to the specs in `template/common/.agent/` and to `REPO-SPEC.md`; section numbers in 1.x entries refer to the 1.x specs. The 1.x entries are summarised from the git history and tag messages; dates are tag dates.
 
-## [2.0.0] - 2026-10-12
+## [2.0.0] - 2026-10-15
 
-**Status: unreleased.** This entry describes the `v2.0.0` branch. No `v2.0.0` tag exists yet, and the date is the day the build started; changes made before the tag land in this entry. Tool maintainers: see [MIGRATION-2.0.md](MIGRATION-2.0.md).
+Tool maintainers: see [MIGRATION-2.0.md](MIGRATION-2.0.md). Release candidates `v2.0.0-rc.1` and `v2.0.0-rc.2` preceded this release. Evidence: gitlab-cli was migrated onto the aicli library as a pilot (106 commands, 60 of them writes), passed the conformance suite, and passed a recorded live run of 166 calls against GitLab EE 18.8, in which all 164 JSON envelopes validated against the contract and a lost reply was looked up and resolved without a second send.
 
 2.0.0 is one release with three parts: rules that make agents faster and more accurate, measured in the 2026-10 gitlab-cli agent eval; rules for authority and outcomes (scope files, operation records, receipts), taken from tool-driver-cli-spec's general core; and one shared write gate, implemented in the aicli libraries and checked by a conformance suite, after the 2026-10 fleet audit found binding gaps in every per-tool gate. MCP server generation is not part of 2.0.
 

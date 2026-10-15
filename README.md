@@ -4,7 +4,7 @@
 
 One core specification for command-line tools whose main caller is an AI agent, plus the template and the shared libraries that implement it. A conforming tool answers in one JSON envelope, says in every error whether anything was sent and what to do next, refuses writes until a person has granted a scope, and reports only what it observed.
 
-Version 2.0.0 is not released yet; see [CHANGELOG.md](CHANGELOG.md).
+Current version: 2.0.0 (2026-10-15). What changed is in [CHANGELOG.md](CHANGELOG.md); moving a 1.6.x tool is in [MIGRATION-2.0.md](MIGRATION-2.0.md).
 
 ## What is in 2.0
 
