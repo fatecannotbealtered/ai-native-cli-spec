@@ -1,21 +1,21 @@
-# Migrating a 1.6.x tool to ai-native-cli-spec 2.0.0
+# Migrating a 1.6.x tool to ai-native-cli-spec 2.0
 
 **中文版 → [MIGRATION-2.0_zh.md](MIGRATION-2.0_zh.md)**
 
 For maintainers of a tool pinned to spec 1.6.x. Work through the steps in order. Examples use gitlab-cli (Go, cobra). A Python tool follows the same steps with the Python library imported from `<pkg>/_aicli`, which uses the same names, snake_case for functions and methods (`app.write`, `WriteSpec`, `run_conformance`, `parse_version`); a typer app passes `typer.main.get_command(app)` to the library. The result breaks the agent contract (`schema_version` 2.0, renamed keys, scopes for writes), so release it as a new MAJOR version (REPO-030).
 
-## 1. Pin 2.0.0 and sync
+## 1. Pin 2.0.1 and sync
 
 The 1.6 copy of `sync-spec.js` in your repo reads the 1.6 file list and does not know the library, so run the 2.0 copy once:
 
 ```bash
 # from the tool's repo root
-git clone --depth 1 --branch v2.0.0 https://github.com/fatecannotbealtered/ai-native-cli-spec ../ai-native-cli-spec-2.0.0
-node ../ai-native-cli-spec-2.0.0/template/common/scripts/sync-spec.js --from ../ai-native-cli-spec-2.0.0 --version v2.0.0
+git clone --depth 1 --branch v2.0.1 https://github.com/fatecannotbealtered/ai-native-cli-spec ../ai-native-cli-spec-2.0.1
+node ../ai-native-cli-spec-2.0.1/template/common/scripts/sync-spec.js --from ../ai-native-cli-spec-2.0.1 --version v2.0.1
 node scripts/check-spec.js
 ```
 
-This writes `v2.0.0` to `.agent/SPEC_VERSION` and vendors the five specs (`VERIFY-SPEC.md` is new), `contract/contract.json`, `contract/schemas/`, the library with its `MANIFEST.json` (`internal/aicli/` or `<pkg>/_aicli/`) and the sync scripts (REPO-061). Later syncs use `node scripts/sync-spec.js`. The Go library needs cobra, pflag and sigstore-go (run the `go get` line sync-spec prints, then `go mod tidy`); the Python library needs Python ≥ 3.10, click and sigstore. Never edit vendored files (REPO-063). Keep the codes in `contract/contract-ext.json` that the tool can still raise, check them against CLI-018 and declare them to the library in `App.ExtCodes`; drop codes 2.0 makes impossible (gitlab-cli's only one, `E_CANCELLED`, came from interactive prompts), and the file when none is left.
+This writes `v2.0.1` to `.agent/SPEC_VERSION` and vendors the five specs (`VERIFY-SPEC.md` is new), `contract/contract.json`, `contract/schemas/`, the library with its `MANIFEST.json` (`internal/aicli/` or `<pkg>/_aicli/`) and the sync scripts (REPO-061). Later syncs use `node scripts/sync-spec.js`. The Go library needs cobra, pflag and sigstore-go (run the `go get` line sync-spec prints, then `go mod tidy`); the Python library needs Python ≥ 3.10, click and sigstore. Never edit vendored files (REPO-063). Keep the codes in `contract/contract-ext.json` that the tool can still raise, check them against CLI-018 and declare them to the library in `App.ExtCodes`; drop codes 2.0 makes impossible (gitlab-cli's only one, `E_CANCELLED`, came from interactive prompts), and the file when none is left.
 
 ## 2. Hand the envelope and errors to aicli
 
@@ -310,7 +310,7 @@ app.Settings = []aicli.Setting{
 
 ## 14. Checklist
 
-- [ ] `.agent/SPEC_VERSION` is `v2.0.0`; `node scripts/check-spec.js` passes
+- [ ] `.agent/SPEC_VERSION` is `v2.0.1`; `node scripts/check-spec.js` passes
 - [ ] The tree is built per App; `main` calls `Execute`; no own envelope, exit table or format handling
 - [ ] Every leaf registered with effects, output schema, examples, maturity and evidence; one positional per command, refs bound by their own parts
 - [ ] Every write goes through `App.Write` or `App.WriteBatch`; Apply errors classified; the HTTP client never retries writes; target lookups in `ResolveTarget`, not before `App.Write`

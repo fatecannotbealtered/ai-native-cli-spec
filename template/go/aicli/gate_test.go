@@ -683,3 +683,37 @@ func TestFileAndLiteralMismatchExplainsTheBytes(t *testing.T) {
 		t.Fatalf("next_action should explain the literal: %s", r)
 	}
 }
+
+// R1: the read-back of a write whose target ResolveTarget finds: "{target}" in
+// WriteSpec.ReadBack is the resolved key, and without a ReadBack the next_action
+// names the resolved key.
+func TestR1ReadBackNamesTheResolvedTarget(t *testing.T) {
+	for readBack, want := range map[string]string{
+		"note get {target}": "Do not resend. Run `notes note get notes/2` to see whether the change landed, then",
+		"":                  "Do not resend. Read notes/2 upstream to see whether the change landed, then",
+	} {
+		h := newHarness(t)
+		h.build = func(u *upstream) *App {
+			a := testApp(u)
+			rm := &cobra.Command{Use: "remove", RunE: func(cmd *cobra.Command, _ []string) error {
+				return a.Write(cmd, WriteSpec{
+					ResolveTarget: func(context.Context) (Target, error) { return Target{Key: "notes/2", Kind: "note"}, nil },
+					Preview: func(context.Context) (Preview, error) {
+						return Preview{Action: "Remove note 2", CanApply: true, BaseVersion: "1",
+							Changes: []FieldChange{{Field: "note", Before: "Ideas", Note: "removed"}}}, nil
+					},
+					Apply:    func(context.Context, Op) (Result, error) { return Result{}, errors.New("connection reset by peer") },
+					ReadBack: readBack,
+				})
+			}}
+			a.commandByPath("note").AddCommand(rm)
+			a.Register(rm, Meta{Summary: "Remove a note", Effects: []Effect{Change}, Output: "note_write",
+				Examples: []string{"notes note remove --dry-run", "notes note remove --confirm <token>"}})
+			return a
+		}
+		r := h.run("note", "remove", "--confirm", h.mustToken("note", "remove"))
+		if na, _ := r.details()["next_action"].(string); r.code() != "E_OUTCOME_UNKNOWN" || !strings.HasPrefix(na, want) {
+			t.Fatalf("ReadBack %q: %s", readBack, r)
+		}
+	}
+}

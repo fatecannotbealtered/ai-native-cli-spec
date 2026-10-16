@@ -92,7 +92,7 @@ grep -rlE '\{\{(TOOL_NAME|ENV_PREFIX|MODULE|CMD_PATH|NPM_PKG|REPO_SLUG)\}\}' . -
 ### 4. Pin the spec and vendor the library
 
 ```bash
-echo v2.0.0 > .agent/SPEC_VERSION
+echo v2.0.1 > .agent/SPEC_VERSION
 node scripts/sync-spec.js        # or: --from "$SPEC" to copy from the local checkout
 node scripts/check-spec.js
 # Go: run the "go get ... && go mod tidy" line sync-spec printed (every module the library requires, indirect ones included, at the library's versions)

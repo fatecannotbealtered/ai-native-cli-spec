@@ -232,12 +232,16 @@ func (u *updateRun) installBinary(exe string, rel *ghRelease, target Version) (m
 	case err != nil:
 		return nil, u.checksumMismatch()
 	}
-	observed := u.observeVersion(newBin, false)
+	observed, ran := u.observeVersion(newBin, false)
 	if u.ctx.Err() != nil {
 		return nil, u.interruptError()
 	}
-	if observed == "" {
+	if !ran {
 		return nil, u.fail("E_IO", "The downloaded binary does not run on this machine, so it was not installed.",
+			fmt.Sprintf("Install %s with the package-manager command in its README instead.", u.tool))
+	}
+	if observed == "" {
+		return nil, u.fail("E_IO", "The downloaded binary did not report its version, so it was not installed.",
 			fmt.Sprintf("Install %s with the package-manager command in its README instead.", u.tool))
 	}
 	if !sameVersion(observed, target) {

@@ -16,7 +16,7 @@ from typing import NamedTuple
 SCHEMA_VERSION = "2.0"
 
 # SPEC_VERSION: The ai-native-cli-spec release this library implements.
-SPEC_VERSION = "2.0.0"
+SPEC_VERSION = "2.0.1"
 
 # CONTRACT_VERSION: The contract.json version the library was generated from.
 CONTRACT_VERSION = "2.0"

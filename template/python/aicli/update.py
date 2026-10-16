@@ -652,8 +652,11 @@ def checksum_for(checksums: bytes, asset: str) -> str | None:
 
 
 def _reported_version(out: bytes) -> str | None:
-    """data.version of the JSON envelope a `--version` run printed."""
-    for line in out.decode("utf-8", "replace").splitlines():
+    """data.version of the JSON envelope a `--version` run printed, else a
+    plain-text version (a 1.x tool prints "gitlab-cli version 1.2.17"): the last
+    word of the first line whose last word is a semantic version."""
+    lines = out.decode("utf-8", "replace").splitlines()
+    for line in lines:
         line = line.strip()
         if not line.startswith("{"):
             continue
@@ -665,6 +668,11 @@ def _reported_version(out: bytes) -> str | None:
         v = data.get("version") if isinstance(data, dict) else None
         if isinstance(v, str) and v:
             return v
+    for line in lines:
+        words = line.split()
+        version = _parse_or_none(words[-1]) if words else None
+        if version is not None:
+            return str(version)
     return None
 
 
@@ -1490,13 +1498,15 @@ class _Updater:
         return _version_argv(self.exe) if self.cfg.executable else _self_version_argv()
 
     def observe_version(self, argv: list[str]) -> str | None:
+        """The version a `--version` run reports (_reported_version): None when it
+        does not run or exits non-zero, "" when it ran but reported no version."""
         try:
             code, out = self.run_cmd(argv, VERSION_TIMEOUT)
         except OSError:
             return None
         if code != 0:
             return None
-        return _reported_version(out)
+        return _reported_version(out) or ""
 
     def install_package(self, target: Version) -> list[str]:
         """The package-manager path: run the manager, then check the version the
@@ -1698,6 +1708,12 @@ class _Updater:
             raise self.fail(
                 "E_IO",
                 "The downloaded binary does not run on this machine, so it was not installed.",
+                f"Install {tool} with the package-manager command in its README instead.",
+            )
+        if not reported:
+            raise self.fail(
+                "E_IO",
+                "The downloaded binary did not report its version, so it was not installed.",
                 f"Install {tool} with the package-manager command in its README instead.",
             )
         if not _same_version(reported, target):

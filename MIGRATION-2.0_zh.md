@@ -1,21 +1,21 @@
-# 把 1.6.x 工具迁移到 ai-native-cli-spec 2.0.0
+# 把 1.6.x 工具迁移到 ai-native-cli-spec 2.0
 
 **English → [MIGRATION-2.0.md](MIGRATION-2.0.md)**
 
 本文写给固定在规范 1.6.x 上的工具的维护者。请按顺序完成各步。示例用的是 gitlab-cli（Go、cobra）。Python 工具按同样的步骤做，库从 `<pkg>/_aicli` 导入，名称与 Go 版相同，只是函数和方法改用 snake_case（`app.write`、`WriteSpec`、`run_conformance`、`parse_version`）；typer 应用则把 `typer.main.get_command(app)` 传给库。迁移结果会破坏面向 Agent 的契约（`schema_version` 2.0、键名改名、写入需要授权范围），所以要作为新的 MAJOR 版本发布（REPO-030）。
 
-## 1. 固定到 2.0.0 并同步
+## 1. 固定到 2.0.1 并同步
 
 你仓库里 1.6 版的 `sync-spec.js` 读的是 1.6 的文件清单，也不知道有这个库，所以先运行一次 2.0 版的副本：
 
 ```bash
 # from the tool's repo root
-git clone --depth 1 --branch v2.0.0 https://github.com/fatecannotbealtered/ai-native-cli-spec ../ai-native-cli-spec-2.0.0
-node ../ai-native-cli-spec-2.0.0/template/common/scripts/sync-spec.js --from ../ai-native-cli-spec-2.0.0 --version v2.0.0
+git clone --depth 1 --branch v2.0.1 https://github.com/fatecannotbealtered/ai-native-cli-spec ../ai-native-cli-spec-2.0.1
+node ../ai-native-cli-spec-2.0.1/template/common/scripts/sync-spec.js --from ../ai-native-cli-spec-2.0.1 --version v2.0.1
 node scripts/check-spec.js
 ```
 
-这会把 `v2.0.0` 写入 `.agent/SPEC_VERSION`，并以副本方式引入五份规范（`VERIFY-SPEC.md` 是新增的）、`contract/contract.json`、`contract/schemas/`、带 `MANIFEST.json` 的库（`internal/aicli/` 或 `<pkg>/_aicli/`）以及同步脚本（REPO-061）。以后的同步用 `node scripts/sync-spec.js`。Go 库需要 cobra、pflag 和 sigstore-go（运行 sync-spec 打印出的 `go get` 那一行，再运行 `go mod tidy`）；Python 库需要 Python ≥ 3.10、click 和 sigstore。绝不要编辑内置副本文件（REPO-063）。`contract/contract-ext.json` 中工具仍可能返回的错误码要保留，按 CLI-018 检查，并在 `App.ExtCodes` 中向库声明它们；2.0 中不可能再出现的错误码要删掉（gitlab-cli 唯一的一个 `E_CANCELLED` 来自交互式提示），一个都不剩时连文件一起删掉。
+这会把 `v2.0.1` 写入 `.agent/SPEC_VERSION`，并以副本方式引入五份规范（`VERIFY-SPEC.md` 是新增的）、`contract/contract.json`、`contract/schemas/`、带 `MANIFEST.json` 的库（`internal/aicli/` 或 `<pkg>/_aicli/`）以及同步脚本（REPO-061）。以后的同步用 `node scripts/sync-spec.js`。Go 库需要 cobra、pflag 和 sigstore-go（运行 sync-spec 打印出的 `go get` 那一行，再运行 `go mod tidy`）；Python 库需要 Python ≥ 3.10、click 和 sigstore。绝不要编辑内置副本文件（REPO-063）。`contract/contract-ext.json` 中工具仍可能返回的错误码要保留，按 CLI-018 检查，并在 `App.ExtCodes` 中向库声明它们；2.0 中不可能再出现的错误码要删掉（gitlab-cli 唯一的一个 `E_CANCELLED` 来自交互式提示），一个都不剩时连文件一起删掉。
 
 ## 2. 把信封和错误交给 aicli
 
@@ -310,7 +310,7 @@ app.Settings = []aicli.Setting{
 
 ## 14. 检查清单
 
-- [ ] `.agent/SPEC_VERSION` 是 `v2.0.0`；`node scripts/check-spec.js` 通过
+- [ ] `.agent/SPEC_VERSION` 是 `v2.0.1`；`node scripts/check-spec.js` 通过
 - [ ] 命令树按 App 构建；`main` 调用 `Execute`；没有自己的信封、退出码表或格式处理
 - [ ] 每个叶子命令都已注册，并带有效果、输出 schema、示例、成熟度和证据；每个命令一个位置参数，ref 的各部分各自绑定
 - [ ] 每个写入都经过 `App.Write` 或 `App.WriteBatch`；Apply 错误已分类；HTTP 客户端从不重试写入；对目标的查询放在 `ResolveTarget` 中，而不是 `App.Write` 之前

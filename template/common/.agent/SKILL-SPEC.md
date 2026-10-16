@@ -2,7 +2,7 @@
 
 **中文版 → [SKILL-SPEC_zh.md](SKILL-SPEC_zh.md)**
 
-Spec version 2.0.0, rules SKL-001 to SKL-011. This file is normative for the Agent Skills that ship with an AI-native CLI. Related files: `CLI-SPEC.md` (the tool's behaviour, CLI-xxx), `SEC-SPEC.md` (security, SEC-xxx) and `VERIFY-SPEC.md` (the agent eval that tests a Skill, VER-006).
+Spec version 2.0.1, rules SKL-001 to SKL-011. This file is normative for the Agent Skills that ship with an AI-native CLI. Related files: `CLI-SPEC.md` (the tool's behaviour, CLI-xxx), `SEC-SPEC.md` (security, SEC-xxx) and `VERIFY-SPEC.md` (the agent eval that tests a Skill, VER-006).
 
 ## What a Skill is for (informative)
 

@@ -4,7 +4,7 @@
 
 One core specification for command-line tools whose main caller is an AI agent, plus the template and the shared libraries that implement it. A conforming tool answers in one JSON envelope, says in every error whether anything was sent and what to do next, refuses writes until a person has granted a scope, and reports only what it observed.
 
-Current version: 2.0.0 (2026-10-15). What changed is in [CHANGELOG.md](CHANGELOG.md); moving a 1.6.x tool is in [MIGRATION-2.0.md](MIGRATION-2.0.md).
+Current version: 2.0.1 (2026-10-16). What changed is in [CHANGELOG.md](CHANGELOG.md); moving a 1.6.x tool is in [MIGRATION-2.0.md](MIGRATION-2.0.md).
 
 ## What is in 2.0
 
@@ -30,7 +30,7 @@ Out of scope for 2.0: the driver layer for desktop applications and devices (ses
 
 ```bash
 # A checkout of the spec at the release you will pin.
-git clone --depth 1 --branch v2.0.0 https://github.com/fatecannotbealtered/ai-native-cli-spec spec
+git clone --depth 1 --branch v2.0.1 https://github.com/fatecannotbealtered/ai-native-cli-spec spec
 mkdir my-cli && cd my-cli
 # The common layer, then only the CI and build files of one overlay (never its aicli/ or example/).
 cp -R ../spec/template/common/. .
@@ -45,7 +45,7 @@ These are step 1 of [`template/INSTANTIATE.md`](template/INSTANTIATE.md); follow
 
 ## Quick start: migrating a 1.6.x tool
 
-Pin `v2.0.0` in `.agent/SPEC_VERSION`, vendor the 2.0 files with the 2.0 copy of `scripts/sync-spec.js`, and work through [`MIGRATION-2.0.md`](MIGRATION-2.0.md) in order. The conformance suite tells you when the write paths are done.
+Pin `v2.0.1` in `.agent/SPEC_VERSION`, vendor the 2.0 files with the 2.0 copy of `scripts/sync-spec.js`, and work through [`MIGRATION-2.0.md`](MIGRATION-2.0.md) in order. The conformance suite tells you when the write paths are done.
 
 ## Repository layout
 
@@ -74,7 +74,7 @@ skills/review-ai-native-cli/   Skill that reviews a tool repo against this spec
 ## Versioning
 
 - Releases are git tags `vMAJOR.MINOR.PATCH`. One tag versions everything in the table above; a tool pins one tag in `.agent/SPEC_VERSION` and gets specs, contract, schemas and library that were tested together.
-- `contract.json` carries `spec_version` (`2.0.0`) and `contract_version` (`2.0`). The envelope's `schema_version` is `"2.0"` and changes major only when the envelope breaks (CLI-080).
+- `contract.json` carries `spec_version` (`2.0.1`) and `contract_version` (`2.0`). The envelope's `schema_version` is `"2.0"` and changes major only when the envelope breaks (CLI-080).
 - A change that breaks conforming tools or their agents bumps MAJOR. Rule IDs never change meaning and are never reused.
 - History: [CHANGELOG.md](CHANGELOG.md). English is the source text; `*_zh.md` files are translations of it.
 

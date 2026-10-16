@@ -10,7 +10,7 @@ import click
 from aicli_testapp import THarness, TOut, Upstream, list_has, notes_app
 
 import aicli
-from aicli import CHANGE, App, CodeSpec, Meta
+from aicli import CHANGE, OBSERVE, App, CodeSpec, Meta, SchemaDef
 from aicli.contract_gen import SPEC_VERSION
 
 
@@ -320,3 +320,44 @@ def test_unsupported_click_features_are_reported() -> None:
     a.register(c, Meta(summary="Ask", effects=[aicli.OBSERVE], output="x", examples=["odd ask"]))
     found = "\n".join(a.check_tree())
     assert "prompt" in found and "nargs" in found, found
+
+
+def test_s1_tied_suggestions_name_each_corrected_line(h: THarness) -> None:
+    """An unknown word whose closest commands tie under different parents gets each
+    one's corrected line in next_action, none picked; did_you_mean is unchanged."""
+
+    def build(u: Upstream) -> App:
+        a = notes_app(u)
+        a.schema("noun_result", SchemaDef(shape="object", fields=["noun"]))
+        for noun in ("label", "milestone"):
+            group = click.Group(noun)
+            a.group(group, f"Work with {noun}s")
+            a.root.add_command(group)
+
+            def run(nid: str, noun: str = noun) -> None:
+                a.ok(None, {"noun": noun})
+
+            cmd = click.Command(
+                "archive", callback=run, params=[click.Option(["--id", "nid"], default="")]
+            )
+            group.add_command(cmd)
+            a.register(
+                cmd,
+                Meta(
+                    summary=f"Archive a {noun}",
+                    effects=[OBSERVE],
+                    output="noun_result",
+                    positional="id",
+                    examples=[f"notes {noun} archive 7"],
+                ),
+            )
+        return a
+
+    h.build = build
+    r = h.run("archive", "7")
+    assert r.code() == "E_USAGE", r
+    assert r.details()["did_you_mean"] == ["notes label archive", "notes milestone archive"], r
+    assert r.details()["next_action"] == (
+        "Did you mean `notes label archive` or `notes milestone archive`? Run "
+        "`notes label archive 7` or `notes milestone archive 7`."
+    ), r

@@ -449,7 +449,7 @@ func (u *updateRun) installedVersion(exe string, target Version) string {
 	}
 	first := ""
 	for _, c := range candidates {
-		v := u.observeVersion(c, true)
+		v, _ := u.observeVersion(c, true)
 		if sameVersion(v, target) {
 			return v
 		}
@@ -469,12 +469,13 @@ func holdInterrupts() func() {
 	return func() { signal.Stop(ch) }
 }
 
-// observeVersion runs `<exe> --version` and returns the version its JSON envelope
-// reports ("" when it does not run or says nothing readable). After a package
-// manager ran (afterInstall) it runs even when the update was interrupted.
-func (u *updateRun) observeVersion(exe string, afterInstall bool) string {
+// observeVersion runs `<exe> --version` and returns the version it reports
+// (versionFromOutput; "" when it says nothing readable) and whether it ran and
+// exited zero. After a package manager ran (afterInstall) it runs even when the
+// update was interrupted.
+func (u *updateRun) observeVersion(exe string, afterInstall bool) (string, bool) {
 	if exe == "" {
-		return ""
+		return "", false
 	}
 	parent := u.ctx
 	if afterInstall {
@@ -482,14 +483,16 @@ func (u *updateRun) observeVersion(exe string, afterInstall bool) string {
 	}
 	ctx, cancel := context.WithTimeout(parent, versionTimeout)
 	defer cancel()
-	out, _ := u.cfg.Run(ctx, []string{exe, "--version"})
-	return versionFromOutput(out)
+	out, err := u.cfg.Run(ctx, []string{exe, "--version"})
+	return versionFromOutput(out), err == nil
 }
 
 // versionFromOutput reads data.version from the first JSON envelope line of a
-// --version run.
+// --version run, else a plain-text version (a 1.x tool prints "gitlab-cli version
+// 1.2.17"): the last word of the first line whose last word is a semantic version.
 func versionFromOutput(out []byte) string {
-	for _, line := range strings.Split(string(out), "\n") {
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "{") {
 			continue
@@ -507,6 +510,13 @@ func versionFromOutput(out []byte) string {
 			return v.String()
 		}
 		return truncateRunes(env.Data.Version, 40)
+	}
+	for _, line := range lines {
+		if words := strings.Fields(line); len(words) > 0 {
+			if v, err := ParseVersion(words[len(words)-1]); err == nil {
+				return v.String()
+			}
+		}
 	}
 	return ""
 }

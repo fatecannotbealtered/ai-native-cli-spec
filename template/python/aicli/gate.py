@@ -174,7 +174,8 @@ class WriteSpec:
     is the read command, without the tool name, that shows whether the change
     landed (for example "note get 1"); an unknown outcome's next_action names it.
     Build it from the registry path and validated inputs only, never from upstream
-    text (SEC-002).
+    text (SEC-002). A "{target}" in it is replaced by the resolved target key, for
+    a target that resolve_target finds.
 
     resolve_target, when set, is used instead of target for a target that takes a
     read to resolve (the canonical key of a variable named by its name, Q1). The
@@ -1861,7 +1862,7 @@ class GateRun:
             check = f"Read {target_key} upstream"
             rb = (spec.read_back if spec is not None else "").strip()
             if rb:
-                check = f"Run `{t} {rb}`"
+                check = f"Run `{t} {rb.replace('{target}', target_key)}`"
             e = new_error(
                 out.code,
                 "The write may have been applied; nothing will be retried. Look the operation up "

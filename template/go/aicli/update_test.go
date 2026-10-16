@@ -1018,3 +1018,57 @@ func TestVerifySigstoreBundleRefusesBadInput(t *testing.T) {
 		t.Fatalf("a malformed bundle is a failed verification: %v", err)
 	}
 }
+
+// U1: the post-install check reads a plain-text version (a 1.x release prints
+// "gitlab-cli version 1.2.17"); the JSON envelope keeps priority. A binary that
+// runs but reports no version is told apart from one that does not run.
+func TestU1PlainTextVersionIsRead(t *testing.T) {
+	for out, want := range map[string]string{
+		"gitlab-cli version 1.2.17\n": "1.2.17", "v1.2.17\r\n": "1.2.17", "1.2.17": "1.2.17",
+		"starting\nnotes version 1.3.1-rc.1+b2\n":                               "1.3.1-rc.1+b2",
+		"notes version 9.9.9\n{\"ok\":true,\"data\":{\"version\":\"1.3.1\"}}\n": "1.3.1",
+		"notes version 1.3\n": "", "version 01.2.3\n": "", "1.2.17 (abc)\n": "", "": "",
+	} {
+		if got := versionFromOutput([]byte(out)); got != want {
+			t.Errorf("versionFromOutput(%q) = %q, want %q", out, got, want)
+		}
+	}
+	// A fake binary whose content starts with "plain:" prints the rest and exits 0.
+	plain := func(f *updateFixture) {
+		f.h.build = func(build func(*upstream) *App) func(*upstream) *App {
+			return func(u *upstream) *App {
+				a := build(u)
+				a.Update.Run = func(ctx context.Context, argv []string) ([]byte, error) {
+					if b, err := os.ReadFile(argv[0]); err == nil && len(argv) == 2 && strings.HasPrefix(string(b), "plain:") {
+						return b[len("plain:"):], nil
+					}
+					return f.run(ctx, argv)
+				}
+				return a
+			}
+		}(f.h.build)
+	}
+	f := newUpdateFixture(t)
+	f.method = "binary"
+	plain(f)
+	f.addRelease("1.3.1", "", archiveFor(t, "plain:notes version 1.3.1\n", "1.3.1", nil))
+	if r := f.h.run("update"); r.exit != 0 || updateData(t, r)["status"] != "updated" || f.readFile(f.exe) != "plain:notes version 1.3.1\n" {
+		t.Fatalf("a plain-text version: %s", r)
+	}
+	for _, c := range []struct{ content, code, message string }{
+		{"plain:notes version v1.3.2\n", "E_INTEGRITY", "The downloaded binary reports version 1.3.2, not 1.3.1, so it was not installed."},
+		{"plain:notes (no version)\n", "E_IO", "The downloaded binary did not report its version, so it was not installed."},
+	} {
+		f := newUpdateFixture(t)
+		f.method = "binary"
+		plain(f)
+		f.addRelease("1.3.1", "", archiveFor(t, c.content, "1.3.1", nil))
+		r := f.h.run("update")
+		if r.code() != c.code || r.details()["stage"] != "replace" || r.message() != c.message || f.readFile(f.exe) != "old notes 1.3.0" {
+			t.Fatalf("%q: %s", c.content, r)
+		}
+		if c.code == "E_IO" && r.details()["next_action"] != "Install notes with the package-manager command in its README instead." {
+			t.Fatalf("next_action: %v", r.details()["next_action"])
+		}
+	}
+}
