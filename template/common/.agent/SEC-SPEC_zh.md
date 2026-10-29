@@ -292,4 +292,4 @@ T2，还要：
 - [ ] 凭证和配置档命令声明为 `configure`（SEC-040）
 - [ ] Skill 在用户没有明确要求的危险操作之前停下（SKL-005）
 
-本文属于 [ai-native-cli-spec](https://github.com/fatecannotbealtered/ai-native-cli-spec)。Copyright (c) 2026 Sean Guo。采用 MIT 许可证，见规范仓库中的 `LICENSE`。
+本文属于 [ai-native-cli-spec](https://github.com/fatecannotbealtered/ai-native-cli-spec)。Copyright (c) 2026 Sean Guo。采用 Apache-2.0 许可证，见采用本规范的工具中的 `licenses/ai-native-cli-spec-LICENSE` 或规范仓库中的 `LICENSE`。

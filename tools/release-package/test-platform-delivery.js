@@ -182,6 +182,10 @@ test("npm keeps the five native targets and labels Windows ARM64 x64 emulation",
   fs.mkdirSync(scripts, { recursive: true });
   const source = path.resolve(__dirname, "../../template/common/scripts/prepare-npm-platform-packages.js");
   fs.copyFileSync(source, path.join(scripts, "prepare-npm-platform-packages.js"));
+  fs.writeFileSync(path.join(project, "LICENSE"), "product MIT license fixture");
+  fs.mkdirSync(path.join(project, "licenses"));
+  const componentLicense = fs.readFileSync(path.resolve(__dirname, "../../LICENSE"));
+  fs.writeFileSync(path.join(project, "licenses", "ai-native-cli-spec-LICENSE"), componentLicense);
   const optionalDependencies = {};
   for (const suffix of ["darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64", "win32-x64", "win32-arm64"])
     optionalDependencies["@example/demo-" + suffix] = "1.2.3";
@@ -198,4 +202,10 @@ test("npm keeps the five native targets and labels Windows ARM64 x64 emulation",
   assert.deepEqual(meta.os, ["win32"]); assert.deepEqual(meta.cpu, ["arm64"]);
   assert.deepEqual(fs.readFileSync(path.join(arm, "bin", "demo.exe")), fs.readFileSync(path.join(x64, "bin", "demo.exe")));
   assert.equal(fs.readdirSync(output).length, 6);
+  for (const directory of fs.readdirSync(output)) {
+    const root = path.join(output, directory);
+    assert.equal(fs.readFileSync(path.join(root, "LICENSE"), "utf8"), "product MIT license fixture");
+    assert.deepEqual(fs.readFileSync(path.join(root, "licenses", "ai-native-cli-spec-LICENSE")), componentLicense);
+    assert.ok(JSON.parse(fs.readFileSync(path.join(root, "package.json"))).files.includes("licenses/"));
+  }
 });

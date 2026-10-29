@@ -6,6 +6,8 @@ All notable changes to ai-native-cli-spec are recorded here. The format follows 
 
 ### Changed
 
+- License the project-owned specification, SDKs and source under Apache-2.0; retain third-party licenses, Contributor Covenant CC-BY-4.0 attribution and the independent MIT product-license seed. Historical releases are unchanged.
+
 - Require real Windows, macOS and Linux packages with an explicit architecture and actual package installation, startup and key-operation smoke for each supported combination (REPO-044). Document binary, npm and host prerequisites separately; do not infer native application support from client support.
 - Replace the 2.0.1 requirement that R06 cover every command before release, and the SKL-011 requirement for a full multi-model evaluation before every changed release, with truthful coverage/evaluation reporting and evidence-based command maturity. Preserve write-gate conformance, authorization, dependency audits, signatures and real failures.
 - The starter release matrix retains five native combinations: Windows/amd64, macOS/amd64 and arm64, and Linux/amd64 and arm64. Its existing Windows ARM64 npm alias is explicitly identified as an amd64 binary using x64 emulation; it is supported only after its own real test.

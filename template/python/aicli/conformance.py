@@ -1,6 +1,6 @@
 # Vendored from ai-native-cli-spec template/python/aicli.
 # Do not edit in tool repos; run scripts/sync-spec.js.
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Sean Guo
 
 """The conformance suite (VER-001, BLUEPRINT 6): G00-G10 for every write command

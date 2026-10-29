@@ -386,3 +386,7 @@ Then walk `docs/OPEN_SOURCE_CHECKLIST.md` before the first public push.
 - The `.agent/` specs, the contract and the schemas are language-neutral and never fork per language.
 - Shared behaviour lives in the library, vendored by copy and drift-guarded; a tool never re-implements the envelope, the registry or the write gate.
 - Adding a language means adding `template/<lang>/`: the CI and packaging overlay, an `aicli` library with the same behaviour, and an example that passes its conformance suite. Nothing in `common/` changes.
+
+## License scope
+
+The MIT seed in `common/LICENSE` is only the starting license for original product code; it does not relicense the Apache-2.0 specification or SDKs. Retain the SDK LICENSE files and copyright/SPDX headers, distribute their license texts, and retain the CC-BY-4.0 attribution in both Code of Conduct files. If you choose another product license, update its README, package and Skill license metadata consistently.

@@ -1278,4 +1278,4 @@ aicli 只在两处访问发布源：`update`（包括 `--check`），以及设�
 
 - [ ] CLI-110 超时；读取最多重试两次，写入绝不重发；代理变量；TLS 始终校验，`<PREFIX>_CA_FILE`；User-Agent
 
-本文是 [ai-native-cli-spec](https://github.com/fatecannotbealtered/ai-native-cli-spec) 的一部分。Copyright (c) 2026 Sean Guo。MIT 许可证；见规范仓库中的 `LICENSE`。
+本文是 [ai-native-cli-spec](https://github.com/fatecannotbealtered/ai-native-cli-spec) 的一部分。Copyright (c) 2026 Sean Guo。Apache-2.0 许可证；见采用本规范的工具中的 `licenses/ai-native-cli-spec-LICENSE` 或规范仓库中的 `LICENSE`。

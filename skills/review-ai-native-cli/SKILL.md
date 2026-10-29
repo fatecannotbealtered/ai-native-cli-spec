@@ -1,7 +1,7 @@
 ---
 name: review-ai-native-cli
 description: "Reviews a command-line tool repository against ai-native-cli-spec 2.0 and reports findings with rule IDs, severity, evidence and a fix. The static review reads the repo: the vendored aicli library and its manifest, registry Meta, every write going through App.Write, private token or scope code, the Skill, and verification evidence. The dynamic review builds the tool and probes it: reference sizes, usage errors, the dry-run and confirm gate against the tool's fake upstream or a disposable target, scope refusals, context, doctor and envelope validation. Use when the user asks to review, audit, grade or check the spec conformance of an AI-native CLI, or to gate its release. Not for fixing the findings, reviewing a single diff, or tools that do not follow ai-native-cli-spec."
-license: MIT
+license: Apache-2.0
 compatibility: "Needs git and Node.js 16 or later. The dynamic review also needs the tool's toolchain (Go, or Python 3.10 or later); schema validation needs Python with jsonschema. Works offline except for fetching the pinned spec."
 metadata:
   version: "2.0.0"

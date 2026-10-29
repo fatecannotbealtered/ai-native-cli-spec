@@ -33,3 +33,5 @@ Report unacceptable behavior privately to the project maintainers at **{{CONTACT
 ## Attribution
 
 This Code of Conduct is adapted from the [Contributor Covenant](https://www.contributor-covenant.org/version/2/1/code_of_conduct/), version 2.1.
+
+This shortened, project-specific adaptation (including project and contact placeholders) is licensed under [Creative Commons Attribution 4.0 International (CC-BY-4.0)](https://creativecommons.org/licenses/by/4.0/). Attribution: Coraline Ada Ehmke and Contributor Covenant contributors. It is not covered by the repository’s Apache-2.0 license.

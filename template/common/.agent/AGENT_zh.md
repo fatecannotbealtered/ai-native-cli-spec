@@ -99,4 +99,4 @@ aicli 库（Go：`internal/aicli/`；Python：`<pkg>/_aicli/`）实现了 CLI-SP
 - [ ] `CHANGELOG.md`、Skill 和 `test-prompts.json` 都已更新。
 - [ ] 如果命令、输出或 Skill 有变化，且有命令处于 `stable`：Agent 评测已运行并通过。
 
-本文属于 [ai-native-cli-spec](https://github.com/fatecannotbealtered/ai-native-cli-spec)。Copyright (c) 2026 Sean Guo。采用 MIT 许可证，见规范仓库中的 `LICENSE`。
+本文属于 [ai-native-cli-spec](https://github.com/fatecannotbealtered/ai-native-cli-spec)。Copyright (c) 2026 Sean Guo。采用 Apache-2.0 许可证，见采用本规范的工具中的 `licenses/ai-native-cli-spec-LICENSE` 或规范仓库中的 `LICENSE`。
