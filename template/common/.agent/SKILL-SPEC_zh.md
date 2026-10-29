@@ -257,4 +257,4 @@ Finish with the notes you changed (refs), what you shared and with whom, what th
 - [ ] 工具带多个 Skill 时遵守家族规则（SKL-010）
 - [ ] `test-prompts.json` 覆盖 VER-006 的 8 个场景，每个都有一个条目（不适用时在 `expected` 中写明原因）；记录了一次 VER-006 运行（SKL-011）
 
-本文属于 [ai-native-cli-spec](https://github.com/fatecannotbealtered/ai-native-cli-spec)。Copyright (c) 2026 Sean Guo。采用 MIT 许可证，见规范仓库中的 `LICENSE`。
+本文属于 [ai-native-cli-spec](https://github.com/fatecannotbealtered/ai-native-cli-spec)。Copyright (c) 2026 Sean Guo。采用 Apache-2.0 许可证，见采用本规范的工具中的 `licenses/ai-native-cli-spec-LICENSE` 或规范仓库中的 `LICENSE`。

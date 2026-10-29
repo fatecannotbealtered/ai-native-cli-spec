@@ -386,3 +386,7 @@ node scripts/check-spec.js && node scripts/check-version.js && go vet ./... && g
 - `.agent/` 下的规范、契约和 schema 都与语言无关，绝不按语言分叉。
 - 共享行为放在库里，以副本方式引入并有漂移检查；工具绝不重新实现信封、注册表或写入门控。
 - 新增一门语言，就是新增一个 `template/<lang>/`：CI 和打包叠加层、一个行为相同的 `aicli` 库，以及一个能通过其符合性测试套件的示例。`common/` 里什么都不用改。
+
+## 许可范围
+
+`common/LICENSE` 中的 MIT 种子仅是产品原创代码的初始许可证，并不改变规范或 SDK 的 Apache-2.0 许可。保留 SDK 的 LICENSE 文件及版权/SPDX 声明，分发时附带许可证全文，并保留两份行为准则中的 CC-BY-4.0 署名。如选择其他产品许可证，请同步更新 README、包及 Skill 的许可元数据。

@@ -1,6 +1,6 @@
 # ai-native-cli-spec
 
-[English](README.md) · [中文](README_zh.md) · [MIT licence](LICENSE)
+[English](README.md) · [中文](README_zh.md) · [Apache-2.0 licence](LICENSE)
 
 One core specification for command-line tools whose main caller is an AI agent, plus the template and the shared libraries that implement it. A conforming tool answers in one JSON envelope, says in every error whether anything was sent and what to do next, refuses writes until a person has granted a scope, and reports only what it observed.
 
@@ -80,4 +80,6 @@ skills/review-ai-native-cli/   Skill that reviews a tool repo against this spec
 
 ## Licence
 
-[MIT](LICENSE). Copyright (c) 2026 Sean Guo.
+[Apache-2.0](LICENSE). Copyright (c) 2026 Sean Guo.
+
+The specification, SDKs and project-owned source are licensed under Apache-2.0, except where explicitly noted. Third-party material retains its original license; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The MIT license in `template/common/LICENSE` is a new-product license seed, not a relicensing of the vendored Apache-2.0 SDKs. Choose a product license deliberately and retain component notices.

@@ -99,4 +99,4 @@ The aicli library (Go: `internal/aicli/`; Python: `<pkg>/_aicli/`) implements mo
 - [ ] `CHANGELOG.md`, the Skill and `test-prompts.json` are updated.
 - [ ] If commands, outputs or the Skill changed and a command is `stable`: the agent eval ran and passed.
 
-Part of [ai-native-cli-spec](https://github.com/fatecannotbealtered/ai-native-cli-spec). Copyright (c) 2026 Sean Guo. MIT License; see `LICENSE` in the spec repository.
+Part of [ai-native-cli-spec](https://github.com/fatecannotbealtered/ai-native-cli-spec). Copyright (c) 2026 Sean Guo. Apache-2.0 License; see `licenses/ai-native-cli-spec-LICENSE` in a vendored tool or `LICENSE` in the spec repository.

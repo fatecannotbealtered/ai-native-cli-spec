@@ -40,6 +40,8 @@ archives:
     # syncs the Skills from there.
     files:
       - skills/**/*
+      - LICENSE
+      - licenses/**/*
 
 checksum:
   name_template: checksums.txt

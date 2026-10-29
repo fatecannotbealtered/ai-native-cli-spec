@@ -33,6 +33,7 @@
     "README_zh.md",
     "*_zh.md",
     "LICENSE",
+    "licenses/",
     "NOTICE.md",
     "CHANGELOG.md",
     "CONTRIBUTING.md",

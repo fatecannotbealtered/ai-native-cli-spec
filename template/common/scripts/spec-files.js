@@ -36,6 +36,7 @@ const SPEC_VERSION_FILE = ".agent/SPEC_VERSION";
 // ---------------------------------------------------------------- registry
 
 const AGENT_SPECS = [
+  "licenses/ai-native-cli-spec-LICENSE",
   ".agent/AGENT.md",
   ".agent/AGENT_zh.md",
   ".agent/CLI-SPEC.md",

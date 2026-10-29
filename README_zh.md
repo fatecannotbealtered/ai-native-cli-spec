@@ -1,6 +1,6 @@
 # ai-native-cli-spec
 
-[English](README.md) · [中文](README_zh.md) · [MIT 许可证](LICENSE)
+[English](README.md) · [中文](README_zh.md) · [Apache-2.0 许可证](LICENSE)
 
 一份核心规范，适用于主要调用方是 AI Agent 的命令行工具，外加实现这份规范的模板和共享库。符合规范的工具以单个 JSON 信封作答；在每个错误中说明是否已有内容发出、下一步该做什么；在有人授予授权范围之前拒绝写入；只报告自己观察到的东西。
 
@@ -80,4 +80,6 @@ skills/review-ai-native-cli/   Skill that reviews a tool repo against this spec
 
 ## 许可证
 
-[MIT](LICENSE)。版权所有 © 2026 Sean Guo。
+[Apache-2.0](LICENSE)。版权所有 © 2026 Sean Guo。
+
+规范、SDK 及项目自有源码采用 Apache-2.0，另有明确说明的内容除外。第三方材料保留原许可证，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。`template/common/LICENSE` 中的 MIT 是新产品的许可证种子，并不改变 vendored SDK 的 Apache-2.0 许可。产品应有意选择许可证并保留组件声明。

@@ -58,7 +58,7 @@ def test_vendored_file_set() -> None:
             continue
         text = (LIB / rel).read_text(encoding="utf-8")
         assert text.startswith("# Vendored from ai-native-cli-spec template/python/aicli.\n"), rel
-        assert "# SPDX-License-Identifier: MIT\n" in text.split('"""', 1)[0], rel
+        assert "# SPDX-License-Identifier: Apache-2.0\n" in text.split('"""', 1)[0], rel
         # relative imports only: the copy lives at <pkg>/_aicli
         assert not re.search(r"^\s*(?:from|import) aicli\b", text, re.MULTILINE), rel
 

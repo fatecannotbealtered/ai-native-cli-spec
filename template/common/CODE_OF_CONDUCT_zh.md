@@ -33,3 +33,5 @@
 ## 出处
 
 本行为准则改编自 [Contributor Covenant（贡献者公约）](https://www.contributor-covenant.org/zh-cn/version/2/1/code_of_conduct/) 2.1 版。
+
+本精简的项目专用改编版本（含项目名及联系信息占位符）采用 [知识共享署名 4.0 国际许可证（CC-BY-4.0）](https://creativecommons.org/licenses/by/4.0/)。原作者为 Coraline Ada Ehmke 及 Contributor Covenant 贡献者；本文件不适用仓库的 Apache-2.0 许可证。

@@ -93,6 +93,9 @@ for (const packageName of Object.keys(rootPackage.optionalDependencies || {})) {
   const packageDir = path.join(outputDir, packageName.replace(/^@/, "").replace("/", "__"));
   const binPath = path.join(packageDir, "bin", toolName + (os === "win32" ? ".exe" : ""));
   extractBinary(archive, binPath, os);
+  // Retain the product license and component licenses beside the packaged binary.
+  fs.copyFileSync(path.join(root, "LICENSE"), path.join(packageDir, "LICENSE"));
+  fs.cpSync(path.join(root, "licenses"), path.join(packageDir, "licenses"), { recursive: true });
   const platformPackage = {
     name: packageName,
     version,
@@ -106,7 +109,7 @@ for (const packageName of Object.keys(rootPackage.optionalDependencies || {})) {
     publishConfig: { access: "public" },
     os: [os],
     cpu: [cpu],
-    files: ["bin/"],
+    files: ["bin/", "LICENSE", "licenses/"],
     engines: rootPackage.engines || { node: ">=16" }
   };
   fs.writeFileSync(path.join(packageDir, "package.json"), JSON.stringify(platformPackage, null, 2) + "\n");

@@ -1,6 +1,6 @@
 # Vendored from ai-native-cli-spec template/python/aicli.
 # Do not edit in tool repos; run scripts/sync-spec.js.
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Sean Guo
 
 """NDJSON streams (CLI-006) and the --output file helper (CLI-042), decision 20.

@@ -238,4 +238,4 @@ aicli 提供 `FromHTTP` 做状态码映射，并对 `Apply` 的错误分类（`N
 
 检查：对比 `ci.yml` 和 `release.yml` 的检查步骤；每个发布任务都通过 `needs:` 依赖检查任务。
 
-本文属于 [ai-native-cli-spec](https://github.com/fatecannotbealtered/ai-native-cli-spec)。Copyright (c) 2026 Sean Guo。采用 MIT 许可证，见规范仓库中的 `LICENSE`。
+本文属于 [ai-native-cli-spec](https://github.com/fatecannotbealtered/ai-native-cli-spec)。Copyright (c) 2026 Sean Guo。采用 Apache-2.0 许可证，见采用本规范的工具中的 `licenses/ai-native-cli-spec-LICENSE` 或规范仓库中的 `LICENSE`。

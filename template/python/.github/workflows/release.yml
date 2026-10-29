@@ -118,14 +118,16 @@ jobs:
           $base = "{{TOOL_NAME}}-$version-$platform-$arch"
           New-Item -ItemType Directory -Force -Path release, stage | Out-Null
           Copy-Item -Recurse -Force skills stage/skills
+          Copy-Item -Force LICENSE stage/LICENSE
+          Copy-Item -Recurse -Force licenses stage/licenses
           if ("${{ runner.os }}" -eq "Windows") {
             Copy-Item dist/{{TOOL_NAME}}.exe stage/{{TOOL_NAME}}.exe
-            Compress-Archive -Path stage/{{TOOL_NAME}}.exe, stage/skills -DestinationPath "release/$base.zip" -Force
+            Compress-Archive -Path stage/{{TOOL_NAME}}.exe, stage/skills, stage/LICENSE, stage/licenses -DestinationPath "release/$base.zip" -Force
             $hash = (Get-FileHash "release/$base.zip" -Algorithm SHA256).Hash.ToLower()
             "$hash  $base.zip" | Out-File -Encoding utf8 "release/checksums-$platform-$arch.txt"
           } else {
             Copy-Item dist/{{TOOL_NAME}} stage/{{TOOL_NAME}}
-            tar -C stage -czf "release/$base.tar.gz" {{TOOL_NAME}} skills
+            tar -C stage -czf "release/$base.tar.gz" {{TOOL_NAME}} skills LICENSE licenses
             $hash = (Get-FileHash "release/$base.tar.gz" -Algorithm SHA256).Hash.ToLower()
             "$hash  $base.tar.gz" | Out-File -Encoding utf8 "release/checksums-$platform-$arch.txt"
           }

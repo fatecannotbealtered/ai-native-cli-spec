@@ -257,4 +257,4 @@ Finish with the notes you changed (refs), what you shared and with whom, what th
 - [ ] Family rules when the tool ships several Skills (SKL-010)
 - [ ] `test-prompts.json` covers the eight VER-006 scenarios, each with an entry (the reason in `expected` where one cannot apply); a VER-006 run is recorded (SKL-011)
 
-Part of [ai-native-cli-spec](https://github.com/fatecannotbealtered/ai-native-cli-spec). Copyright (c) 2026 Sean Guo. MIT License; see `LICENSE` in the spec repository.
+Part of [ai-native-cli-spec](https://github.com/fatecannotbealtered/ai-native-cli-spec). Copyright (c) 2026 Sean Guo. Apache-2.0 License; see `licenses/ai-native-cli-spec-LICENSE` in a vendored tool or `LICENSE` in the spec repository.
