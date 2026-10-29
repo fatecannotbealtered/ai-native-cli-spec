@@ -32,6 +32,8 @@ export {{ENV_PREFIX}}_TOKEN=<token>
 
 PowerShell sets the same variables with `$env:NAME = "value"`. There is no setup command to run before the first task command. Writes also need a scope that you grant; see [Authorization](#authorization).
 
+<!-- Replace this note with the actually tested OS/CPU matrix, minimum OS versions, direct-binary system libraries and external application/service prerequisites. The npm launcher additionally needs Node.js >=16. State any remote host OS/architecture and protocol; do not claim a platform before its final package and key operation pass smoke. -->
+
 ## What It Does
 
 <!-- RISK_TIER_DESC names the effects this tool's commands can have and the worst case, in one sentence, for example "it edits and deletes notes (change) and shares them by mail (deliver)" (CLI-025, SEC-001). Delete the last sentence if the tool wraps no third-party product. -->
@@ -173,7 +175,7 @@ node scripts/check-spec.js       # vendored specs, contract and library match th
 node scripts/check-version.js    # every version location matches package.json
 ```
 
-CI runs these on every push and pull request, and again before a release is signed (VER-008). Every write command needs a conformance sample, every command needs a test that runs it, and a command's maturity (`draft`, `experimental`, `verified`, `stable`) rises only with its evidence (VER-001, VER-003, VER-005). See [CONTRIBUTING.md](CONTRIBUTING.md).
+CI runs these on every push and pull request, and again before a release is signed (VER-008). Every write command needs a conformance sample; coverage gaps are recorded, and a command's maturity rises only with its evidence (VER-001, VER-003, VER-005). See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Links
 

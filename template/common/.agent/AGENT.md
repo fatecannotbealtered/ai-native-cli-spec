@@ -28,7 +28,7 @@ The aicli library (Go: `internal/aicli/`; Python: `<pkg>/_aicli/`) implements mo
 6. Declare secret flags in `Meta.Secrets` and never log or echo them, nor any secret the upstream returns (SEC-021). Declare every output path that carries external text as untrusted, a ref that holds people's text included (CLI-046, SEC-002).
 7. Lists state their completeness and scope (CLI-041); counting, filtering and finding the latest happen in the tool (CLI-044).
 8. `update` is aicli's built-in: set `App.Update` to an `UpdateConfig` with the repository and the package names, and never write an `update` command or update code of your own (CLI-070).
-9. Every write command has a conformance `Sample`, and every registry command runs in a test (VER-001, VER-003).
+9. Every write command has a conformance `Sample`; report command test coverage and gaps honestly (VER-001, VER-003).
 10. Read settings only through `app.Setting`, and never put a secret in the settings file (CLI-100, SEC-040). Diagnostics go through `app.Debugf` under `<PREFIX>_DEBUG`, never through a `--verbose` or `--debug` flag (CLI-102).
 11. Every upstream request has a timeout and verified TLS; reads retry at most twice and writes are never re-sent; the tool connects only to its configured upstream and sends no telemetry (CLI-110, SEC-022).
 12. Use the shared flag names and verb meanings; deprecate a command or flag before removing it, and remove it only in a MAJOR release (CLI-028, CLI-029, CLI-081).
@@ -56,7 +56,7 @@ The aicli library (Go: `internal/aicli/`; Python: `<pkg>/_aicli/`) implements mo
        Apply:   apply,   // sends the change; returns Result{Outcome, Observed} from a read-back
    })
    ```
-8. Tests: one conformance test, `aicli.RunConformance(t, h)` with a `Harness` that sets `NewApp`, `Writes`, `Reset`, `Samples` and `Scope` (VER-001); behaviour-matrix tests per command, run through a helper that validates every envelope (VER-002, VER-004); and coverage: `<PREFIX>_COVERAGE_FILE` set while the tool's own tests run, then `aicli.CheckCoverage(t, h)` with `CoverageFile` in `TestMain` after `m.Run()` (R06, VER-003).
+8. Tests: run `aicli.RunConformance(t, h)` with `NewApp`, `Writes`, `Reset`, `Samples` and `Scope` (VER-001); validate envelopes and add behaviour tests as commands mature (VER-002, VER-004). Record coverage and missing commands; R06 is separately reported when incomplete (VER-003).
 9. Security: derive the risk tier from the effects and fill in `SECURITY.md` (SEC-001, SEC-060).
 10. Skill: write it per SKILL-SPEC, with the command map from `app.CommandMap()` between the `aicli:command-map` markers (CLI-020, SKL-002); `test-prompts.json` covers the VER-006 scenarios.
 11. Evidence: a command stays `draft` until its behaviour matrix passes (`experimental`); a recorded run against the real upstream makes it `verified`; a passed agent eval makes it `stable` (VER-005, VER-006).
@@ -65,11 +65,11 @@ The aicli library (Go: `internal/aicli/`; Python: `<pkg>/_aicli/`) implements mo
 ## Workflow B: extend this tool
 
 1. Read the rules for what you touch: output and errors (CLI-001…CLI-018), commands and discovery (CLI-020…CLI-037), reads (CLI-040…CLI-049), writes (CLI-050…CLI-065, SEC-010…SEC-021), settings and network (CLI-100…CLI-110, SEC-022), the Skill (SKILL-SPEC).
-2. New command: register it with `Meta`; VER-003 requires a test that runs it. If it writes, implement it with `app.Write` and add its `Sample`, or G00 fails. Set its maturity from its evidence (VER-005).
+2. New command: register it with `Meta` and record whether a command-level test ran. If it writes, implement it with `app.Write` and add its `Sample`, or G00 fails. Set its maturity from its evidence (VER-005).
 3. Changed parameters or output: update the output schema. A command, flag or field you rename or remove is deprecated first (`Meta.Deprecated`, `Meta.DeprecatedFlags`), keeps working through at least one MINOR release and 90 days, and goes only in a MAJOR release (CLI-081). The change voids the command's `live` and `eval` evidence: re-run them or lower its maturity (VER-005).
 4. Agents keep guessing a form you don't accept (eval traces, bug reports)? Accept it (`Meta.Aliases`, `FlagAliases`, `AddShortcut`), or make the error carry the exact `did_you_mean` (`FlagSynonyms`, `VerbSynonyms`) (CLI-022).
 5. Update `CHANGELOG.md` and the Skill (playbooks by hand, the command map from the registry). Never edit `metadata.version` or `metadata.min_version`: `npm version` sets both to the tool version on every release (`scripts/sync-version.js`), and `check-version.js` fails on any other value (SKL-001, REPO-031).
-6. Before merge: the tests including the conformance suite, `node scripts/check-spec.js`, lint. Before a release that changes commands, outputs or the Skill: the agent eval (VER-006).
+6. Before merge: the tests including the conformance suite, `node scripts/check-spec.js`, lint. Agent evaluation is recommended for changed commands, outputs or the Skill and required for a `stable` command (VER-006).
 7. New spec version: write its tag to `.agent/SPEC_VERSION`, run `node scripts/sync-spec.js` and the full test suite, and fix the tool, never the vendored files.
 
 ## Workflow C: migrate a 1.6.x tool
@@ -87,10 +87,10 @@ The aicli library (Go: `internal/aicli/`; Python: `<pkg>/_aicli/`) implements mo
 ## Self-check before you finish
 
 - [ ] `node scripts/check-spec.js` passes; nothing vendored was edited by hand.
-- [ ] Every leaf has `Meta`; the conformance suite passes, including R01 (reference budgets) and R02 (tree rules), and so does `CheckCoverage` (R06).
+- [ ] Every leaf has `Meta`; the conformance suite passes, including R01 and R02; coverage gaps and any R06 failure are recorded.
 - [ ] Every non-`observe` command goes through `app.Write` or `app.WriteBatch` and has a `Sample`.
 - [ ] Read commands send no state-changing request; `Effects` and `Dangerous` match what the code does.
-- [ ] Each command's behaviour-matrix rows are tested or skipped as `not applicable: <reason>`; every envelope in tests is validated.
+- [ ] Each `experimental` or higher command's behaviour-matrix rows are tested or skipped as `not applicable: <reason>`; every envelope in tests is validated.
 - [ ] `NotDispatched` and `Rejected` are used only when they are true; upstream errors go through `FromHTTP`.
 - [ ] Secret flags and untrusted paths are declared; lists carry completeness and scope.
 - [ ] `update` comes from `App.Update`, with no update code of the tool's own; settings are read through `app.Setting`, and the settings file holds no secret.

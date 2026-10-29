@@ -16,6 +16,23 @@ permissions:
   contents: read
 
 jobs:
+  package-matrix-checks:
+    name: Package matrix checks (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: node --test tools/release-package/test-platform-delivery.js
+
   go:
     name: Go library and example (${{ matrix.os }})
     strategy:

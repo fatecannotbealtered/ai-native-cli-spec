@@ -20,8 +20,8 @@ builds:
     goarch:
       - amd64
       - arm64
-    # Windows ARM64 is not built natively; prepare-npm-platform-packages.js
-    # reuses the amd64 binary, which runs via Windows x64 emulation on ARM.
+    # Preserve the existing five native targets. Windows ARM64 npm installs
+    # use the Windows amd64 binary under x64 emulation, not a native build.
     ignore:
       - goos: windows
         goarch: arm64
@@ -56,8 +56,8 @@ signs:
       - "--yes"
 
 release:
-  # Idempotent re-tagging: overwrite artifacts if the release already exists.
-  replace_existing_artifacts: true
+  # Published versions are immutable; do not replace existing artifacts.
+  replace_existing_artifacts: false
   # A semver prerelease tag (v2.1.0-rc.1) is published as a GitHub prerelease, so
   # it is never the latest release; `update` installs one only with
   # --target-version (CLI-070).

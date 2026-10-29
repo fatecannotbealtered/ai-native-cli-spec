@@ -47,7 +47,7 @@
 | `scripts/{spec-files,sync-spec,check-spec}.js` | 必须，内置副本 | 同步与漂移检查 |
 | `scripts/{version-files,sync-version,check-version}.js`、`.npmrc` | 必须 | 单一版本来源（REPO-031） |
 | `package.json`、`scripts/{run,prepare-npm-platform-packages}.js` | 必须† | npm 壳（†通过 npm 分发时，REPO-040） |
-| 一个符合性测试，例如 `cmd/conformance_test.go`、`tests/test_conformance.py` | 必须 | 为每条写命令提供样例并运行测试套件（VER-001）；R06 在完整测试跑完后运行（Go：`cmd/main_test.go` 中的 `TestMain`，VER-003） |
+| 一个符合性测试，例如 `cmd/conformance_test.go`、`tests/test_conformance.py` | 必须 | 为每条写命令提供样例并运行测试套件（VER-001）；报告覆盖及单独运行的 R06 结果（VER-003） |
 | `skills/<name>/SKILL.md`、`skills/<name>/test-prompts.json` | 必须 | Skill 及其评测提示词（SKL-011） |
 
 以下内容在 2.0 中退役，2.0 工具一样都没有：FCC 源码扫描守卫 `cmd/fcc_guard_test.go` 和 `tests/test_fcc_guard.py`（由 VER-003 取代）；每个工具各自的契约模块 `internal/contract/contract_gen.go` 和 `<pkg>/contract_gen.py`（库自带生成好的契约）；工具自己的确认令牌、密钥和已消费令牌代码（CLI-050）；工具自己的 `update` 代码，由 aicli 的内置命令取代（CLI-070）；代码和文档中的 `release_readiness`（CLI-027）。
@@ -168,6 +168,16 @@ Agent 从 PATH 运行的命令应当是原生二进制，或者是一个最多�
 原因：1.x 规定每次更新都运行 `npx skills add <repo> -y -g`，它装的是默认分支上当时的内容，而不是为已安装二进制编写的那份 Skill。
 检查：`npm pack --dry-run` 列出 `skills/`；发布归档的根目录下列出二进制和 `skills/`；aicli 的 `update` 测试表明 Skill 同步不发出任何网络请求。
 
+### REPO-044 三端产品交付
+
+每个 CLI 产品（包括软件服务 CLI）都必须提供真实可用的 Windows、macOS 和 Linux 包，每端至少明确一种 CPU 架构。发布支持矩阵必须区分操作系统、CPU、最低系统版本以及已测试、未测试或模拟运行的组合。其他架构、系统版本和故障恢复场景可以迭代增加，不是通用首发前提；既有支持组合不得悄悄消失。
+
+每个宣称支持的组合都必须在干净或隔离环境中安装实际版本化归档，启动可执行文件，并针对真实或适当的受控目标执行代表性的关键产品操作。记录包摘要、源码版本、环境、命令和结果。已知安装失败或关键路径不可用时，先修复再宣称该组合支持；否则明确受影响的组合或操作不可用。未运行或失败不能写成通过。包发布表达通过上述冒烟的产品支持，不等于所有命令达到某个 VER-005 成熟度，也不等于工程设计最终签核。
+
+二进制应尽量自包含应用运行依赖。必须列出外部应用、服务、许可、系统库、最低操作系统与 CPU 等必要前提。直接二进制的前提与 npm 壳所需的 Node.js 运行时分别说明。原应用仅能在特定宿主运行时，区分三端 CLI 客户端与远端宿主、协议和宿主架构；包必须能完成真实支持的远端任务，不能只是能启动的空壳。不得宣称原应用可在不支持的系统原生运行。
+
+检查：发布矩阵包含三种系统且各至少一种架构；实际发布归档的安装、启动及关键操作冒烟结果绑定包摘要。签名、依赖审计和授权要求保持不变（REPO-042、SEC-010、SEC-050）。
+
 ## 6. 目录布局
 
 ### REPO-050 目录布局
@@ -258,7 +268,7 @@ Agent 从 PATH 运行的命令应当是原生二进制，或者是一个最多�
 CI 必须在每次推送和每个 pull request 上运行，任何一步失败都会阻止合并：
 
 - 格式化与 lint：Go 用 `gofmt`、`go vet`、golangci-lint；Python 用 ruff；
-- 测试，包括为每条写命令提供样例的符合性测试套件（VER-001）、对测试产生的每个信封的校验（VER-002），以及从注册表枚举的覆盖率（VER-003）；Go 的 Makefile 目标是 `test`（含符合性测试）、`conformance` 和 `lint`；
+- 测试，包括为每条写命令提供样例的符合性测试套件（VER-001）以及对测试产生的每个信封的校验（VER-002）；按 VER-003 记录注册表覆盖和缺口，不以全部命令覆盖作为产品首发支持的前提。Go 的 Makefile 目标是 `test`（含符合性测试）、`conformance` 和 `lint`；
 - 对工具发布所在的每个生态做依赖审计（SEC-050）：Go 用 `govulncheck ./...` 和 `npm audit`；Python 用 `pip-audit` 和 `npm audit`；
 - `node scripts/check-version.js` 和 `node scripts/check-spec.js`。
 
@@ -288,7 +298,7 @@ CI 必须在每次推送和每个 pull request 上运行，任何一步失败都
 
 ### REPO-074 格式化工具与 pull request 自检
 
-每种语言只用一个格式化工具，配置提交入库（Go 用 `gofmt`，Python 用 ruff，用到 JavaScript 时用 Prettier）；不靠手工对齐任何东西。PR 模板要求确认：测试和符合性测试套件通过，每条写命令都有样例，且 R06 已开启；每条改动过的命令，其成熟度与证据相符；新增的写入经过写入门控，且声明的效果属实；授权范围和授权行为没有变化，否则已更新 `SECURITY.md`；没有编辑任何内置副本；已更新 `CHANGELOG.md`；已重新生成 README 和 Skill 的命令地图；已更新译文。
+每种语言只用一个格式化工具，配置提交入库（Go 用 `gofmt`，Python 用 ruff，用到 JavaScript 时用 Prettier）；不靠手工对齐任何东西。PR 模板要求确认：测试和符合性测试套件通过，每条写命令都有样例，已记录覆盖缺口及任何 R06 失败；每条改动过的命令，其成熟度与证据相符；新增的写入经过写入门控，且声明的效果属实；授权范围和授权行为没有变化，否则已更新 `SECURITY.md`；没有编辑任何内置副本；已更新 `CHANGELOG.md`；已重新生成 README 和 Skill 的命令地图；已更新译文。
 
 原因：格式噪音会掩盖真正的差异；自检能抓住评审者容易忘记的更新。
 检查：CI 中的格式检查；PR 模板。

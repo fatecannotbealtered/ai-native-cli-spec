@@ -61,15 +61,15 @@ Check: no test runs the CLI outside the validating helper; R04 passes.
 
 ### VER-003 Coverage counted from runs
 
-Every command in the registry (everything in the full `reference` except aicli's built-ins, which the library's own tests cover) MUST be executed at least once by a command-level test of the tool, through `App.Execute` or the built binary. The list MUST be enumerated from the registry at test time (R06, run by `CheckCoverage` with `Harness.CoverageFile`), never from a hand-kept list or a scan of test source; runs made by the conformance suite itself do not count.
+Record which registry commands (except aicli's built-ins, covered by the library) ran in command-level tests through `App.Execute` or the built binary, and list missing commands. Enumerate the denominator from the registry, never from a hand-kept list or a source scan; conformance-suite invocations do not count. Complete R06 coverage is a test goal, not a universal prerequisite for releasing a platform package under REPO-044. This replaces the 2.0.1 requirement that every command run and R06 pass before release; it does not weaken the write-gate conformance suite, authorization, audits, or a failure in a test that actually ran.
 
-- aicli appends the canonical path of each command the tool's tests execute to the file named by `<PREFIX>_COVERAGE_FILE`; set it to `Harness.CoverageFile` while those tests run. Run R06 after them: in Go with `aicli.CheckCoverage(t, h)` from `TestMain` after `m.Run()`, as `template/go/example/notes_test.go` in the spec repository does; in Python with `check_coverage(h)` at the end of the test session. Skip it when only a subset of the tests ran (`-run`, `-skip`, `-k`). It fails with the list of paths that never ran. Keep `CoverageFile` out of the harness given to `RunConformance`, which would otherwise check coverage before the other tests have run.
+- aicli appends executed canonical paths to `<PREFIX>_COVERAGE_FILE`. R06 (`CheckCoverage` / `check_coverage`) can compare a full test run to the registry and fails with the missing paths. Run it as a separately reported coverage check when coverage is incomplete: retain its failed result and the missing list, and do not describe it as passed. Do not skip failing test cases or weaken G00–G10. Keep `CoverageFile` out of the harness given to `RunConformance`.
 - Command lines quoted in the README, the Skill and `reference` examples SHOULD be parsed against the registry by a test (path exists, flags declared, required parameters present) without being executed.
 - Delete v1's `cmd/fcc_guard_test.go` or `tests/test_fcc_guard.py`, and `fcc_status`.
 
 Why: v1's guard scanned test source for command words, which proves that a string appears in a file, not that the command ran and passed. Counting runs costs nothing extra: the success row of VER-004 already runs every command.
 
-Check: R06 is enabled and passes in CI; no FCC guard remains.
+Check: the report identifies the registry denominator, executed commands, missing commands and R06 result if run; no FCC source-scan guard remains.
 
 ### VER-004 Behaviour matrix per command
 
@@ -106,7 +106,7 @@ Each command MUST declare `Maturity` and `Evidence` in its `Meta` (published in 
 
 | Level | Means | Evidence it needs |
 |---|---|---|
-| `draft` | declared; the interface may still change; SHOULD ship only in pre-release versions | none beyond VER-003; writes are still conformance-checked (G00) |
+| `draft` | declared; the interface may still change; limitations are disclosed | no complete-coverage prerequisite; writes are still conformance-checked (G00) |
 | `experimental` | the behaviour matrix (VER-004) passes against a fake upstream | `simulated:` references to those tests |
 | `verified` | also ran against a real upstream, recorded | plus a current `live:` record for this command |
 | `stable` | also passed the agent eval, and has no open P1 defect | plus an `eval:` report (VER-006) |
@@ -208,7 +208,7 @@ The spec itself uses the same method: a SHOULD rule becomes a MUST when an arm t
 
 Why: documents and unit tests do not show how agents use a tool. In the 2026-10 eval only measured trials showed that structured usage errors alone left invalid calls almost unchanged (0.44 → 0.40 per trial) while accepting the measured guesses took them from 0.22 to 0.07 (arm D against C), and that a Skill without a command map raised help calls from 0.6 to 2.9 per trial.
 
-Check: the release has an eval report with the plan, results, paired comparisons, noise check, classified failures and decision; `stable` commands cite it.
+Check: an eval that was run has a report with the plan, results, paired comparisons, noise check, classified failures and decision; `stable` commands cite it. An unrun eval is recorded as such and is not a general package-support gate.
 
 ## Fleet and release
 
@@ -232,7 +232,7 @@ Check: the release notes link the audit results; no open high-severity finding t
 
 ### VER-008 Release path parity
 
-The release workflow MUST run, on the tagged commit and before anything is published, every check the merge workflow runs: unit and command-level tests including the conformance suite and the R06 coverage check, `node scripts/check-spec.js`, `node scripts/check-version.js`, lint and format checks, and the dependency audit of every shipped ecosystem (`govulncheck` or `pip-audit`, plus `npm audit` for the wrapper). Publish jobs MUST depend on those jobs, and release jobs MUST NOT run them with weaker settings (skipped tests, `-short`, test-only environment switches). The release workflow SHOULD also smoke-test the built artefact offline (`reference --index`, `context` and `doctor`, validating their envelopes) and measure the launcher's start-up overhead (CLI-090).
+The release workflow MUST run, on the tagged commit and before anything is published, the merge workflow's tests including the complete write-gate conformance suite, `node scripts/check-spec.js`, `node scripts/check-version.js`, lint and format checks, and the dependency audit of every shipped ecosystem (`govulncheck` or `pip-audit`, plus `npm audit` for the wrapper). Publish jobs MUST depend on those jobs; do not hide failed tests or weaken security checks. R06 is reported separately as in VER-003, rather than a complete-coverage release prerequisite. The actual package installation, startup and key-operation smoke is required by REPO-044; launcher timing remains recommended (CLI-090).
 
 Why: a tag can point at a commit merge CI never checked, and a release job that skips a check ships what a merge would have refused. The 1.6.3 template release workflows run neither golangci-lint nor ruff and run `check-version.js` only after the GitHub release exists; the 2026-10 eval build of gitlab-cli carried a test-only `GITLAB_CLI_LEGACY_CONFIRM_BINDING=1` switch that turned binding off.
 

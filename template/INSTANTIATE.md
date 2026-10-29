@@ -281,7 +281,7 @@ func TestMain(m *testing.M) {
 	f.Close()
 	os.Setenv("NOTES_CLI_COVERAGE_FILE", f.Name())
 	code := m.Run()
-	if code == 0 && fullRun() {
+	if code == 0 && fullRun() && os.Getenv("NOTES_CLI_CHECK_FULL_COVERAGE") == "1" {
 		tb := &mainTB{}
 		h := conformanceHarness(newFakeStore())
 		h.CoverageFile = f.Name()
@@ -289,6 +289,8 @@ func TestMain(m *testing.M) {
 		if tb.failed {
 			code = 1
 		}
+	} else if code == 0 && fullRun() {
+		fmt.Fprintln(os.Stderr, "R06 not run; full coverage has not been checked")
 	}
 	os.Remove(f.Name())
 	os.Exit(code)
@@ -316,7 +318,7 @@ func (m *mainTB) Fatalf(format string, args ...any) { m.Errorf(format, args...) 
 func (m *mainTB) Logf(string, ...any)               {}
 ```
 
-The suite runs the gate checks on every write command (a write without a sample fails it), validates every envelope, and checks `reference`, the tree shape, usage errors, `context`, `doctor` and `operation` (VER-001, VER-002). `CheckCoverage` in `TestMain` fails any command no test of yours executed (R06, VER-003). It runs only after a full run, so `make conformance` (`go test -run Conformance`) and other filtered runs skip it instead of failing it; `template/go/example/notes_test.go` has the same wiring. A nil `Scope` grants every effect for the positive checks; a tool with `deliver`, `artifact` or `persist` commands sets `Scope` with the `destinations` or `outputs` its samples use, and `roots` only for a sample that overwrites a file; `Reset` removes the output file of a sample that never overwrites (SEC-012, VER-001). Add the behaviour matrix per command yourself (VER-004), and set `App.StateDir` to `t.TempDir()` in those tests, so no test touches the user's key, journal or scope file (REPO-073).
+The suite runs the gate checks on every write command (a write without a sample fails it), validates every envelope, and checks `reference`, the tree shape, usage errors, `context`, `doctor` and `operation` (VER-001, VER-002). Run the example's R06 separately with `NOTES_CLI_CHECK_FULL_COVERAGE=1`; it fails with any untested commands. Record its result or explicitly record that it did not run. It is not a package-support prerequisite (VER-003), and the separate switch does not disable any write-gate check. A nil `Scope` grants every effect for the positive checks; a tool with `deliver`, `artifact` or `persist` commands sets `Scope` with its sample destinations and roots (SEC-012, VER-001). Add behaviour tests as commands mature and isolate their state (VER-004, REPO-073).
 
 Then the Skill:
 
@@ -364,11 +366,13 @@ Write one concrete prompt per scenario in `test-prompts.json` (VER-006). Each en
 
 ### 9. Python differences
 
-The library lands in `<pkg>/_aicli/` and is imported relatively (`from ._aicli import App, Meta, WriteSpec`). The API mirrors Go in snake_case (`app.register`, `app.write`, `set_resolved`, `run_conformance`, `check_coverage`, `app.command_map()`) on a click tree; `UpdateConfig` and `Setting` take the same fields in snake_case (`App(update=UpdateConfig(repo="OWNER/notes-cli", npm_package="@OWNER/notes-cli"))`). `template/python/example/` is the complete reference. Tests live in `tests/`: `run_conformance` runs in one test, `NOTES_CLI_COVERAGE_FILE` is set for the whole session, and `check_coverage` runs once every test has run, on full runs only. `ruff.toml` already excludes `_aicli`.
+The library lands in `<pkg>/_aicli/` and is imported relatively (`from ._aicli import App, Meta, WriteSpec`). The API mirrors Go in snake_case (`app.register`, `app.write`, `set_resolved`, `run_conformance`, `check_coverage`, `app.command_map()`) on a click tree; `UpdateConfig` and `Setting` take the same fields in snake_case (`App(update=UpdateConfig(repo="OWNER/notes-cli", npm_package="@OWNER/notes-cli"))`). `template/python/example/` is the complete-coverage reference. Tests live in `tests/`: always run `run_conformance`, and record command coverage for the whole session. If complete coverage is not yet available, isolate `check_coverage` as an explicitly skipped test unless `NOTES_CLI_CHECK_FULL_COVERAGE=1`; run it separately on a full test run to retain its real failure and missing-command list. Never skip the conformance suite or conceal other failures. `ruff.toml` already excludes `_aicli`.
 
 ### 10. CI and the final check
 
-The workflows need no edits beyond placeholders. On every push: formatting, vet and lint (the vendored library excluded from lint), `go test ./...` with the conformance suite on three OSes, `govulncheck`, `npm audit`, `check-version.js` and `check-spec.js`; Python runs ruff, pytest, pip-audit and the same Node checks. `release.yml` repeats every gate before it builds and signs (VER-008). The Go workflow also reports the npm launcher's overhead (REPO-041); when it misses 100 ms, document the native binary path in the README's Agent Install.
+The default release matrix retains Windows/amd64, macOS/amd64 and arm64, and Linux/amd64 and arm64. The Windows ARM64 npm alias is a Windows amd64 binary using x64 emulation, not a native ARM64 build; test that path before claiming it. The specification minimum is one architecture per OS and does not require every new product to support all five. Replace `scripts/smoke-product.js` with a real representative key-operation check on an authorized disposable target: the placeholder fails deliberately. For each target the workflow installs and starts the actual archive, runs the check and creates one versioned `smoke-<os>-<arch>.json` record. The release checker consumes those records with an explicit expected source SHA and verifies the actual archive and executable identity, architecture and digest. Provide minimum OS, CPU, external applications and system libraries in the smoke result, and state direct-binary dependencies separately from the npm wrapper's Node.js prerequisite. Add architectures with matching artifacts, npm declarations and real evidence; never silently remove previously supported combinations. If the original application is host-limited, test and document the remote host and protocol rather than claiming native availability.
+
+CI retains the conformance suite, dependency audits, version and spec checks. The release repeats the security and merge checks (VER-008); record incomplete coverage or evaluations honestly. Measure launcher overhead as in REPO-041 and document the native path where it exceeds the budget.
 
 ```bash
 grep -rnE '\{\{[A-Z_0-9]+\}\}' . --exclude-dir=node_modules --exclude-dir=.git || echo "all placeholders filled"

@@ -163,7 +163,7 @@ Skill 必须放在工具仓库的 `skills/<name>/` 中，并以工具的版本�
 
 ### SKL-011 评测
 
-每个 Skill 都必须附带 `skills/<name>/test-prompts.json`，并且在改动命令、输出或 Skill 的发布之前，必须按 VER-006 做评测（启用和不启用 Skill，至少 2 个模型）。该文件是一个 JSON 数组；每个条目有 `id`（kebab-case，唯一）、`scenario`、`prompt`（用户的原话）和 `expected`（可观察的结果：最终状态和回答），可以有 `grader_notes`（评测框架预置了什么、评分者检查什么、哪些操作会让这次试验失败）；除此之外没有别的键。`scenario` 是 VER-006 的场景 ID（`read-answer`、`write`、`ambiguous-target`、`injected-instruction`、`dangerous-action`、`no-scope`、`lost-reply`、`long-list`），每个至少覆盖一次；也可以是 `update`（带 `update` 的工具要加一条）或 `other`。不适用的场景也要有一个条目，在 `expected` 中写明原因和安全的行为：T0 工具的 `write` 条目，期望 Agent 说明它不能修改数据，并且不做任何写入。
+每个 Skill 都必须附带 `skills/<name>/test-prompts.json`。改动命令、输出或 Skill 的发布之前建议按 VER-006 评测；命令声明 `stable` 时必须评测，但这不是通用的首发包支持门禁。未运行或失败的评测如实记录。该文件是一个 JSON 数组；每个条目有 `id`（kebab-case，唯一）、`scenario`、`prompt`（用户的原话）和 `expected`（可观察的结果：最终状态和回答），可以有 `grader_notes`（评测框架预置了什么、评分者检查什么、哪些操作会让这次试验失败）；除此之外没有别的键。`scenario` 是 VER-006 的场景 ID（`read-answer`、`write`、`ambiguous-target`、`injected-instruction`、`dangerous-action`、`no-scope`、`lost-reply`、`long-list`），每个至少覆盖一次；也可以是 `update`（带 `update` 的工具要加一条）或 `other`。不适用的场景也要有一个条目，在 `expected` 中写明原因和安全的行为：T0 工具的 `write` 条目，期望 Agent 说明它不能修改数据，并且不做任何写入。
 
 ```json
 [

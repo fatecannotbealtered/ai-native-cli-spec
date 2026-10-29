@@ -28,7 +28,7 @@ aicli 库（Go：`internal/aicli/`；Python：`<pkg>/_aicli/`）实现了 CLI-SP
 6. 在 `Meta.Secrets` 中声明机密标志，绝不记录或回显它们，也绝不输出上游返回的机密（SEC-021）。把每个承载外部文本的输出路径声明为不可信，带着人写的文本的 ref 也包括在内（CLI-046、SEC-002）。
 7. 列表要说明自己的完整性和范围（CLI-041）；计数、过滤和查找最新项都在工具里完成（CLI-044）。
 8. `update` 是 aicli 的内置命令：把 `App.Update` 设为一个写明仓库和包名的 `UpdateConfig`，绝不自己编写 `update` 命令或任何更新代码（CLI-070）。
-9. 每个写命令都有一个符合性 `Sample`，注册表中的每个命令都在测试中运行过（VER-001、VER-003）。
+9. 每个写命令都有符合性 `Sample`；如实报告命令测试覆盖和缺口（VER-001、VER-003）。
 10. 只通过 `app.Setting` 读取设置，绝不把机密放进设置文件（CLI-100、SEC-040）。诊断输出经由 `<PREFIX>_DEBUG` 下的 `app.Debugf`，绝不通过 `--verbose` 或 `--debug` 标志（CLI-102）。
 11. 每个上游请求都有超时并校验 TLS；读取最多重试两次，写入绝不重发；工具只连接配置的上游，不发送遥测（CLI-110、SEC-022）。
 12. 使用共享的标志名和动词含义；命令或标志要先弃用再移除，并且只在 MAJOR 版本中移除（CLI-028、CLI-029、CLI-081）。
@@ -56,7 +56,7 @@ aicli 库（Go：`internal/aicli/`；Python：`<pkg>/_aicli/`）实现了 CLI-SP
        Apply:   apply,   // sends the change; returns Result{Outcome, Observed} from a read-back
    })
    ```
-8. 测试：一个符合性测试，即 `aicli.RunConformance(t, h)`，配一个设置了 `NewApp`、`Writes`、`Reset`、`Samples` 和 `Scope` 的 `Harness`（VER-001）；每个命令的行为矩阵测试，通过一个校验每个信封的辅助函数运行（VER-002、VER-004）；以及覆盖率：在工具自己的测试运行期间设置 `<PREFIX>_COVERAGE_FILE`，然后在 `TestMain` 中的 `m.Run()` 之后，带上 `CoverageFile` 调用 `aicli.CheckCoverage(t, h)`（R06、VER-003）。
+8. 测试：运行 `aicli.RunConformance(t, h)`，提供 `NewApp`、`Writes`、`Reset`、`Samples` 和 `Scope`（VER-001）；校验信封并随命令成熟补行为测试（VER-002、VER-004）。记录覆盖和缺失命令；覆盖未完成时单独报告 R06（VER-003）。
 9. 安全：根据效果推导风险档，并填写 `SECURITY.md`（SEC-001、SEC-060）。
 10. Skill：按 SKILL-SPEC 编写，命令地图取自 `app.CommandMap()`，放在 `aicli:command-map` 标记之间（CLI-020、SKL-002）；`test-prompts.json` 覆盖 VER-006 的各个场景。
 11. 证据：命令在行为矩阵通过之前一直是 `draft`（通过后为 `experimental`）；有一次针对真实上游的运行记录，它就成为 `verified`；通过 Agent 评测后成为 `stable`（VER-005、VER-006）。
@@ -65,11 +65,11 @@ aicli 库（Go：`internal/aicli/`；Python：`<pkg>/_aicli/`）实现了 CLI-SP
 ## 工作流 B：扩展本工具
 
 1. 读你要改动部分的规则：输出和错误（CLI-001 至 CLI-018）、命令和发现（CLI-020 至 CLI-037）、读操作（CLI-040 至 CLI-049）、写操作（CLI-050 至 CLI-065、SEC-010 至 SEC-021）、设置和网络（CLI-100 至 CLI-110、SEC-022）、Skill（SKILL-SPEC）。
-2. 新命令：用 `Meta` 注册它；VER-003 要求有一个运行它的测试。如果它会写入，就用 `app.Write` 实现并加上它的 `Sample`，否则 G00 会失败。根据它的证据设定成熟度（VER-005）。
+2. 新命令：用 `Meta` 注册它，并记录命令级测试是否运行。如果它会写入，就用 `app.Write` 实现并加上它的 `Sample`，否则 G00 会失败。根据它的证据设定成熟度（VER-005）。
 3. 参数或输出有变化：更新输出 schema。你要改名或移除的命令、标志或字段，先标为弃用（`Meta.Deprecated`、`Meta.DeprecatedFlags`），至少在一个 MINOR 版本中、并且至少在 90 天内保持可用，只在 MAJOR 版本中移除（CLI-081）。这次改动会使该命令的 `live` 和 `eval` 证据作废：重新运行它们，或者降低它的成熟度（VER-005）。
 4. Agent 一直在猜一种你不接受的写法（评测轨迹、缺陷报告里能看到）？那就接受它（`Meta.Aliases`、`FlagAliases`、`AddShortcut`），或者让错误带上准确的 `did_you_mean`（`FlagSynonyms`、`VerbSynonyms`）（CLI-022）。
 5. 更新 `CHANGELOG.md` 和 Skill（剧本手工更新，命令地图从注册表生成）。绝不编辑 `metadata.version` 或 `metadata.min_version`：每次发布时 `npm version` 都会把两者设为工具版本（`scripts/sync-version.js`），值不同时 `check-version.js` 会失败（SKL-001、REPO-031）。
-6. 合并之前：包括符合性测试套件在内的测试、`node scripts/check-spec.js`、lint。在改动命令、输出或 Skill 的发布之前：Agent 评测（VER-006）。
+6. 合并之前：包括符合性测试套件在内的测试、`node scripts/check-spec.js`、lint。改动命令、输出或 Skill 后建议进行 Agent 评测，声明命令为 `stable` 时必须评测（VER-006）。
 7. 新的规范版本：把它的 tag 写入 `.agent/SPEC_VERSION`，运行 `node scripts/sync-spec.js` 和完整的测试套件，然后修改工具，绝不修改内置副本文件。
 
 ## 工作流 C：迁移 1.6.x 工具
@@ -87,10 +87,10 @@ aicli 库（Go：`internal/aicli/`；Python：`<pkg>/_aicli/`）实现了 CLI-SP
 ## 收尾前自检
 
 - [ ] `node scripts/check-spec.js` 通过；没有手工编辑任何内置副本。
-- [ ] 每个叶子命令都有 `Meta`；符合性测试套件通过，包括 R01（reference 预算）和 R02（命令树规则），`CheckCoverage`（R06）也通过。
+- [ ] 每个叶子命令都有 `Meta`；符合性测试套件通过，包括 R01 和 R02；已记录覆盖缺口与任何 R06 失败。
 - [ ] 每个非 `observe` 命令都经过 `app.Write` 或 `app.WriteBatch`，并且有 `Sample`。
 - [ ] 读命令不发送任何改变状态的请求；`Effects` 和 `Dangerous` 与代码实际做的事相符。
-- [ ] 每个命令的行为矩阵各行，要么已测试，要么以 `not applicable: <reason>` 跳过；测试中的每个信封都经过校验。
+- [ ] 每个 `experimental` 及以上命令的行为矩阵各行，要么已测试，要么以 `not applicable: <reason>` 跳过；测试中的每个信封都经过校验。
 - [ ] 只在属实时才使用 `NotDispatched` 和 `Rejected`；上游错误经过 `FromHTTP`。
 - [ ] 机密标志和不可信路径都已声明；列表带有完整性和范围信息。
 - [ ] `update` 来自 `App.Update`，工具没有自己的更新代码；设置经由 `app.Setting` 读取，设置文件中没有机密。
