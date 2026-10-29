@@ -8,7 +8,7 @@ const crypto = require("crypto");
 const { execFileSync, spawnSync } = require("child_process");
 const { check, smoke } = require("../../template/common/scripts/check-platform-delivery.js");
 
-const sha = "a".repeat(40);
+const sha = process.env.GITHUB_SHA || "a".repeat(40);
 const requirements = { minimum_os: "test OS", cpu: "64-bit", external_software: [],
   system_libraries: [], node_wrapper: "Node 20", host: "none" };
 const hash = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
@@ -79,7 +79,8 @@ test("checks real archives and accepts multiple architectures without record col
 test("missing OS, invalid structure, mismatched commit and duplicate target are rejected", (t) => {
   const f = setup(t); const items = three(f); const [win] = items;
   fs.unlinkSync(win.file); assert.throws(() => invoke(f), /windows/); update(win);
-  assert.throws(() => invoke(f, "b".repeat(40)), /stale or failed/i);
+  const otherSha = (sha === "b".repeat(40) ? "c" : "b").repeat(40);
+  assert.throws(() => invoke(f, otherSha), /stale or failed/i);
   assert.throws(() => invoke(f, ""), /expected-source-sha/);
   win.record.extra = true; update(win); assert.throws(() => invoke(f), /structure/);
   delete win.record.extra; update(win);
