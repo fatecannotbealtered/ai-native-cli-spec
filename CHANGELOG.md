@@ -11,6 +11,10 @@ All notable changes to ai-native-cli-spec are recorded here. The format follows 
 - The starter release matrix retains five native combinations: Windows/amd64, macOS/amd64 and arm64, and Linux/amd64 and arm64. Its existing Windows ARM64 npm alias is explicitly identified as an amd64 binary using x64 emulation; it is supported only after its own real test.
 - The versioned per-target package and smoke record binds the installed executable to the archive and an explicitly expected source commit. The release checker consumes these records directly; it does not change legacy readiness or claim security review or engineering signoff.
 
+### Security
+
+- Use Go 1.26.10 for the Go library and example to fix GO-2026-6809 in `crypto/x509`; signature verification remains enabled.
+
 ## [2.0.1] - 2026-10-16
 
 ### Fixed
