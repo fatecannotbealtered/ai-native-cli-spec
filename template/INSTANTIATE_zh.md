@@ -281,7 +281,7 @@ func TestMain(m *testing.M) {
 	f.Close()
 	os.Setenv("NOTES_CLI_COVERAGE_FILE", f.Name())
 	code := m.Run()
-	if code == 0 && fullRun() {
+	if code == 0 && fullRun() && os.Getenv("NOTES_CLI_CHECK_FULL_COVERAGE") == "1" {
 		tb := &mainTB{}
 		h := conformanceHarness(newFakeStore())
 		h.CoverageFile = f.Name()
@@ -289,6 +289,8 @@ func TestMain(m *testing.M) {
 		if tb.failed {
 			code = 1
 		}
+	} else if code == 0 && fullRun() {
+		fmt.Fprintln(os.Stderr, "R06 not run; full coverage has not been checked")
 	}
 	os.Remove(f.Name())
 	os.Exit(code)
@@ -316,7 +318,7 @@ func (m *mainTB) Fatalf(format string, args ...any) { m.Errorf(format, args...) 
 func (m *mainTB) Logf(string, ...any)               {}
 ```
 
-套件对每个写命令运行写入门控检查（缺少样例的写命令会让它失败），校验每个信封，并检查 `reference`、命令树形状、用法错误、`context`、`doctor` 和 `operation`（VER-001、VER-002）。只要有命令没被你的任何测试执行过，`TestMain` 里的 `CheckCoverage` 就会失败（R06、VER-003）。它只在完整运行之后执行，所以 `make conformance`（`go test -run Conformance`）和其他带过滤的运行会跳过它，而不是让它失败；`template/go/example/notes_test.go` 的接法相同。`Scope` 为 nil 时，正向检查会被授予所有效果；有 `deliver`、`artifact` 或 `persist` 命令的工具要设置 `Scope`，写明其样例用到的 `destinations` 或 `outputs`，只有样例会覆盖文件时才加上 `roots`；从不覆盖文件的样例，由 `Reset` 删掉它的输出文件（SEC-012、VER-001）。每个命令的行为矩阵由你自己补上（VER-004），并在这些测试里把 `App.StateDir` 设为 `t.TempDir()`，这样没有测试会碰到用户的密钥、操作记录或授权范围文件（REPO-073）。
+套件对每个写命令运行门控检查（缺少样例会失败），校验每个信封，并检查 `reference`、命令树、用法错误、`context`、`doctor` 和 `operation`（VER-001、VER-002）。通过 `NOTES_CLI_CHECK_FULL_COVERAGE=1` 单独运行示例中的 R06；缺失命令时它会失败。记录其结果或明确记录未运行；它不是包支持前提（VER-003），此开关不关闭任何写入门控检查。`Scope` 为 nil 时正向检查获授全部效果；含 `deliver`、`artifact` 或 `persist` 的工具应按样例设置目标和根目录（SEC-012、VER-001）。随命令成熟补行为测试并隔离状态（VER-004、REPO-073）。
 
 然后是 Skill：
 
@@ -364,11 +366,13 @@ func TestSkillCommandMap(t *testing.T) {
 
 ### 9. Python 的差异
 
-库放在 `<pkg>/_aicli/`，用相对导入（`from ._aicli import App, Meta, WriteSpec`）。API 与 Go 版相同，只是改用 snake_case（`app.register`、`app.write`、`set_resolved`、`run_conformance`、`check_coverage`、`app.command_map()`），构建在 click 命令树上；`UpdateConfig` 和 `Setting` 的字段相同，只是改用 snake_case（`App(update=UpdateConfig(repo="OWNER/notes-cli", npm_package="@OWNER/notes-cli"))`）。`template/python/example/` 是完整的参考。测试放在 `tests/`：`run_conformance` 在一个测试里运行，`NOTES_CLI_COVERAGE_FILE` 对整个测试会话生效，`check_coverage` 在所有测试跑完后运行一次，且只在完整运行时执行。`ruff.toml` 已经排除了 `_aicli`。
+库放在 `<pkg>/_aicli/`，用相对导入（`from ._aicli import App, Meta, WriteSpec`）。API 与 Go 版相同，只是改用 snake_case（`app.register`、`app.write`、`set_resolved`、`run_conformance`、`check_coverage`、`app.command_map()`），构建在 click 命令树上；`UpdateConfig` 和 `Setting` 的字段相同，只是改用 snake_case（`App(update=UpdateConfig(repo="OWNER/notes-cli", npm_package="@OWNER/notes-cli"))`）。`template/python/example/` 是完整覆盖的参考。测试放在 `tests/`：始终运行 `run_conformance`，整个测试会话记录命令覆盖。覆盖尚不完整时，把 `check_coverage` 单独设为测试，默认明确报告跳过；设置 `NOTES_CLI_CHECK_FULL_COVERAGE=1` 后在完整测试运行中执行，保留其真实失败和缺失命令清单。不得跳过符合性套件或掩盖其他失败。`ruff.toml` 已经排除了 `_aicli`。
 
 ### 10. CI 和最后的检查
 
-工作流除了占位符之外不需要修改。每次 push 都会运行：格式检查、vet 和 lint（lint 不检查内置的库副本）、在三种操作系统上运行带符合性测试套件的 `go test ./...`、`govulncheck`、`npm audit`、`check-version.js` 和 `check-spec.js`；Python 运行 ruff、pytest、pip-audit 和同样的 Node 检查。`release.yml` 在构建和签名之前把每一道关卡重跑一遍（VER-008）。Go 工作流还会报告 npm 启动器的开销（REPO-041）；超过 100 ms 时，在 README 的 Agent Install 一节写明原生二进制的路径。
+默认发布矩阵保留 Windows/amd64、macOS/amd64 和 arm64、Linux/amd64 和 arm64。Windows ARM64 npm 别名通过 x64 模拟运行 Windows amd64 二进制，并非原生 ARM64 包；实际测试该路径后才可宣称支持。规范最低要求是每个系统至少一个架构，并不强迫每个新产品支持全部五项。把 `scripts/smoke-product.js` 替换为在获授权的隔离目标上执行代表性关键操作的真实检查：占位脚本会故意失败。工作流在各端安装并启动实际归档，运行检查，按目标生成一份版本化 `smoke-<os>-<arch>.json`。发布检查器直接读取这些记录，要求明确给出预期源码 SHA，并验证实际归档与可执行文件的身份、架构和摘要。在 smoke 结果中填写最低 OS、CPU、外部应用和系统库；分别说明直接二进制依赖及 npm 壳所需 Node.js。新增架构时补对应产物、npm 声明和真实证据；不得静默移除已有支持组合。原应用受宿主限制时，测试并说明远端宿主和协议，不要声称原应用可在客户端系统原生运行。
+
+CI 保留符合性套件、依赖审计、版本和规范检查；发布重跑安全与合并检查（VER-008），如实记录未完成的覆盖或评测。按 REPO-041 测量启动器开销，超过预算时说明原生路径。
 
 ```bash
 grep -rnE '\{\{[A-Z_0-9]+\}\}' . --exclude-dir=node_modules --exclude-dir=.git || echo "all placeholders filled"

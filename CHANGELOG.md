@@ -2,6 +2,19 @@
 
 All notable changes to ai-native-cli-spec are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html); tags before v1.5.0 have two segments. Rule IDs in the 2.0.0 entry refer to the specs in `template/common/.agent/` and to `REPO-SPEC.md`; section numbers in 1.x entries refer to the 1.x specs. The 1.x entries are summarised from the git history and tag messages; dates are tag dates.
 
+## [Unreleased]
+
+### Changed
+
+- Require real Windows, macOS and Linux packages with an explicit architecture and actual package installation, startup and key-operation smoke for each supported combination (REPO-044). Document binary, npm and host prerequisites separately; do not infer native application support from client support.
+- Replace the 2.0.1 requirement that R06 cover every command before release, and the SKL-011 requirement for a full multi-model evaluation before every changed release, with truthful coverage/evaluation reporting and evidence-based command maturity. Preserve write-gate conformance, authorization, dependency audits, signatures and real failures.
+- The starter release matrix retains five native combinations: Windows/amd64, macOS/amd64 and arm64, and Linux/amd64 and arm64. Its existing Windows ARM64 npm alias is explicitly identified as an amd64 binary using x64 emulation; it is supported only after its own real test.
+- The versioned per-target package and smoke record binds the installed executable to the archive and an explicitly expected source commit. The release checker consumes these records directly; it does not change legacy readiness or claim security review or engineering signoff.
+
+### Security
+
+- Use Go 1.26.10 for the Go library and example to fix GO-2026-6809 in `crypto/x509`; signature verification remains enabled.
+
 ## [2.0.1] - 2026-10-16
 
 ### Fixed

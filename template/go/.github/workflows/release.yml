@@ -135,12 +135,12 @@ jobs:
           fi
           node scripts/check-version.js
 
-  release:
-    name: Release
+  build-release:
+    name: Build and sign release archives
     needs: [ci, npm-audit]
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v7
@@ -151,14 +151,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Extract release notes
-        run: |
-          # Slice the '## [VERSION]' section out of CHANGELOG.md for this tag.
-          VERSION="${GITHUB_REF#refs/tags/v}"
-          sed -n "/^## \[${VERSION}\]/,/^## \[/p" CHANGELOG.md | sed '$ { /^## \[/d }' > release-notes.md
-          # Defensive fallback: if the slice is empty, ship the whole changelog.
-          [ -s release-notes.md ] || cp CHANGELOG.md release-notes.md
-
       # Sigstore keyless signing: .goreleaser.yml signs checksums.txt with
       # `cosign sign-blob --new-bundle-format` using this job's OIDC identity.
       - name: Install cosign
@@ -168,9 +160,116 @@ jobs:
         uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
-          args: release --clean --release-notes=release-notes.md
+          args: release --clean --skip=publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload candidate archives and signed checksums
+        uses: actions/upload-artifact@v7
+        with:
+          name: candidate-archives
+          if-no-files-found: error
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+            dist/checksums.txt.sigstore.json
+
+  smoke-package:
+    name: Install and smoke candidate package
+    needs: build-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, platform: linux, arch: amd64 }
+          - { runner: ubuntu-24.04-arm, platform: linux, arch: arm64 }
+          - { runner: macos-15-intel, platform: darwin, arch: amd64 }
+          - { runner: macos-14, platform: darwin, arch: arm64 }
+          - { runner: windows-2022, platform: windows, arch: amd64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+      - uses: actions/download-artifact@v7
+        with:
+          name: candidate-archives
+          path: dist
+      - name: Install archive and run product smoke
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $ext = if ('${{ matrix.platform }}' -eq 'windows') { 'zip' } else { 'tar.gz' }
+          $archive = "dist/{{TOOL_NAME}}-$version-${{ matrix.platform }}-${{ matrix.arch }}.$ext"
+          $install = Join-Path $env:RUNNER_TEMP 'package-install'
+          New-Item -ItemType Directory -Path $install -Force | Out-Null
+          tar -xf $archive -C $install
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $binaryName = if ('${{ matrix.platform }}' -eq 'windows') { '{{TOOL_NAME}}.exe' } else { '{{TOOL_NAME}}' }
+          node scripts/check-platform-delivery.js smoke $archive (Join-Path $install $binaryName) '${{ matrix.platform }}' '${{ matrix.arch }}' 'smoke-${{ matrix.platform }}-${{ matrix.arch }}.json' scripts/smoke-product.js '{{TOOL_NAME}}' $version --expected-source-sha $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Retain actual smoke result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-${{ matrix.platform }}-${{ matrix.arch }}
+          path: smoke-${{ matrix.platform }}-${{ matrix.arch }}.json
+          if-no-files-found: warn
+
+  release:
+    name: Publish tested release assets
+    needs: [build-release, smoke-package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+      - uses: actions/download-artifact@v7
+        with:
+          name: candidate-archives
+          path: dist
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: smoke-*
+          path: smoke-artifacts
+      - name: Verify three-platform evidence and archive checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p smoke-records
+          while IFS= read -r -d '' file; do
+            target="smoke-records/$(basename "$file")"
+            if [ -e "$target" ]; then echo "Duplicate smoke record: $target" >&2; exit 1; fi
+            cp -- "$file" "$target"
+          done < <(find smoke-artifacts -type f -name 'smoke-*.json' -print0)
+          VERSION=$(node -p "require('./package.json').version")
+          node scripts/check-platform-delivery.js check dist smoke-records '{{TOOL_NAME}}' "$VERSION" --expected-source-sha "$GITHUB_SHA"
+          (cd dist && sha256sum --check checksums.txt)
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Verify signed checksums before publication
+        run: |
+          cosign verify-blob --bundle dist/checksums.txt.sigstore.json \
+            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${GITHUB_REF}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" dist/checksums.txt
+      - name: Publish immutable release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -n "/^## \[${VERSION}\]/,/^## \[/p" CHANGELOG.md | sed '$ { /^## \[/d }' > release-notes.md
+          [ -s release-notes.md ] || cp CHANGELOG.md release-notes.md
+          prerelease=()
+          [[ "$VERSION" == *-* ]] && prerelease+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip dist/checksums.txt dist/checksums.txt.sigstore.json --title "$GITHUB_REF_NAME" --notes-file release-notes.md "${prerelease[@]}"
 
   publish-npm:
     name: Publish to npm

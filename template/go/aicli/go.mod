@@ -1,6 +1,6 @@
 module github.com/fatecannotbealtered/ai-native-cli-spec/template/go/aicli
 
-go 1.26.9
+go 1.26.10
 
 require (
 	github.com/sigstore/sigstore-go v1.3.0

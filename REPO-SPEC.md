@@ -47,7 +47,7 @@ A tool repo MUST contain the files marked MUST and SHOULD contain those marked S
 | `scripts/{spec-files,sync-spec,check-spec}.js` | MUST, vendored | sync and drift guard |
 | `scripts/{version-files,sync-version,check-version}.js`, `.npmrc` | MUST | one version source (REPO-031) |
 | `package.json`, `scripts/{run,prepare-npm-platform-packages}.js` | MUST† | npm wrapper (†distributed through npm, REPO-040) |
-| a conformance test, e.g. `cmd/conformance_test.go`, `tests/test_conformance.py` | MUST | runs the suite with a sample for every write command (VER-001); R06 runs after the full test run (Go: `TestMain` in `cmd/main_test.go`, VER-003) |
+| a conformance test, e.g. `cmd/conformance_test.go`, `tests/test_conformance.py` | MUST | runs the suite with a sample for every write command (VER-001); report coverage and any separate R06 result (VER-003) |
 | `skills/<name>/SKILL.md`, `skills/<name>/test-prompts.json` | MUST | the Skill and its eval prompts (SKL-011) |
 
 Retired in 2.0; a 2.0 tool has none of them: the FCC source-scan guards `cmd/fcc_guard_test.go` and `tests/test_fcc_guard.py` (replaced by VER-003); the per-tool contract modules `internal/contract/contract_gen.go` and `<pkg>/contract_gen.py` (the library carries its generated contract); the tool's own confirm-token, key and consumed-token code (CLI-050); the tool's own `update` code, which aicli's built-in replaces (CLI-070); `release_readiness` in code and docs (CLI-027).
@@ -168,6 +168,16 @@ Every distribution channel MUST carry the Skills of its own version: the npm pac
 Why: 1.x prescribed `npx skills add <repo> -y -g` on every update, which installs whatever the default branch holds, not the Skill written for the installed binary.
 Check: `npm pack --dry-run` lists `skills/`; a release archive lists the binary and `skills/` at its root; aicli's `update` tests show the Skill sync makes no network request.
 
+### REPO-044 Three-platform product delivery
+
+Every CLI product, including software-service CLIs, MUST provide real, usable Windows, macOS and Linux packages, each for at least one explicitly named CPU architecture. The published support matrix MUST distinguish OS, CPU, minimum OS version and tested combinations from untested or emulated ones. More architectures, OS versions and failure-recovery scenarios can be added iteratively; they are not a universal first-release prerequisite. Existing supported combinations must not silently disappear.
+
+For every combination advertised as supported, install the actual versioned archive in a clean or isolated environment, start its executable and run a representative key product operation against a real or appropriate controlled target. Record the archive digest, source version, environment, commands and results. Fix a known installation failure or unavailable key path before claiming that combination; otherwise clearly identify the affected combination or operation as unavailable. An unrun or failed test is never a pass. Publishing a package is product support for the combinations that pass this smoke, not a claim that all commands have attained a particular VER-005 maturity or that an engineering design has been signed off.
+
+The binary SHOULD bundle its application runtime dependencies as far as practical. Document any required external application, service, license, system library, minimum OS and CPU. A direct binary's prerequisites are separate from the Node.js runtime required for an npm wrapper. Where the driven application only runs on certain hosts, distinguish the three-platform CLI client from the supported remote host, protocol and host architecture; the package must perform a real supported remote task, not merely start an empty shell. Do not claim the original application runs natively on an unsupported OS.
+
+Check: the release matrix records three OSes and at least one architecture per OS; final-archive installation, startup and key-operation smoke results are tied to the package digest. Signing, dependency audits and authorization remain mandatory (REPO-042, SEC-010, SEC-050).
+
 ## 6. Layout
 
 ### REPO-050 Directory layout
@@ -258,7 +268,7 @@ Check: the extension rules in `contract.json` `error_codes.extension`.
 CI MUST run on every push and pull request, and a failed step blocks the merge:
 
 - format and lint: Go `gofmt`, `go vet`, golangci-lint; Python ruff;
-- tests, including the conformance suite with a sample for every write command (VER-001), validation of every envelope the tests produce (VER-002), and coverage enumerated from the registry (VER-003); Go Makefile targets are `test` (includes conformance), `conformance` and `lint`;
+- tests, including the conformance suite with a sample for every write command (VER-001) and validation of every envelope the tests produce (VER-002); record registry coverage and gaps under VER-003 without requiring complete command coverage for initial product support. Go Makefile targets are `test` (includes conformance), `conformance` and `lint`;
 - a dependency audit for every ecosystem the tool ships in (SEC-050): Go `govulncheck ./...` and `npm audit`; Python `pip-audit` and `npm audit`;
 - `node scripts/check-version.js` and `node scripts/check-spec.js`.
 
@@ -288,7 +298,7 @@ Check: the test suite passes with `HOME` (or `USERPROFILE`) set to a read-only d
 
 ### REPO-074 Formatter and pull request self-check
 
-Each language has one formatter with committed config (Go `gofmt`, Python ruff, Prettier for JavaScript where used); nothing is aligned by hand. The PR template asks: tests and the conformance suite pass with a sample for every write command and R06 on; each changed command's maturity matches its evidence; new writes go through the gate with truthful effects; scope and authorization behaviour unchanged or `SECURITY.md` updated; nothing vendored edited; `CHANGELOG.md` updated; README and Skill command maps regenerated; translations updated.
+Each language has one formatter with committed config (Go `gofmt`, Python ruff, Prettier for JavaScript where used); nothing is aligned by hand. The PR template asks: tests and the conformance suite pass with a sample for every write command, and coverage gaps and any R06 failure are recorded; each changed command's maturity matches its evidence; new writes go through the gate with truthful effects; scope and authorization behaviour unchanged or `SECURITY.md` updated; nothing vendored edited; `CHANGELOG.md` updated; README and Skill command maps regenerated; translations updated.
 
 Why: formatting noise hides real diffs; the self-check catches the updates reviewers forget.
 Check: a format check in CI; the PR template.

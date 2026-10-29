@@ -32,6 +32,8 @@ export {{ENV_PREFIX}}_TOKEN=<token>
 
 PowerShell 用 `$env:NAME = "value"` 设置同样的变量。运行第一个任务命令之前，不需要先运行任何设置命令。写入还需要你授予的授权范围，见[授权](#授权)。
 
+<!-- 将此说明替换为实际测试的 OS/CPU 矩阵、最低系统版本、直接二进制所需系统库和外部应用/服务前提。npm 启动器另外需要 Node.js >=16。写明远端宿主系统、架构和协议；最终包及关键操作冒烟通过后才能宣称支持。 -->
+
 ## 它做什么
 
 <!-- RISK_TIER_DESC 用一句话写出本工具的命令可能产生的效果和最坏情况，例如“它编辑和删除笔记（change），并通过邮件分享笔记（deliver）”（CLI-025、SEC-001）。如果本工具不封装第三方产品，删掉最后一句。 -->
@@ -173,7 +175,7 @@ node scripts/check-spec.js       # vendored specs, contract and library match th
 node scripts/check-version.js    # every version location matches package.json
 ```
 
-CI 在每次推送和每个 pull request 上运行这些命令，在发布签名之前再运行一次（VER-008）。每个写命令都需要一个符合性样例，每个命令都需要一个实际运行它的测试；命令的成熟度（`draft`、`experimental`、`verified`、`stable`）只随证据提升（VER-001、VER-003、VER-005）。见 [CONTRIBUTING_zh.md](CONTRIBUTING_zh.md)。
+CI 在每次推送和每个 pull request 上运行这些命令，在发布签名之前再运行一次（VER-008）。每个写命令都需要符合性样例；记录覆盖缺口，命令成熟度只随证据提升（VER-001、VER-003、VER-005）。见 [CONTRIBUTING_zh.md](CONTRIBUTING_zh.md)。
 
 ## 链接
 

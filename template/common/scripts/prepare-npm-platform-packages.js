@@ -27,16 +27,17 @@ function walk(dir) {
 
 function findArchive(npmOS, npmCPU) {
   const releaseOS = osMap[npmOS];
-  let releaseArch = archMap[npmCPU];
+  const releaseArch = archMap[npmCPU];
   let archive = findArchiveExact(releaseOS, releaseArch);
+  let emulated = false;
   if (!archive && npmOS === "win32" && npmCPU === "arm64") {
-    releaseArch = "amd64";
-    archive = findArchiveExact(releaseOS, releaseArch);
+    archive = findArchiveExact(releaseOS, "amd64");
+    emulated = Boolean(archive);
   }
   if (!archive) {
     throw new Error(`No release archive found for npm platform ${npmOS}-${npmCPU}`);
   }
-  return archive;
+  return { archive, emulated };
 }
 
 function findArchiveExact(releaseOS, releaseArch) {
@@ -88,14 +89,16 @@ const archives = walk(inputDir);
 
 for (const packageName of Object.keys(rootPackage.optionalDependencies || {})) {
   const { os, cpu } = platformParts(packageName);
-  const archive = findArchive(os, cpu);
+  const { archive, emulated } = findArchive(os, cpu);
   const packageDir = path.join(outputDir, packageName.replace(/^@/, "").replace("/", "__"));
   const binPath = path.join(packageDir, "bin", toolName + (os === "win32" ? ".exe" : ""));
   extractBinary(archive, binPath, os);
   const platformPackage = {
     name: packageName,
     version,
-    description: `${toolName} prebuilt binary for ${os}-${cpu}`,
+    description: emulated
+      ? `${toolName} Windows amd64 binary for Windows ARM64 using x64 emulation (not native)`
+      : `${toolName} prebuilt binary for ${os}-${cpu}`,
     license: rootPackage.license,
     author: rootPackage.author,
     homepage: rootPackage.homepage,

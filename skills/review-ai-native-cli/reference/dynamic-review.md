@@ -43,7 +43,8 @@ find "$SCRATCH/home" -type f | head             # a file here means a test used 
 |---|---|---|
 | a failing test | the reviewed tree is red | VER-001, VER-008: Major |
 | a failure naming `G00`–`G10` | the gate check failed for a write command | the rule the check cites: Blocker (G00 alone: Major) |
-| a failure naming `R01`–`R06` | reference, tree, usage errors, envelopes, built-ins or coverage | the rule the check cites: Major |
+| a failure naming `R01`–`R05` | reference, tree, usage errors, envelopes or built-ins | the rule the check cites: Major |
+| an `R06` coverage failure | incomplete command coverage | report the actual failure and missing commands; grade against the pinned VER-003, without treating it as a universal platform release blocker under the newer policy |
 | `its binding was not exercised` | a sample input was rejected before the gate, so G03 did not test it | VER-001: Minor; Major when that input changes the effect |
 | no conformance test ran | the tool's gate wiring is unproven | VER-001: Major |
 | files under `$SCRATCH/home` | a test reached for the user's home state | REPO-073: Major |

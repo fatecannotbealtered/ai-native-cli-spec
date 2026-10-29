@@ -26,11 +26,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # PyInstaller binaries are not cross-compiled: one runner per OS/arch.
-        # macos-15-intel = darwin-amd64 (macos-13 retired 2025-12), macos-14 =
-        # darwin-arm64 (Apple Silicon),
-        # ubuntu-24.04-arm = linux-arm64. win32-arm64 reuses the amd64 binary
-        # via Windows x64 emulation (see prepare-npm-platform-packages.js).
+        # Preserve the five existing native targets; Windows ARM64 npm uses
+        # the amd64 binary under x64 emulation and needs separate testing.
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15-intel, macos-14, windows-2022]
         python-version: ["3.12"]
     runs-on: ${{ matrix.os }}
@@ -133,11 +130,43 @@ jobs:
             "$hash  $base.tar.gz" | Out-File -Encoding utf8 "release/checksums-$platform-$arch.txt"
           }
 
+      - uses: actions/setup-node@v7
+        if: runner.os != 'Linux'
+        with:
+          node-version: '20'
+
+      - name: Install actual archive and run product smoke
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $platform = @{ Linux = 'linux'; macOS = 'darwin'; Windows = 'windows' }['${{ runner.os }}']
+          $arch = if ('${{ runner.arch }}' -eq 'ARM64') { 'arm64' } else { 'amd64' }
+          $ext = if ($platform -eq 'windows') { 'zip' } else { 'tar.gz' }
+          $archive = "release/{{TOOL_NAME}}-$version-$platform-$arch.$ext"
+          $install = Join-Path $env:RUNNER_TEMP 'package-install'
+          New-Item -ItemType Directory -Path $install -Force | Out-Null
+          tar -xf $archive -C $install
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $binaryName = if ($platform -eq 'windows') { '{{TOOL_NAME}}.exe' } else { '{{TOOL_NAME}}' }
+          node scripts/check-platform-delivery.js smoke $archive (Join-Path $install $binaryName) $platform $arch "release/smoke-$platform-$arch.json" scripts/smoke-product.js '{{TOOL_NAME}}' $version --expected-source-sha $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Retain actual smoke result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: "smoke-evidence-${{ matrix.os }}"
+          path: release/smoke-*.json
+          if-no-files-found: warn
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: "{{TOOL_NAME}}-${{ matrix.os }}"
-          path: release/*
+          path: |
+            release/*.tar.gz
+            release/*.zip
+            release/checksums-*.txt
 
   release:
     name: Publish release assets
@@ -151,6 +180,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+
       - name: Download build artifacts
         uses: actions/download-artifact@v7
         with:
@@ -160,10 +193,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p release
+          mkdir -p release smoke-records
           find release-dist -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release/ \;
           find release-dist -type f -name "checksums-*.txt" -exec cat {} \; > release/checksums.txt
+          while IFS= read -r -d '' file; do
+            target="smoke-records/$(basename "$file")"
+            if [ -e "$target" ]; then echo "Duplicate smoke record: $target" >&2; exit 1; fi
+            cp -- "$file" "$target"
+          done < <(find release-dist -type f -name 'smoke-*.json' -print0)
           test -s release/checksums.txt
+          VERSION=$(node -p "require('./package.json').version")
+          node scripts/check-platform-delivery.js check release smoke-records '{{TOOL_NAME}}' "$VERSION" --expected-source-sha "$GITHUB_SHA"
+          (cd release && sha256sum --check checksums.txt)
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3

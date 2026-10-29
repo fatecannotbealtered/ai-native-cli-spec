@@ -39,7 +39,7 @@ Run through this gate **before the first public push** of `{{TOOL_NAME}}`. It is
 
 - [ ] CI (`.github/workflows/ci.yml`) is **green** on the commit being pushed, and a red step blocks the merge (not advisory-only).
 - [ ] CI runs format and lint, the tests with the conformance suite on every OS, a dependency audit for every shipped ecosystem, `check-version.js` and `check-spec.js` (REPO-070, SEC-050).
-- [ ] The conformance test runs with a `Sample` for every write command and coverage recording on (R06), and filters nothing (VER-001, VER-003).
+- [ ] The conformance test runs with a `Sample` for every write command and filters nothing; coverage gaps and any R06 failure are recorded (VER-001, VER-003).
 - [ ] Every envelope the tests produce is validated, and each command at `experimental` or above has its behaviour-matrix tests (VER-002, VER-004).
 - [ ] Each command's maturity matches its evidence: `verified` cites a `live:` record, `stable` also an `eval:` report, and every referenced file exists (VER-005).
 - [ ] `release.yml` runs every merge check on the tagged commit before anything is signed or published (VER-008).

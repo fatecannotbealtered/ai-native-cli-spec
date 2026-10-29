@@ -102,10 +102,10 @@ node scripts/check-spec.js && node scripts/check-version.js
 
 - **符合性测试套件（VER-001）**。一个测试运行 `aicli.RunConformance`（Python：`run_conformance`），并提供一个统计写入次数的模拟上游、每个写命令的 `Sample` 和一个授权范围。它对每个写命令检查写入门控（G00 至 G10），并对整个工具检查 `reference`、命令树、用法错误、信封、`context`、`doctor` 和 `operation`（R01 至 R05）。缺少样例的写命令会让套件失败。绝不跳过、过滤或削弱任何一项检查。
 - **真实输出（VER-002）**。命令级测试通过同一个辅助函数运行 CLI：它执行 App，用库自带的校验器校验信封，并对照 contract.json 检查退出码。
-- **按实际运行统计覆盖（VER-003）**。注册表中的每个命令（包括内置命令）都至少在一个命令级测试中运行过。测试运行期间，`{{ENV_PREFIX}}_COVERAGE_FILE` 指向一个临时文件，库把每个执行过的命令记录在里面；完整跑完之后，`aicli.CheckCoverage`（Python：`check_coverage`）遍历注册表，列出每个从未运行过的命令（R06）。在 Go 中，这一步是 `cmd/main_test.go` 里的 `TestMain`。没有源码扫描式的守卫。
+- **按实际运行统计覆盖（VER-003）**。记录实际运行的命令与注册表中的缺口。`{{ENV_PREFIX}}_COVERAGE_FILE` 指向记录文件，单独的 `aicli.CheckCoverage`（Python：`check_coverage`）可枚举缺失命令（R06）。R06 失败或未运行须如实报告；完整覆盖不是通用包支持前提。写入门控符合性套件仍必须运行。
 - **行为矩阵（VER-004）**。处于 `experimental` 或更高级别的每个命令，都要为适用于它的各行编写测试：成功、无效输入、认证与权限、上游失败、空结果、分页、退出码、读取无副作用，对写入还有写入门控和 apply 失败。不适用的行写成一个被跳过的子测试，跳过原因以 `not applicable:` 开头。每个改变可观察行为的缺陷修复，都要补一个回归测试。
 - **成熟度（VER-005）**。每个命令在其 `Meta` 中声明 `Maturity` 和 `Evidence`，级别绝不超过证据：`draft`（已声明）、`experimental`（针对模拟上游跑过行为矩阵，`simulated:` 证据）、`verified`（另有一次针对真实 {{THIRD_PARTY}} 的运行记录，`live:` 证据保存在 `docs/E2E.md` 中）、`stable`（另外通过了 Agent 评测，且没有未关闭的 P1 缺陷，`eval:` 证据）。改动命令的请求、解析或输出，会让它的 `live` 和 `eval` 证据作废：在同一次改动中重新运行它们，或者降低成熟度。
-- **Agent 评测（VER-006）**。在发布改动了命令、输出或 Skill 的版本之前，用 `skills/{{TOOL_NAME}}/test-prompts.json` 运行 Agent 评测，带 Skill 和不带 Skill 各跑一次。要把任何命令标为或保持为 `stable`，都必须先做这项评测。
+- **Agent 评测（VER-006）**。发布改动了命令、输出或 Skill 的版本时，建议进行带 Skill 和不带 Skill 的评测。要把任何命令标为或保持为 `stable`，必须先做这项评测；未运行或失败须如实报告。
 - **不碰用户状态（REPO-073）**。测试把状态目录指向临时目录（`App.StateDir` 或 `{{ENV_PREFIX}}_STATE_DIR`），绝不指向用户的确认密钥、操作记录或授权范围文件。
 
 ## 新增或修改命令
